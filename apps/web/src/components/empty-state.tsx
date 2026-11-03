@@ -16,11 +16,11 @@ type EmptyStateProps = {
 
 function EmptyState({ title, description, actionLabel, onAction, icon: Icon = Inbox, className, children }: EmptyStateProps) {
   return (
-    <div className={cn('wl-enter flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-surface px-6 py-12 text-center', className)}>
-      <span className="flex size-11 items-center justify-center rounded-full bg-brand-subtle text-brand" aria-hidden="true">
+    <div className={cn('flex flex-col items-center gap-2 rounded-xl bg-surface-subtle/40 px-6 py-10 text-center', className)}>
+      <span className="flex size-9 items-center justify-center text-muted-foreground" aria-hidden="true">
         <Icon className="size-5" />
       </span>
-      <h2 className="text-base font-semibold">{title}</h2>
+      <h2 className="text-sm font-medium">{title}</h2>
       <p className="max-w-md text-[13px] leading-5 text-muted-foreground">{description}</p>
       {actionLabel && onAction ? (
         <Button className="mt-1" onClick={onAction}>{actionLabel}</Button>

@@ -8,8 +8,7 @@ export function teamRoleLabel(tTeams: TFunction<'coders'>, task: RoleIdentity): 
   return task.roleName ?? tTeams(`role.${task.role.replaceAll('-', '_')}` as never, { defaultValue: task.role });
 }
 
-// Collapsed-card role label: the single active role, or a count when Developer lanes (or several
-// roles) run in parallel.
+// Collapsed-card role label: the single active role, or a count when several role tasks run in parallel.
 export function teamCurrentLabel(t: TFunction<'assistant'>, tTeams: TFunction<'coders'>, current: AgentTeamRunCurrentView): string {
   const role = teamRoleLabel(tTeams, current);
   if (current.activeCount <= 1) return role;

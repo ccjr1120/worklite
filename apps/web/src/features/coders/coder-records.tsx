@@ -139,10 +139,10 @@ function RunRow({ run, nodes, nodesLoading, retentionHours, locale }: {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const control = async (action: 'pause' | 'resume' | 'cancel') => {
+  const control = async () => {
     setPending(true); setError('');
     try {
-      await (action === 'pause' ? api.pauseAgentTeamRun(run.id) : action === 'resume' ? api.resumeAgentTeamRun(run.id) : api.cancelAgentTeamRun(run.id));
+      await api.cancelAgentTeamRun(run.id);
       await queryClient.invalidateQueries({ queryKey: ['agent-team-run-list'] });
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setPending(false); }
@@ -199,8 +199,7 @@ function RunRow({ run, nodes, nodesLoading, retentionHours, locale }: {
           </div>
         </Link>
         {!SETTLED_STATUSES.has(run.status) ? <div className="flex shrink-0 gap-1 pr-3">
-          <Button variant="secondary" disabled={pending} onClick={() => void control(run.status === 'paused' ? 'resume' : 'pause')}>{t(run.status === 'paused' ? 'controls.resume' : 'controls.pause')}</Button>
-          <Button variant="secondary" disabled={pending} onClick={() => void control('cancel')}>{t('controls.cancel')}</Button>
+          <Button variant="secondary" disabled={pending} onClick={() => void control()}>{t('controls.cancel')}</Button>
         </div> : null}
       </div>
       {error ? <p role="alert" className="px-4 text-xs text-danger">{error}</p> : null}
@@ -269,7 +268,6 @@ export function CoderRecords({ coderId }: { coderId: string }) {
       <WorkspaceChrome crumbs={crumbs} />
       <PageHeading
         title="Coding"
-        description={t('records.description')}
         actions={<Link to="/coding/$coderId/config" params={{ coderId: coderId }} className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-md border border-border px-3 text-sm font-medium hover:bg-muted ${focusRing}`}><Settings className="size-4" aria-hidden="true" />{t('config.viewConfig')}</Link>}
       />
       <div className="space-y-4">

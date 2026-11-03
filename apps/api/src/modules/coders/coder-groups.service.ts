@@ -19,18 +19,22 @@ import {
   coderGroupMessages,
   coderGroupRepositories,
   coderGroups,
+  coderDocuments,
   coderMemories,
   coderRepositories,
   coderPendingInputs,
   coderRuns,
+  coderRunEvents,
+  coderTaskAttempts,
   coders,
   chatSubmissions,
   type Database,
   type StoredAgentTeamRole,
+  type StoredAgentTeamGroupContinuation,
 } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { isValidAgentTeamRoleId, teamEntryRole } from './coder-configuration';
+import { CODER_ROUTER_ROLE, isValidAgentTeamRoleId, teamEntryRole } from './coder-configuration';
 import { AgentTeamRuntimeService } from './coder-runtime.service';
 
 @Injectable()
@@ -70,9 +74,8 @@ export class AgentTeamGroupsService {
     if (!repository) throw new BadRequestException('The Chat project directory was not attached to its task group.');
     return this.sendMessage(request, workspaceSlug, groupId, {
       body: input.message,
-      // Determine entry role from team's actual roles. If user specified a role, use that.
-      // Otherwise, resolve to the team's entry role (Dispatcher if present, else Planner).
-      recipientRole: input.role ?? teamEntryRole(team),
+      recipientRole: teamEntryRole(team),
+      requestedRole: input.role,
       repositoryIds: [repository.id],
       submissionId: `chat_${input.submissionId}`,
     }, acceptance);
@@ -90,6 +93,16 @@ export class AgentTeamGroupsService {
     const pendingRows = runs.length ? await this.db.select().from(coderPendingInputs)
       .where(and(inArray(coderPendingInputs.runId, runs.map((run) => run.id)), eq(coderPendingInputs.status, 'pending'), eq(coderPendingInputs.kind, 'question')))
       .orderBy(asc(coderPendingInputs.createdAt)) : [];
+    const taskRows = runs.length ? await this.db.select({
+      id: coderTaskAttempts.id,
+      runId: coderTaskAttempts.runId,
+      role: coderTaskAttempts.role,
+      status: coderTaskAttempts.status,
+    }).from(coderTaskAttempts)
+      .where(inArray(coderTaskAttempts.runId, runs.map((run) => run.id)))
+      .orderBy(asc(coderTaskAttempts.createdAt), asc(coderTaskAttempts.attemptIndex)) : [];
+    const taskRowsByRun = new Map<string, typeof taskRows>();
+    for (const task of taskRows) taskRowsByRun.set(task.runId, [...(taskRowsByRun.get(task.runId) ?? []), task]);
     const pendingByRun = new Map<string, typeof pendingRows>();
     for (const pending of pendingRows) pendingByRun.set(pending.runId, [...(pendingByRun.get(pending.runId) ?? []), pending]);
     const convertedMessages = messages.map(toMessageView);
@@ -97,7 +110,6 @@ export class AgentTeamGroupsService {
       id: group.id,
       coderId: group.coderId,
       title: group.title,
-      mode: group.mode,
       status: runs.length ? runs.at(-1)!.status : 'empty',
       runCount: runs.length,
       repositories: repositories.map(toRepositoryView),
@@ -119,6 +131,7 @@ export class AgentTeamGroupsService {
         createdAt: run.createdAt.toISOString(),
         finishedAt: run.finishedAt?.toISOString() ?? null,
         pendingInputs: (pendingByRun.get(run.id) ?? []).map((input) => ({ id: input.id, question: input.question, scopeRevision: input.scopeRevision })),
+        tasks: (taskRowsByRun.get(run.id) ?? []).map((attempt) => ({ taskAttemptId: attempt.id, role: attempt.role, status: attempt.status })),
       })),
     };
   }
@@ -182,7 +195,14 @@ export class AgentTeamGroupsService {
     request: Request,
     workspaceSlug: string,
     groupId: string,
-    input: { body: string; recipientRole: AgentTeamRoleId; repositoryIds?: string[]; submissionId: string },
+    input: {
+      body: string;
+      recipientRole: AgentTeamRoleId;
+      requestedRole?: AgentTeamRoleId;
+      continuation?: StoredAgentTeamGroupContinuation;
+      repositoryIds?: string[];
+      submissionId: string;
+    },
     acceptance?: Parameters<AgentTeamRuntimeService['createGroupRun']>[2],
   ): Promise<AgentTeamGroupView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
@@ -190,8 +210,9 @@ export class AgentTeamGroupsService {
     const body = input?.body?.trim();
     if (!body) throw new BadRequestException('A group message is required.');
     const recipientRole = this.requireRole(input?.recipientRole);
+    if (recipientRole !== CODER_ROUTER_ROLE) throw new BadRequestException('New Coding Team messages must be routed through Router.');
     const team = await this.getTeam(group.coderId, workspace.id);
-    if (!team.roles.some((role) => role.role === recipientRole)) throw new BadRequestException('Select an active role in this Coder.');
+    if (input.requestedRole && !team.roles.some((role) => role.role === input.requestedRole)) throw new BadRequestException('Select an active requested role in this Coder.');
     const submissionId = input?.submissionId?.trim();
     if (!submissionId) throw new BadRequestException('A message submission id is required.');
     const repositories = await this.db.select().from(coderGroupRepositories)
@@ -248,13 +269,13 @@ export class AgentTeamGroupsService {
       initialMessageId: messageId,
       initialMessage: body,
       targetRole: recipientRole as StoredAgentTeamRole,
-      mode: group.mode,
+      ...(input.requestedRole ? { requestedRole: input.requestedRole as StoredAgentTeamRole } : {}),
+      ...(input.continuation ? { continuation: input.continuation } : {}),
       repositories: contextRepositories,
       ...(knownRepositories.length ? { knownRepositories } : {}),
       memories: memories.filter((memory) => !memory.repositoryId || selectedRepositories.some((repository) => repository.teamRepositoryId === memory.repositoryId)).map((memory) => ({
         id: memory.id,
         repositoryId: memory.repositoryId,
-        role: memory.role,
         content: memory.content,
       })),
     };
@@ -313,6 +334,90 @@ export class AgentTeamGroupsService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const group = await this.getGroup(groupId, workspace.id);
     const team = await this.getTeam(group.coderId, workspace.id);
+    if (input?.operation === 'stop_task') {
+      const [run] = await this.db.select().from(coderRuns)
+        .where(and(eq(coderRuns.id, input.runId), eq(coderRuns.groupId, group.id), eq(coderRuns.workspaceId, workspace.id))).limit(1);
+      if (!run) throw new NotFoundException('The selected Run does not belong to this group.');
+      await this.runtime.stopTaskAttempt(run.id, input.taskAttemptId);
+      return this.get(request, workspaceSlug, groupId);
+    }
+    if (input?.operation === 'continue_task') {
+      const [run] = await this.db.select().from(coderRuns)
+        .where(and(eq(coderRuns.id, input.runId), eq(coderRuns.groupId, group.id), eq(coderRuns.workspaceId, workspace.id))).limit(1);
+      if (!run) throw new NotFoundException('The selected Run does not belong to this group.');
+      await this.runtime.assertRouterRun(run.id);
+      const [attempt] = await this.db.select().from(coderTaskAttempts)
+        .where(and(eq(coderTaskAttempts.id, input.taskAttemptId), eq(coderTaskAttempts.runId, run.id))).limit(1);
+      if (!attempt) throw new NotFoundException('The selected role task was not found in this Run.');
+      if (attempt.status !== 'stopped' && attempt.status !== 'failed') {
+        throw new BadRequestException('Only a stopped or failed role task can be continued.');
+      }
+      if (!team.roles.some((role) => role.role === attempt.role)) {
+        throw new BadRequestException(`Role ${attempt.role} is no longer configured for this Coder.`);
+      }
+      const [alreadyContinued] = await this.db.select({ id: coderRuns.id }).from(coderRuns)
+        .where(and(
+          eq(coderRuns.groupId, group.id),
+          sql`json_extract(${coderRuns.groupContext}, '$.continuation.sourceTaskAttemptId') = ${attempt.id}`,
+        )).limit(1);
+      if (alreadyContinued) return this.get(request, workspaceSlug, groupId);
+
+      const taskRequest = findStoredTaskRequest(attempt.inputRevision);
+      const goal = taskRequest?.goal || attempt.assignmentTitle || run.intent;
+      const activityRows = await this.db.select({ type: coderRunEvents.type, payload: coderRunEvents.payload })
+        .from(coderRunEvents)
+        .where(and(eq(coderRunEvents.runId, run.id), inArray(coderRunEvents.type, ['task.activity', 'task.delta', 'task.failed', 'task.stopped'])))
+        .orderBy(asc(coderRunEvents.sequence));
+      const savedEvents = activityRows.flatMap((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        if (payload.taskAttemptId !== attempt.id) return [];
+        const detail = [payload.phase, payload.message, payload.delta, payload.error]
+          .filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(': ');
+        return detail ? [detail] : [];
+      });
+      const documentRows = await this.db.select({ documentId: coderDocuments.id, revision: coderDocuments.revision, title: coderDocuments.title })
+        .from(coderDocuments).where(eq(coderDocuments.taskAttemptId, attempt.id)).orderBy(asc(coderDocuments.createdAt));
+      const fileReferences = [...new Map([
+        ...(taskRequest?.fileReferences ?? []),
+        ...documentRows.map((document) => ({ documentId: document.documentId, revision: document.revision, title: document.title })),
+      ].map((reference) => [`${reference.documentId}:${reference.revision}`, reference])).values()];
+      const continuation: StoredAgentTeamGroupContinuation = {
+        sourceRunId: run.id,
+        sourceTaskAttemptId: attempt.id,
+        taskKey: attempt.taskKey,
+        role: attempt.role,
+        goal,
+        savedProgress: [attempt.error, ...savedEvents].filter(Boolean).join('\n').slice(-8_000) || 'No progress output was saved before the task stopped.',
+        fileReferences,
+      };
+      const [binding] = await this.db.select().from(chatSubmissions)
+        .where(and(eq(chatSubmissions.workspaceId, workspace.id), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder'`, sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${run.id}`))
+        .limit(1);
+      const reference = binding?.reference?.kind === 'coder' ? binding.reference : null;
+      const submissionId = `continue_${attempt.id}`;
+      await this.sendMessage(request, workspaceSlug, groupId, {
+        body: `继续 ${attempt.role} 的任务：${goal}`,
+        recipientRole: teamEntryRole(team),
+        requestedRole: attempt.role,
+        continuation,
+        repositoryIds: run.repositoryIds,
+        submissionId,
+      }, binding && reference ? {
+        runId: `atrun_${randomUUID()}`,
+        accept: (transaction, acceptedRunId) => {
+          transaction.insert(chatSubmissions).values({
+            id: submissionId,
+            workspaceId: binding.workspaceId,
+            chatId: binding.chatId,
+            executionId: binding.executionId,
+            message: binding.message,
+            target: binding.target,
+            reference: { ...reference, runId: acceptedRunId },
+          }).run();
+        },
+      } : undefined);
+      return this.get(request, workspaceSlug, groupId);
+    }
     if (input?.operation !== 'reexecute') throw new BadRequestException('Only Chat re-execution is available for Coder groups.');
     const runIds = [...new Set(input?.runIds ?? [])];
     if (!runIds.length) throw new BadRequestException('Select at least one Run to re-execute.');
@@ -323,12 +428,9 @@ export class AgentTeamGroupsService {
       if (!run.targetRole || !run.groupMessageId) throw new BadRequestException('The selected Run has no re-executable group message.');
       const [message] = await this.db.select().from(coderGroupMessages).where(eq(coderGroupMessages.id, run.groupMessageId)).limit(1);
       if (!message) throw new NotFoundException('The original group message was not found.');
-      // If the original targetRole is executor-manager or no longer exists in the team,
-      // fall back to the team's current entry role.
-      let initialRole = run.targetRole as AgentTeamRoleId;
-      if (initialRole === 'executor-manager' || !team.roles.some((r) => r.role === initialRole)) {
-        initialRole = teamEntryRole(team);
-      }
+      const requestedRole = run.targetRole && run.targetRole !== CODER_ROUTER_ROLE && team.roles.some((role) => role.role === run.targetRole)
+        ? run.targetRole
+        : undefined;
       const submissionId = `reexecute_${run.id}_${randomUUID()}`;
       // A Run bound to a Chat conversation keeps its replacement in that conversation: the new
       // Run gets its own task submission, so its card, pin, progress and terminal report follow it.
@@ -338,7 +440,8 @@ export class AgentTeamGroupsService {
       const reference = binding?.reference?.kind === 'coder' ? binding.reference : null;
       await this.sendMessage(request, workspaceSlug, groupId, {
         body: message.body,
-        recipientRole: initialRole,
+        recipientRole: teamEntryRole(team),
+        ...(requestedRole ? { requestedRole } : {}),
         repositoryIds: run.repositoryIds,
         submissionId,
       }, binding && reference ? {
@@ -408,7 +511,6 @@ export class AgentTeamGroupsService {
     await this.getTeam(coderId, workspace.id);
     const content = input?.content?.trim();
     if (!content) throw new BadRequestException('Memory content is required.');
-    const role = input.role ? this.requireRole(input.role) : null;
     await this.assertMemoryScope(workspace.id, coderId, input.repositoryId);
     await this.assertMemorySource(workspace.id, coderId, input.sourceMessageId);
     const now = new Date();
@@ -417,7 +519,6 @@ export class AgentTeamGroupsService {
       workspaceId: workspace.id,
       coderId,
       repositoryId: input.repositoryId ?? null,
-      role: role as StoredAgentTeamRole | null,
       content,
       sourceMessageId: input.sourceMessageId ?? null,
       createdAt: now,
@@ -442,7 +543,6 @@ export class AgentTeamGroupsService {
     const [updated] = await this.db.update(coderMemories).set({
       content,
       repositoryId: input.repositoryId === undefined ? existing.repositoryId : input.repositoryId,
-      role: input.role === undefined ? existing.role : (input.role ? this.requireRole(input.role) as StoredAgentTeamRole : null),
       sourceMessageId: input.sourceMessageId === undefined ? existing.sourceMessageId : input.sourceMessageId,
       updatedAt: new Date(),
     }).where(eq(coderMemories.id, memoryId)).returning();
@@ -477,7 +577,7 @@ export class AgentTeamGroupsService {
 
   private insertMessage(transaction: Parameters<Parameters<Database['transaction']>[0]>[0], input: {
     id?: string; workspaceId: string; groupId: string; sender: 'user' | 'role' | 'system'; senderRole?: AgentTeamRoleId;
-    recipientRole?: AgentTeamRoleId; kind: 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file'; body: string;
+    recipientRole?: AgentTeamRoleId; kind: 'text' | 'question' | 'assignment' | 'result' | 'control' | 'status' | 'file'; body: string;
     runId?: string; repositoryIds?: string[]; submissionId?: string; deliveryStatus: 'pending' | 'delivered' | 'failed';
   }) {
     const [latest] = transaction.select({ sequence: coderGroupMessages.sequence }).from(coderGroupMessages)
@@ -542,10 +642,36 @@ function toMemoryView(row: typeof coderMemories.$inferSelect, repositoryName: st
     repositoryId: row.repositoryId,
     repositoryName,
     repositoryDirectory,
-    role: row.role,
     content: row.content,
     sourceMessageId: row.sourceMessageId,
+    sourceRunId: row.sourceRunId,
+    sourceRole: row.sourceRole,
+    sourceTaskAttemptId: row.sourceTaskAttemptId,
+    createdBy: row.createdBy,
+    upsertKey: row.upsertKey,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function findStoredTaskRequest(value: unknown): { goal?: string; fileReferences?: Array<{ documentId: string; revision: number; title: string }> } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const taskDefinition = record.taskDefinition && typeof record.taskDefinition === 'object'
+    ? record.taskDefinition as Record<string, unknown>
+    : undefined;
+  const goal = typeof taskDefinition?.goal === 'string' ? taskDefinition.goal : undefined;
+  const fileReferences = Array.isArray(record.fileReferences)
+    ? record.fileReferences.filter(isStoredTaskFileReference)
+    : undefined;
+  if (goal || fileReferences) return { ...(goal ? { goal } : {}), ...(fileReferences ? { fileReferences } : {}) };
+  return findStoredTaskRequest(record.resumedWith) ?? findStoredTaskRequest(record.initial);
+}
+
+function isStoredTaskFileReference(value: unknown): value is { documentId: string; revision: number; title: string } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.documentId === 'string'
+    && Number.isInteger(record.revision)
+    && typeof record.title === 'string';
 }

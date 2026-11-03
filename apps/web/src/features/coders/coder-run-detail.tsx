@@ -16,7 +16,6 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import type { ReactElement } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { runModeLabel } from './run-mode';
 import { formatDateTime } from '@/i18n/format';
 
 function roleLabel(role: string, t: (key: string) => string) {
@@ -52,6 +51,10 @@ function CommandEvidence({ commandId }: { commandId: string }) {
         if (event.commandId === commandId) setEvents((current) => current.some((item) => item.sequence === event.sequence) ? current : [...current, event].sort((a, b) => a.sequence - b.sequence));
       } catch { /* Keep persisted command data authoritative for malformed events. */ }
     };
+    source.addEventListener('complete', () => {
+      source.close();
+      void refresh();
+    });
     void refresh();
     return () => { disposed = true; source.close(); };
   }, [commandId, t]);
@@ -86,38 +89,34 @@ export function TeamRunDetail({ runId }: { runId: string }) {
   const questions = run.pendingInputs.filter((input) => input.status === 'pending');
   return (
     <div className="space-y-4">
-      <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{run.intent}</p>
-      <Link to="/chat" className="inline-block rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('run.continueInChat')}</Link>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 space-y-2"><p className="whitespace-pre-wrap break-words text-sm">{run.intent}</p><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /></div>
+        <Link to="/chat" className="inline-block rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted">{t('run.continueInChat')}</Link>
+      </div>
 
-      <section className="rounded-xl border border-border bg-surface p-4 shadow-xs">
-        <h2 className="text-sm font-semibold">{t('metadata.title')}</h2>
-        <div className="mt-3 flex flex-wrap items-center gap-3"><StatusBadge status={toStatusKey(run.status)} label={t(`run.status.${run.status}`)} /><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span></div>
+      <details className="rounded-xl border border-border bg-surface p-4">
+        <summary className="text-sm font-semibold">{t('metadata.title')}</summary>
+        <div className="mt-3 flex flex-wrap items-center gap-3"><CopyableId value={run.id} /><span className="text-xs text-muted-foreground">v{run.teamVersion.version} · {formatDateTime(run.createdAt, locale)}</span></div>
         <dl className="mt-4 grid gap-4 text-[13px] md:grid-cols-2">
           <div><dt className="text-muted-foreground">{t('records.coderName')}</dt><dd className="mt-1 break-words">{run.coderName}</dd></div>
-          <div><dt className="text-muted-foreground">{t('run.version')}</dt><dd className="mt-1 font-mono">v{run.teamVersion.version} · {run.teamVersion.orchestrationVersion ? `v${run.teamVersion.orchestrationVersion}` : t('run.versionUnknown')}</dd></div>
-          <div><dt className="text-muted-foreground">{t('run.mode')}</dt><dd className="mt-1">{runModeLabel(t, run.mode, run.teamVersion.orchestrationVersion ?? 1, run.modeDecidedAt)}</dd></div>
-          {run.modeRationale ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.modeRationale')}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{run.modeRationale}</dd></div> : null}
+          <div><dt className="text-muted-foreground">{t('run.version')}</dt><dd className="mt-1 font-mono">v{run.teamVersion.version} · v{run.teamVersion.orchestrationVersion}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.project')}</dt><dd className="mt-1 font-mono break-all">{run.projectDirectory}</dd></div>
           <div><dt className="text-muted-foreground">{t('run.scopeRevision')}</dt><dd className="mt-1 font-mono tabular-nums">{run.scopeRevision}</dd></div>
           {run.worktreeBasePath ? <div><dt className="text-muted-foreground">{t('run.worktreeBasePath')}</dt><dd className="mt-1 font-mono break-all">{run.worktreeBasePath}</dd></div> : null}
           {run.runBranch ? <div><dt className="text-muted-foreground">{t('run.runBranch')}</dt><dd className="mt-1 font-mono break-all">{run.runBranch}</dd></div> : null}
-          <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.intent')}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{run.intent}</dd></div>
-          {/* Historical evidence only: Executor roles now execute commands directly, so only
-              Runs recorded under the retired grant model list command strings here. */}
-          {run.authorizedCommands.length ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.commands')}</dt><dd className="mt-1"><ul className="space-y-1">{run.authorizedCommands.map((command) => <li key={command} className="font-mono text-xs break-all">{command}</li>)}</ul></dd></div> : null}
-          {run.teamVersion.projectExecutorLaunches ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.executors')}</dt><dd><JsonEvidence value={run.teamVersion.projectExecutorLaunches} /></dd></div> : null}
+          {Object.keys(run.teamVersion.projectExecutorLaunches).length ? <div className="md:col-span-2"><dt className="text-muted-foreground">{t('run.executors')}</dt><dd><JsonEvidence value={run.teamVersion.projectExecutorLaunches} /></dd></div> : null}
         </dl>
-      </section>
+      </details>
 
       {questions.length ? <section className="rounded-xl border border-border bg-surface p-4 shadow-xs"><h2 className="text-sm font-semibold">{t('input.title')}</h2><p className="mt-1 text-[13px] text-muted-foreground">{t('run.inputInChat')}</p><ul className="mt-3 space-y-3">{questions.map((input) => <li key={input.id} className="rounded-lg border border-border p-3"><StreamingMarkdown content={input.question} className="text-[13px]" /><p className="mt-2 text-xs text-muted-foreground">{t('run.scopeRevision')}: {input.scopeRevision}</p></li>)}</ul></section> : null}
 
-      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('tasks.title')}</h2>{run.tasks.length ? run.tasks.map((task) => <article key={task.id} className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={toStatusKey(task.status)} label={t(`run.status.${task.status}`)} /><span className="font-mono text-xs break-all">{task.taskKey}</span><span className="text-[13px] text-muted-foreground">{roleLabel(task.role, (key) => t(key as never))}</span>{task.assignmentTitle ? <span className="text-[13px] text-muted-foreground">{task.assignmentTitle}</span> : null}</div>{task.progressText ? <StreamingMarkdown content={task.progressText} className="mt-3 text-[13px]" /> : null}{task.error ? <p className="mt-3 whitespace-pre-wrap break-words text-[13px] text-danger">{task.error}</p> : null}{task.result ? <JsonEvidence value={task.result} /> : null}<p className="mt-3 text-xs text-muted-foreground">{formatDateTime(task.createdAt, locale)}</p></article>) : <EmptyState title={t('tasks.title')} description={t('tasks.empty')} />}</section>
+      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('tasks.title')}</h2>{run.tasks.length ? run.tasks.map((task) => <article key={task.id} className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><StatusBadge status={toStatusKey(task.status)} label={t(`run.status.${task.status}`)} /><span className="font-mono text-xs break-all">{task.taskKey}</span><span className="text-[13px] text-muted-foreground">{roleLabel(task.role, (key) => t(key as never))}</span>{task.assignmentTitle ? <span className="text-[13px] text-muted-foreground">{task.assignmentTitle}</span> : null}</div>{task.progressText ? <StreamingMarkdown content={task.progressText} className="mt-3 text-[13px]" /> : null}{task.error ? <p className="mt-3 whitespace-pre-wrap break-words text-[13px] text-danger">{task.error}</p> : null}{task.result ? <details className="mt-3"><summary className="text-xs text-muted-foreground">{t('outcome.title')}</summary><JsonEvidence value={task.result} /></details> : null}<p className="mt-3 text-xs text-muted-foreground">{formatDateTime(task.createdAt, locale)}</p></article>) : <EmptyState title={t('tasks.title')} description={t('tasks.empty')} />}</section>
 
-      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('documents.title')}</h2>{run.documents.length ? run.documents.map((document) => <article key={document.id} className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">{document.title}</h3><span className="text-xs text-muted-foreground">v{document.revision} · {formatDateTime(document.createdAt, locale)}</span><StatusBadge status={toStatusKey(document.deliveryStatus)} label={t(`run.status.${document.deliveryStatus}`)} /></div><p className="mt-2 text-xs text-muted-foreground">{document.key}</p>{document.deliveryError ? <p className="mt-2 text-[13px] text-danger">{document.deliveryError}</p> : null}<StreamingMarkdown content={document.content} className="mt-3 text-[13px]" /></article>) : <EmptyState title={t('documents.title')} description={t('documents.empty')} />}</section>
+      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('documents.title')}</h2>{run.documents.length ? run.documents.map((document) => <article key={document.id} className="rounded-xl border border-border bg-surface p-4 shadow-xs"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">{document.title}</h3><span className="text-xs text-muted-foreground">v{document.revision} · {formatDateTime(document.createdAt, locale)}</span><StatusBadge status={toStatusKey(document.deliveryStatus)} label={t(`run.status.${document.deliveryStatus}`)} /></div>{document.deliveryError ? <p className="mt-2 text-[13px] text-danger">{document.deliveryError}</p> : null}<StreamingMarkdown content={document.content} className="mt-3 text-[13px]" /></article>) : <EmptyState title={t('documents.title')} description={t('documents.empty')} />}</section>
 
-      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('operations.title')}</h2>{run.operations.length ? run.operations.map((operation) => <OperationEvidence key={operation.key} operation={operation} />) : <EmptyState title={t('operations.title')} description={t('operations.empty')} />}</section>
+      <details className="space-y-3"><summary className="text-sm font-semibold">{t('operations.title')}</summary>{run.operations.length ? run.operations.map((operation) => <OperationEvidence key={operation.key} operation={operation} />) : <EmptyState title={t('operations.title')} description={t('operations.empty')} />}</details>
 
-      <section className="space-y-3"><h2 className="text-sm font-semibold">{t('events.title')}</h2>{run.activities.length ? <ul className="max-h-[560px] divide-y divide-border overflow-auto rounded-xl border border-border bg-surface px-4">{run.activities.map((event) => <li key={event.sequence} className="py-3"><div className="flex flex-wrap items-center gap-2 text-xs"><span className="font-mono">#{event.sequence}</span><span className="font-medium">{event.type}</span><time className="text-muted-foreground">{formatDateTime(event.createdAt, locale)}</time></div><JsonEvidence value={event.payload} /></li>)}</ul> : <EmptyState title={t('events.title')} description={t('events.empty')} />}</section>
+      <details className="space-y-3"><summary className="text-sm font-semibold">{t('events.title')}</summary>{run.activities.length ? <ul className="max-h-[560px] divide-y divide-border overflow-auto rounded-xl border border-border bg-surface px-4">{run.activities.map((event) => <li key={event.sequence} className="py-3"><div className="flex flex-wrap items-center gap-2 text-xs"><span className="font-mono">#{event.sequence}</span><span className="font-medium">{event.type}</span><time className="text-muted-foreground">{formatDateTime(event.createdAt, locale)}</time></div><JsonEvidence value={event.payload} /></li>)}</ul> : <EmptyState title={t('events.title')} description={t('events.empty')} />}</details>
 
       {run.outcome ? <section className="rounded-xl border border-border bg-surface p-4 shadow-xs"><h2 className="text-sm font-semibold">{t('outcome.title')}</h2><StreamingMarkdown content={run.outcome.summary} className="mt-3 text-[13px]" /><h3 className="mt-4 text-xs font-medium text-muted-foreground">{t('outcome.unresolved')}</h3>{run.outcome.unresolvedIssues.length ? <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px]">{run.outcome.unresolvedIssues.map((issue) => <li key={issue} className="whitespace-pre-wrap break-words">{issue}</li>)}</ul> : <p className="mt-1 text-[13px] text-muted-foreground">{t('outcome.noUnresolved')}</p>}<h3 className="mt-4 text-xs font-medium text-muted-foreground">{t('outcome.criteria')}</h3>{run.outcome.criterionAssessments.length ? <ul className="mt-2 space-y-3 text-[13px]">{run.outcome.criterionAssessments.map((assessment) => <li key={`${assessment.criterion}-${assessment.assessment}`}><div className="flex flex-wrap items-center gap-2"><Badge variant={assessment.assessment === 'met' ? 'success' : assessment.assessment === 'unmet' ? 'danger' : 'warning'}>{t(`outcome.assessment.${assessment.assessment}`)}</Badge><span className="whitespace-pre-wrap break-words">{assessment.criterion}</span></div>{assessment.evidence.length ? <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">{assessment.evidence.map((evidence) => <li key={evidence} className="whitespace-pre-wrap break-words">{evidence}</li>)}</ul> : <p className="mt-1 text-muted-foreground">{t('outcome.noEvidence')}</p>}</li>)}</ul> : <p className="mt-1 text-[13px] text-muted-foreground">{t('outcome.empty')}</p>}</section> : null}
     </div>
@@ -132,16 +131,6 @@ export function CoderRunDialog({ runId, children }: { runId: string; children: R
     <DialogContent className="max-w-4xl" aria-describedby={undefined}>
       <DialogTitle>{t('run.detail.title')}</DialogTitle>
       {open ? <TeamRunDetail runId={runId} /> : null}
-    </DialogContent>
-  </Dialog>;
-}
-
-export function LegacyCoderRunDialog({ runId, onClose }: { runId: string; onClose: () => void }) {
-  const { t } = useTranslation('coders');
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-    <DialogContent className="max-w-4xl" aria-describedby={undefined}>
-      <DialogTitle>{t('run.detail.title')}</DialogTitle>
-      <TeamRunDetail runId={runId} />
     </DialogContent>
   </Dialog>;
 }

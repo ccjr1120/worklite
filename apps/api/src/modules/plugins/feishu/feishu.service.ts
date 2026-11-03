@@ -332,8 +332,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         } else if (turn.reference.completionStatus) throw new ConflictException('This conversation turn has already ended.');
       }
       if (action.domain === 'coder') {
-        if (action.action === 'retry') await this.teams.retry(request, 'personal', action.runId, action.taskKey ?? '');
-        else await this.teams[action.action](request, 'personal', action.runId);
+        await this.teams.cancel(request, 'personal', action.runId);
       } else if (action.domain === 'workflow') {
         if (action.action === 'retry') await this.runs.retryNode(request, 'personal', action.runId, action.taskKey ?? '');
         else await this.runs[action.action](request, 'personal', action.runId);
@@ -430,7 +429,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     } else if (reference?.kind === 'coder') {
       state.title = 'Chat · coders';
       const run = await this.teams.getRun(request, 'personal', reference.runId);
-      const phaseText: Record<string, string> = { planning: '规划中', test_design: '测试设计中', development: '开发中', test_authoring: '测试编写中', test_execution: '测试执行中', review: '审查中', repair: '修复中', working: '执行中', waiting: '等待输入', terminal: '已结束' };
+      const phaseText: Record<string, string> = { routing: 'Router 协调中', working: '角色执行中', waiting: '等待输入', terminal: '已结束' };
       state.status = statusText[run.status] ?? run.status;
       if (run.progress && !['succeeded', 'failed', 'cancelled'].includes(run.status)) state.status += ` · ${phaseText[run.progress.phase] ?? run.progress.phase}`;
       state.meta = teamRunMeta(run);
@@ -438,7 +437,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         const progressLine = task.progressText.trim().split(/\r?\n/, 1)[0] ?? '';
         return `- ${[task.taskKey, teamRoleName(task), task.model, statusText[task.status] ?? task.status, progressLine].filter(Boolean).join(' · ')}`;
       }).join('\n');
-      const active = [...run.tasks].reverse().find((task) => task.retryable || ['running', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
+      const active = [...run.tasks].reverse().find((task) => ['running', 'stop_requested', 'waiting_for_input', 'waiting_for_recovery'].includes(task.status));
       state.content = `${run.intent}${active ? `\n\n当前任务：${active.assignmentTitle ?? active.taskKey}` : ''}`;
       if (run.status === 'failed' && active?.error) state.content += `\n\n${active.error}`;
       const pending = run.pendingInputs.find((item) => item.status === 'pending');
@@ -449,7 +448,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         state.content += `\n\n${pending.question}`;
         state.buttons.push(...(['adopt_command', 'mark_failed', 'replay'] as const).map((decision) => ({ label: ({ adopt_command: '采用已执行结果', mark_failed: '标记操作失败', replay: '重新执行此操作' })[decision], action: { kind: 'recovery', runId: run.id, operationKey: pending.operationKey!, decision } as FeishuAction })));
       }
-      this.controls(state.buttons, 'coder', run.id, run.status, active?.retryable ? active.taskKey : undefined);
+      this.controls(state.buttons, 'coder', run.id, run.status);
       terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
       if (run.outcome) state.content += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
       for (const document of run.documents) {
@@ -710,6 +709,10 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
   }
 
   private controls(buttons: CardButton[], domain: 'coder' | 'workflow', runId: string, status: string, retryable?: string): void {
+    if (domain === 'coder') {
+      if (['queued', 'running', 'waiting_for_input'].includes(status)) buttons.push({ label: '取消任务', action: { kind: 'control', domain, runId, action: 'cancel' } });
+      return;
+    }
     if (status === 'queued' || status === 'running') buttons.push({ label: '暂停任务', action: { kind: 'control', domain, runId, action: 'pause' } });
     if (status === 'paused') buttons.push({ label: '继续任务', action: { kind: 'control', domain, runId, action: 'resume' } });
     if (['queued', 'running', 'paused', 'waiting_for_input'].includes(status)) buttons.push({ label: '取消任务', action: { kind: 'control', domain, runId, action: 'cancel' } });

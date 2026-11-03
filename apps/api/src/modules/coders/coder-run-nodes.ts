@@ -272,7 +272,6 @@ export function buildRunNodes(
       name: nodeName(row, roleName),
       role: row.role,
       roleName,
-      developerId: row.developerId,
       status: row.status,
       startedAt: startedAt.toISOString(),
       endedAt: row.finishedAt?.toISOString() ?? null,

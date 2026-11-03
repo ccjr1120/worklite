@@ -42,8 +42,6 @@ export type ProjectExecutorRequest = {
   launch: StoredProjectExecutorLaunch;
   // Public Gateway model id; null keeps the executor's own configured default.
   model: string | null;
-  // Resume a persisted Claude session belonging to this Coder task attempt.
-  resumeSessionId?: string;
   systemPrompt: string;
   input: string;
   projectDirectory: string;

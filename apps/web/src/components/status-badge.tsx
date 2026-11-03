@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-type RunUiStatus = 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled';
+type RunUiStatus = 'queued' | 'running' | 'paused' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled' | 'superseded';
 
 type StatusKey =
   | RunUiStatus
@@ -42,6 +42,7 @@ const STATUS_CONFIG: Record<StatusKey, StatusMeta> = {
   completed: { tone: 'success', icon: CheckCircle2, pop: true },
   failed: { tone: 'danger', icon: XCircle },
   cancelled: { tone: 'neutral', icon: Ban },
+  superseded: { tone: 'neutral', icon: CircleDashed },
   idle: { tone: 'neutral', icon: CircleDashed },
   draft: { tone: 'neutral', icon: CircleDashed },
   published: { tone: 'success', icon: CheckCircle2 },
@@ -73,7 +74,7 @@ const TONE_TEXT: Record<StatusTone, string> = {
   info: 'text-info',
 };
 
-const LIVE_STATUSES = new Set<string>(['running', 'waiting_for_input', 'queued', 'paused', 'starting', 'stopping', 'pending', 'qr_pending', 'cancelling', 'reserved', 'waiting_for_recovery']);
+const LIVE_STATUSES = new Set<string>(['running', 'waiting_for_input', 'queued', 'paused', 'starting', 'stopping', 'stop_requested', 'pending', 'qr_pending', 'cancelling', 'reserved', 'waiting_for_recovery']);
 
 /** Whether a status represents work that is still in progress (not settled). */
 function isLiveStatus(status: string | null | undefined): boolean {
@@ -85,6 +86,7 @@ function toStatusKey(status: string): StatusKey {
   if (status === 'succeeded') return 'completed';
   if (status === 'timed_out') return 'failed';
   if (status === 'cancelling') return 'stopping';
+  if (status === 'stop_requested') return 'stopping';
   if (status === 'waiting_for_recovery') return 'waiting_for_input';
   if (status === 'uncertain') return 'paused';
   if (status === 'reserved') return 'queued';

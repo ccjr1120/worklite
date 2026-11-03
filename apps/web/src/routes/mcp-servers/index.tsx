@@ -36,7 +36,7 @@ function McpListPage() {
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-6 md:px-6 md:py-8">
       <WorkspaceChrome crumbs={[{ label: t('title') }]} />
-      <PageHeading title={t('title')} description={t('description')} />
+      <PageHeading title={t('title')} />
       <CollectionToolbar
         className="mt-6"
         search={search}

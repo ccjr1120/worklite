@@ -52,20 +52,17 @@ function SkillEditorPage() {
     setSelectedPath(skill.files.some((file) => file.path === 'SKILL.md') ? 'SKILL.md' : skill.files[0]?.path ?? 'SKILL.md');
   }, [skill]);
 
+  const executionId = execution?.id;
   useEffect(() => {
-    if (!execution) return;
+    if (!executionId) return;
     let disposed = false;
-    const source = new EventSource(api.commandEventsUrl(execution.id));
+    const source = new EventSource(api.commandEventsUrl(executionId));
 
     const refreshExecution = async () => {
       try {
-        const refreshed = await api.command(execution.id);
+        const refreshed = await api.command(executionId);
         if (disposed) return;
         setExecution(refreshed);
-        if (isTerminalExecution(refreshed.status)) {
-          source.close();
-          setStreamDisconnected(false);
-        }
       } catch (error) {
         if (!disposed) setExecutionError(error instanceof Error ? error.message : t('editor.run.loadFailed'));
       }
@@ -84,6 +81,10 @@ function SkillEditorPage() {
         setStreamDisconnected(true);
       }
     };
+    source.addEventListener('complete', () => {
+      source.close();
+      if (!disposed) { setStreamDisconnected(false); void refreshExecution(); }
+    });
     source.onerror = () => {
       if (!disposed) setStreamDisconnected(true);
     };
@@ -93,7 +94,7 @@ function SkillEditorPage() {
       disposed = true;
       source.close();
     };
-  }, [execution, t]);
+  }, [executionId, t]);
 
   useEffect(() => {
     const output = outputRef.current;
@@ -331,10 +332,6 @@ function executionBadgeStatus(status: CommandExecutionStatus): 'queued' | 'runni
   if (status === 'succeeded') return 'completed';
   if (status === 'cancelling') return 'running';
   return status;
-}
-
-function isTerminalExecution(status: CommandExecutionStatus): boolean {
-  return status === 'succeeded' || status === 'failed' || status === 'cancelled';
 }
 
 function ResourceState({ icon: Icon, message, animated, error }: { icon: typeof LoaderCircle; message: string; animated?: boolean; error?: boolean }) {

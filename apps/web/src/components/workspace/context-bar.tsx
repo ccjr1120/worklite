@@ -30,7 +30,7 @@ function ContextBar({
   const { t } = useTranslation('workspace');
 
   return (
-    <header className="wl-glass relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 md:px-5">
+    <header className="relative z-20 bg-background flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 md:px-5">
       {showMenuButton ? (
         <Button variant="ghost" size="icon-compact" aria-label={t('openNavigation')} onClick={onOpenNavigation}>
           <Menu className="size-4" />
@@ -54,7 +54,7 @@ function ContextBar({
               type="button"
               onClick={onOpenCommand}
               aria-label={t('command.open')}
-              className="wl-press hidden h-8 w-56 items-center gap-2 rounded-full border border-border bg-surface-subtle/70 pl-3 pr-1.5 text-[13px] text-muted-foreground hover:border-foreground/15 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 lg:inline-flex"
+              className="wl-press hidden h-8 w-56 items-center gap-2 rounded-md bg-surface-subtle/60 pl-3 pr-1.5 text-[13px] text-muted-foreground hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 lg:inline-flex"
             >
               <Search className="size-3.5 shrink-0" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate text-left">{t('command.search')}</span>

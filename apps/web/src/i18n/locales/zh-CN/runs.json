@@ -24,6 +24,27 @@
     "action": "重试该节点",
     "failed": "无法重试该节点。"
   },
+  "nodeRerun": {
+    "action": "重跑",
+    "title": "重跑“{{node}}”",
+    "description": "将复用该节点已有输入创建一次新尝试，并从该节点继续执行。",
+    "model": "本次重跑使用的模型",
+    "keepCurrentModel": "沿用当前模型",
+    "downstreamTitle": "以下已有下游节点将被作废并重新执行",
+    "noDownstream": "没有已执行的下游节点需要作废。",
+    "confirmSideEffects": "我确认重跑会再次执行公众号草稿/发布操作。",
+    "confirm": "确认重跑",
+    "submitting": "正在发起重跑...",
+    "failed": "无法重跑该节点。",
+    "errors": {
+      "notAllowed": "当前运行状态不允许重跑，可能已有另一次节点重跑正在进行。",
+      "nodeNotEligible": "该节点当前不能重跑，请选择已成功或已失败且未被取代的尝试。",
+      "invalidModel": "模型覆盖无效，仅 Agent 节点可使用支持 Agent 执行的公开模型。",
+      "sideEffectConfirmationRequired": "请先确认本次重跑会再次影响公众号草稿/发布。",
+      "stateUnavailable": "该运行缺少可恢复的执行状态，无法发起节点重跑。"
+    }
+  },
+  "artifactSuperseded": "已被取代",
   "artifacts": "产物",
   "artifactsLoading": "正在加载产物...",
   "artifactsFailed": "无法加载产物。",

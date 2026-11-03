@@ -13,8 +13,6 @@ import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { CommandsService } from '../commands/commands.service';
 import { RunsService } from '../runs/runs.service';
-import type { FeishuService } from '../plugins/feishu/feishu.service';
-import type { FeishuRegistrationService } from '../plugins/feishu/feishu-registration.service';
 import type { WechatService } from '../plugins/wechat/wechat.service';
 import type { Request } from 'express';
 import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
@@ -146,7 +144,6 @@ export class UpgradesService implements OnModuleInit {
   async complete(id: string) {
     const job = this.load(id);
     if (job.phase !== 'succeeded') throw new BadRequestException('Upgrade has not succeeded.');
-    await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).connect();
     // A WeChat reconnect failure must not fail the upgrade completion itself; the monitor
     // also self-heals after a freeze, so this is a best-effort immediate reconnect.
     const wechat = this.modules.get<WechatService | undefined>('WECHAT_UPGRADE_TRANSPORT', { strict: false });
@@ -164,7 +161,7 @@ export class UpgradesService implements OnModuleInit {
   private async interruptActiveWork(id: string) {
     const job = this.load(id);
     const activeAgents = await this.db.select({ id: agentExecutions.id, agentId: agentExecutions.agentId }).from(agentExecutions).where(inArray(agentExecutions.status, ['running', 'waiting_for_input']));
-    const activeTeams = await this.db.select({ id: coderRuns.id }).from(coderRuns).where(inArray(coderRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
+    const activeTeams = await this.db.select({ id: coderRuns.id }).from(coderRuns).where(inArray(coderRuns.status, ['queued', 'running', 'waiting_for_input']));
     const activeWorkflows = await this.db.select({ id: workflowRuns.id }).from(workflowRuns).where(inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
     const activeCommands = await this.db.select({ id: commandExecutions.id }).from(commandExecutions).where(inArray(commandExecutions.status, ['queued', 'running', 'cancelling']));
     const interruptedWork = {
@@ -172,7 +169,7 @@ export class UpgradesService implements OnModuleInit {
       teamRuns: [...new Set([...(job.interruptedWork?.teamRuns ?? []), ...activeTeams.map(({ id: runId }) => runId)])],
       workflowRuns: [...new Set([...(job.interruptedWork?.workflowRuns ?? []), ...activeWorkflows.map(({ id: runId }) => runId)])],
       commands: [...new Set([...(job.interruptedWork?.commands ?? []), ...activeCommands.map(({ id: commandId }) => commandId)])],
-      feishuRegistration: true,
+      feishuRegistration: false,
     };
     job.interruptionPolicy = 'cancel_active_work_without_resume';
     job.interruptedWork = interruptedWork;
@@ -182,13 +179,11 @@ export class UpgradesService implements OnModuleInit {
     const teamRuntime = this.modules.get(AgentTeamRuntimeService, { strict: false });
     const runs = this.modules.get(RunsService, { strict: false });
     const commands = this.modules.get(CommandsService, { strict: false });
-    const registration = this.modules.get<FeishuRegistrationService>('FEISHU_REGISTRATION_RUNTIME', { strict: false });
     const cancellationLabels = [
       ...activeAgents.map(({ id: executionId }) => `agent:${executionId}`),
       ...activeTeams.map(({ id: runId }) => `team:${runId}`),
       ...activeWorkflows.map(({ id: runId }) => `workflow:${runId}`),
       ...activeCommands.map(({ id: commandId }) => `command:${commandId}`),
-      'feishu-registration',
     ];
     const cancellations = [
       ...activeAgents.map(({ id: executionId, agentId }) => executions.cancel({} as Request, 'personal', agentId, executionId)),
@@ -198,7 +193,6 @@ export class UpgradesService implements OnModuleInit {
         await commands.cancel(commandId);
         await commands.waitForCompletion(commandId);
       }),
-      registration.cancelForUpgrade(),
     ];
     const settled = await Promise.allSettled(cancellations);
     const interruptionFailures = settled.flatMap((result, index) => result.status === 'rejected' ? [cancellationLabels[index]] : []);
@@ -219,7 +213,6 @@ export class UpgradesService implements OnModuleInit {
     if (job.phase !== 'draining') throw new BadRequestException('Upgrade is not draining.');
     await this.handoff(id);
     const current = this.load(id); current.phase = 'frozen'; this.save(current);
-    await this.modules.get<FeishuService>('FEISHU_UPGRADE_TRANSPORT', { strict: false }).freezeForUpgrade();
     await this.modules.get<WechatService>('WECHAT_UPGRADE_TRANSPORT', { strict: false })?.freezeForUpgrade();
     return { frozen: true };
   }

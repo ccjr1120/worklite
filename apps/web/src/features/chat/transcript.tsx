@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Activity, Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { memo, createContext, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { splitChatAttachmentImages, type AgentExecutionView, type AgentToolCallView, type ChatConversationView, type ChatProjectTaskView, type ChatSubmissionView, type RunView, type WorkflowView } from '@worklite/contracts';
@@ -21,9 +21,10 @@ import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 import { toSingleLine } from '@/lib/single-line';
 import { ApiError, api } from '@/api/client';
-import { useAgentTeamRunQuery, useChatProjectOperationQuery } from '@/api/queries';
+import { useChatProjectOperationQuery } from '@/api/queries';
 import { PinTrackingContext } from './pinned-executions';
 import { messagePreview } from './attachment-preview';
+import { ExecutionChecklist, parseChecklistProgress } from './execution-checklist';
 
 type TranscriptMessage = AgentExecutionView['messages'][number];
 type TurnSegment = { kind: 'message'; item: TranscriptMessage } | { kind: 'tool'; item: AgentToolCallView } | { kind: 'question'; item: AgentToolCallView; text: string };
@@ -196,71 +197,24 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
 // compact default when the conversation changes or the page reloads.
 export const ProgressReportExpansionContext = createContext<{ expanded: boolean; toggle: () => void }>({ expanded: false, toggle: () => undefined });
 
-function CoderReportStatus({ runId }: { runId: string }) {
-  const query = useAgentTeamRunQuery('personal', runId);
-  return query.data ? <StatusBadge status={toStatusKey(query.data.status)} className="shrink-0" /> : null;
-}
-
-function ProgressReportCard({ message, report, streaming, markdownEnabled }: {
+function ProgressReportCard({ report, streaming }: {
   message: TranscriptMessage;
   report: NonNullable<TranscriptMessage['progressReport']>;
   streaming: boolean;
   markdownEnabled: boolean;
 }) {
   const { t } = useTranslation('assistant');
-  const { locale } = useLocale();
-  const { expanded, toggle } = useContext(ProgressReportExpansionContext);
-  const titleId = useId();
-  const contentId = useId();
-  // The collapsed line keeps the "work is alive" signal: the count plus the most recently
-  // changed item, chosen by the captured update time rather than list order.
-  const latest = report.items.reduce<typeof report.items[number] | null>((current, item) => (item.updatedAt ?? '') >= (current?.updatedAt ?? '') ? item : current, null);
-  return (
-    <article className="my-2" aria-labelledby={titleId} aria-busy={streaming || undefined}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={contentId}
-        aria-label={expanded ? t('progress.collapse') : t('progress.expand')}
-        onClick={toggle}
-        className={cn('flex min-h-9 w-full items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-left shadow-xs hover:bg-surface-subtle/70', surfaceInteraction, focusRingInset)}
-      >
-        <Activity className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-[13px]">
-          <span id={titleId} className="font-medium">{t('progress.title')}</span>
-          <span className="text-muted-foreground"> · {t('progress.compactCount', { count: report.items.length })}</span>
-          {latest ? <span className="text-muted-foreground"> · {t('progress.compactLatest', { title: latest.title })}</span> : null}
-        </span>
-        <time dateTime={message.createdAt} className="shrink-0 text-xs text-muted-foreground">{formatDateTime(message.createdAt, locale)}</time>
-        <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-[200ms] ease-[var(--ease-out)]', !expanded && '-rotate-90')} aria-hidden="true" />
-      </button>
-      {expanded ? (
-        <div id={contentId} className="wl-fade mt-2 rounded-xl border border-border bg-surface p-3.5 shadow-xs">
-          <ul className="space-y-2.5">
-            {report.items.map((item) => (
-              <li key={`${item.kind}:${item.id}`} className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-muted-foreground">{t(`progress.kind.${item.kind}`, { defaultValue: item.kind })}</p>
-                  <p className="break-words text-sm font-medium leading-5">{item.title}</p>
-                  <p className="mt-0.5 break-all font-mono text-[11px] text-muted-foreground">{item.id}</p>
-                  {item.kind !== 'coder' && item.stage ? <p className="mt-0.5 text-xs text-muted-foreground">{t('progress.stage', { stage: item.kind === 'task' ? t(`codex.stage.${item.stage}`, { defaultValue: item.stage }) : item.stage })}</p> : null}
-                  {item.kind !== 'coder' && item.progress ? <p className="mt-0.5 break-words text-xs text-muted-foreground">{item.progress}</p> : null}
-                </div>
-                {item.kind === 'coder' ? <CoderReportStatus runId={item.id} /> : <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />}
-              </li>
-            ))}
-          </ul>
-          <div className="mt-3 border-t border-border pt-3">
-            {report.items.some((item) => item.kind === 'coder' && item.progress) ? null : <MessageResponse content={message.content} enabled={markdownEnabled} className={streaming ? 'wl-caret' : undefined} />}
-          </div>
-        </div>
-      ) : null}
-    </article>
-  );
+  return <div className="my-2 space-y-2" aria-busy={streaming || undefined}>
+    {report.items.map((item) => <article key={`${item.kind}:${item.id}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 break-words text-sm font-medium">{item.title}</p>
+        <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
+      </div>
+      {item.progress ? parseChecklistProgress(item.progress) ? <div className="mt-1"><ExecutionChecklist steps={parseChecklistProgress(item.progress)!} /></div> : <p className="mt-1 whitespace-pre-line break-words text-[13px] text-muted-foreground">{item.progress}</p> : item.kind === 'task' && item.stage ? <p className="mt-1 text-[13px] text-muted-foreground">{t(`codex.stage.${item.stage}`, { defaultValue: item.stage })}</p> : null}
+    </article>)}
+  </div>;
 }
 
-// A settled question is part of the reply that asked it, so it reads as quiet assistant text
-// rather than the amber waiting note it replaced.
 function AskedQuestion({ text }: { text: string }) {
   return (
     <p className="wl-fade my-2 flex items-start gap-2 text-sm text-muted-foreground">

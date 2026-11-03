@@ -1,4 +1,9 @@
-import type { WorkflowDefinition, WorkflowEdgeDefinition, WorkflowNodeDefinition } from '@worklite/contracts';
+import {
+  workflowRerunAffectedNodeIds,
+  type WorkflowDefinition,
+  type WorkflowEdgeDefinition,
+  type WorkflowNodeDefinition,
+} from '@worklite/contracts';
 
 export type JsonSchema = Readonly<Record<string, unknown>>;
 
@@ -622,6 +627,13 @@ export type WorkflowSchedulerState = {
   active?: WorkflowActiveInvocation;
 };
 
+export type WorkflowRerunHistoryEntry = {
+  nodeId: string;
+  input: unknown;
+  position: number;
+  status: string;
+};
+
 const VALUE_COMPARISON_OPERATORS = new Set([
   'equals',
   'notEquals',
@@ -834,6 +846,85 @@ export function createWorkflowSchedulerState(definition: WorkflowDefinition): Wo
     terminalOutputs: {},
     nextPosition: 0,
   };
+}
+
+/**
+ * Rebuild scheduler queues for a new target attempt. The caller activates the
+ * target with targetInput after inserting its NodeRun.
+ */
+export function createWorkflowRerunState(
+  definition: WorkflowDefinition,
+  currentState: WorkflowSchedulerState,
+  targetNodeId: string,
+  _targetInput: Record<string, unknown>,
+  history: readonly WorkflowRerunHistoryEntry[],
+): { state: WorkflowSchedulerState; affectedNodeIds: string[] } {
+  const affectedNodeIds = workflowRerunAffectedNodeIds(definition, targetNodeId);
+  const affected = new Set(affectedNodeIds);
+  const state = structuredClone(currentState);
+  const active = state.active;
+
+  state.ready = state.ready.filter((invocation) => !affected.has(invocation.nodeId));
+  delete state.active;
+  if (active && !affected.has(active.nodeId)) {
+    state.ready.unshift({ nodeId: active.nodeId, input: active.input });
+  }
+
+  for (const nodeId of affected) {
+    delete state.latestOutputs[nodeId];
+    delete state.terminalOutputs[nodeId];
+    delete state.pendingInputs[nodeId];
+    if (state.joinBuffers) delete state.joinBuffers[nodeId];
+  }
+  for (const edge of definition.edges) {
+    if (affected.has(edge.sourceNodeId)) delete state.edgeTraversals[edge.id];
+  }
+
+  const latestHistory = new Map<string, WorkflowRerunHistoryEntry>();
+  for (const entry of history) {
+    const previous = latestHistory.get(entry.nodeId);
+    if (!previous || entry.position >= previous.position) latestHistory.set(entry.nodeId, entry);
+  }
+
+  for (const node of definition.nodes) {
+    if (node.id === targetNodeId || !affected.has(node.id)) continue;
+    const storedInput = latestHistory.get(node.id)?.input;
+    if (!storedInput || typeof storedInput !== 'object' || Array.isArray(storedInput)) continue;
+    const previousInput = storedInput as Record<string, unknown>;
+    const capability = resolveWorkflowNodeCapability(node.type, node.typeVersion);
+    if (!capability) throw new Error(`Node Type is not registered: ${node.type}@${node.typeVersion}`);
+    const incoming = definition.edges.filter((edge) => edge.targetNodeId === node.id);
+
+    if (capability.aggregation === 'join') {
+      const values = previousInput.input;
+      if (!Array.isArray(values)) continue;
+      for (const [index, edge] of incoming.entries()) {
+        if (affected.has(edge.sourceNodeId) || index >= values.length) continue;
+        state.joinBuffers ??= {};
+        const buffers = state.joinBuffers[node.id] ?? {};
+        buffers[edge.id] = [structuredClone(values[index])];
+        state.joinBuffers[node.id] = buffers;
+      }
+      continue;
+    }
+
+    for (const port of capability.inputs) {
+      const incomingForPort = incoming.filter((edge) => edge.targetPort === port.name);
+      if (incomingForPort.length === 0
+        || incomingForPort.some((edge) => affected.has(edge.sourceNodeId))
+        || !Object.hasOwn(previousInput, port.name)) continue;
+      const value = previousInput[port.name];
+      const values = port.multiple && Array.isArray(value)
+        ? structuredClone(value)
+        : [structuredClone(value)];
+      if (values.length === 0) continue;
+      const pending = state.pendingInputs[node.id] ?? {};
+      pending[port.name] = values;
+      state.pendingInputs[node.id] = pending;
+    }
+  }
+
+  return { state, affectedNodeIds };
 }
 
 export function takeNextWorkflowInvocation(state: WorkflowSchedulerState): WorkflowScheduledInvocation | undefined {
@@ -1106,10 +1197,9 @@ async function executeWorkflowMapElement(params: {
 }
 
 /**
- * Serial array map. Each element gets an isolated scheduler state and cloned
- * item/context, and results are appended by item index rather than completion
- * order. Parallelism can be added inside this loop later without changing the
- * node contract or the scheduler.
+ * Image-producing maps run up to three elements concurrently. Other maps stay
+ * serial because their subgraphs may depend on ordered side effects. Each element
+ * has isolated state, and outputs retain input order.
  */
 export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Promise<unknown[]> {
   const config = asWorkflowRecord(request.config);
@@ -1133,9 +1223,10 @@ export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Pr
     itemsValue = located.value;
   }
   if (!Array.isArray(itemsValue)) throw new Error('Map requires a JSON array on the items port.');
+  const items = itemsValue;
   const maxItems = typeof config.maxItems === 'number' && Number.isInteger(config.maxItems) && config.maxItems > 0 ? config.maxItems : undefined;
-  if (maxItems !== undefined && itemsValue.length > maxItems) {
-    throw new Error(`Map received ${itemsValue.length} items but maxItems is ${maxItems}.`);
+  if (maxItems !== undefined && items.length > maxItems) {
+    throw new Error(`Map received ${items.length} items but maxItems is ${maxItems}.`);
   }
   const continueOnError = config.continueOnError === true;
   const bindings = readWorkflowMapBindings(config.bindings);
@@ -1145,44 +1236,78 @@ export async function executeWorkflowMap(request: ExecuteWorkflowMapRequest): Pr
   // (an Agent's script that does not compile). When the subgraph opts into retries, a failed
   // element therefore runs once more from its first node so upstream output is regenerated.
   const elementAttempts = definition.nodes.some((node) => node.errorPolicy === 'retry') ? 2 : 1;
-  const results: unknown[] = [];
+  // Only image-producing subgraphs opt in automatically, including existing published
+  // workflows whose configuration predates parallel execution.
+  const outputNode = configuredOutputNodeId
+    ? definition.nodes.find((node) => node.id === configuredOutputNodeId)
+    : definition.nodes.filter((node) => !definition.edges.some((edge) => edge.sourceNodeId === node.id)).length === 1
+      ? definition.nodes.find((node) => !definition.edges.some((edge) => edge.sourceNodeId === node.id))
+      : undefined;
+  const imageOutput = outputNode && ['worklite/image', 'worklite/canvas-render', 'worklite/canvas-sticker'].includes(outputNode.type);
+  const concurrency = imageOutput ? 3 : 1;
+  const results: Array<{ value: unknown } | undefined> = new Array(items.length);
+  const controller = new AbortController();
+  const abort = () => controller.abort(request.signal.reason);
+  if (request.signal.aborted) abort();
+  else request.signal.addEventListener('abort', abort, { once: true });
+  let cursor = 0;
+  let failure: Error | undefined;
 
-  for (let index = 0; index < itemsValue.length; index += 1) {
-    throwIfWorkflowAborted(request.signal);
-    const scope: WorkflowMapScope = {
-      item: cloneWorkflowValue(itemsValue[index]),
-      index,
-      context: cloneWorkflowValue(request.context),
-    };
-    try {
-      let output: unknown;
-      for (let attempt = 0; ; attempt += 1) {
+  async function worker(): Promise<void> {
+    while (!controller.signal.aborted) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      const scope: WorkflowMapScope = {
+        item: cloneWorkflowValue(items[index]),
+        index,
+        context: cloneWorkflowValue(request.context),
+      };
+      try {
+        let output: unknown;
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            output = await executeWorkflowMapElement({
+              subgraph: definition,
+              scope: { ...scope, item: cloneWorkflowValue(scope.item), context: cloneWorkflowValue(scope.context) },
+              bindings,
+              configuredOutputNodeId,
+              entryPort,
+              executeNode: request.executeNode,
+              signal: controller.signal,
+            });
+            break;
+          } catch (error) {
+            if (controller.signal.aborted || attempt + 1 >= elementAttempts) throw error;
+          }
+        }
+        results[index] = { value: output };
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (!continueOnError) {
+          const message = error instanceof Error ? error.message : String(error);
+          failure = new Error(`Map element ${index} failed: ${message}`);
+          controller.abort(failure);
+          return;
+        }
         try {
-          output = await executeWorkflowMapElement({
-            subgraph: definition,
-            scope: { ...scope, item: cloneWorkflowValue(scope.item), context: cloneWorkflowValue(scope.context) },
-            bindings,
-            configuredOutputNodeId,
-            entryPort,
-            executeNode: request.executeNode,
-            signal: request.signal,
-          });
-          break;
-        } catch (error) {
-          if (request.signal.aborted || attempt + 1 >= elementAttempts) throw error;
+          await request.onElementError?.(error instanceof Error ? error : new Error(String(error)), index, items.length);
+        } catch (callbackError) {
+          failure = callbackError instanceof Error ? callbackError : new Error(String(callbackError));
+          controller.abort(failure);
+          return;
         }
       }
-      results.push(output);
-    } catch (error) {
-      if (request.signal.aborted) throw error;
-      if (!continueOnError) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Map element ${index} failed: ${message}`);
-      }
-      await request.onElementError?.(error instanceof Error ? error : new Error(String(error)), index, itemsValue.length);
     }
   }
-  return results;
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+    if (request.signal.aborted) throwIfWorkflowAborted(request.signal);
+    if (failure) throw failure;
+    return results.flatMap((entry) => entry ? [entry.value] : []);
+  } finally {
+    request.signal.removeEventListener('abort', abort);
+  }
 }
 
 export type ComposeWorkflowArticleConfig = {

@@ -2,21 +2,13 @@
   "title": "执行记录",
   "run": {
     "loadFailed": "无法加载执行记录",
-    "mode": "执行模式",
-    "modeValue": {
-      "plan_only": "仅计划",
-      "validate_existing": "验证现有实现",
-      "implement_and_validate": "实现并验证"
-    },
-    "modeDecided": "本次判定：{{mode}}",
-    "modePending": "调度中，尚未判定模式",
-    "modeRationale": "判定理由",
     "status": {
       "queued": "排队中",
       "running": "运行中",
       "waiting_for_input": "等待输入",
       "waiting_for_recovery": "等待操作恢复",
-      "paused": "已暂停",
+      "stop_requested": "停止中",
+      "stopped": "已停止",
       "succeeded": "已完成",
       "failed": "失败",
       "cancelled": "已取消",
@@ -28,56 +20,41 @@
       "delivered": "已投递"
     },
     "version": "Coder 版本",
-    "versionUnknown": "编排版本未知",
     "project": "项目目录",
     "worktreeBasePath": "基础 Worktree",
     "runBranch": "Run 分支",
     "intent": "任务目标",
-    "commands": "历史命令授权（已停用）",
     "scopeRevision": "授权范围版本",
     "detail": {
       "title": "执行记录"
     },
     "continueInChat": "在 Chat 中处理任务",
     "inputInChat": "问题和恢复操作由 Chat 任务卡片处理。",
-    "openArchive": "查看历史对话",
     "executors": "捕获的执行引擎"
   },
   "tasks": {
     "title": "任务",
-    "empty": "暂无任务记录。",
-    "retryTask": "重试 {{taskKey}}"
+    "empty": "暂无任务记录。"
   },
   "progress": {
     "title": "执行进度",
     "phase": "当前阶段",
     "phaseValue": {
-      "planning": "规划中",
-      "test_design": "测试设计中",
-      "development": "开发中",
-      "test_authoring": "测试编写中",
-      "test_execution": "测试执行中",
-      "review": "审查中",
-      "repair": "修复中",
+      "routing": "Router 协调中",
+      "working": "角色执行中",
       "waiting": "等待输入",
       "terminal": "已结束"
     },
     "nextStep": "下一步",
     "nextStepValue": {
-      "dispatch_assignments": "派发开发任务",
-      "await_assignment_completion": "等待开发任务完成",
+      "route_tasks": "分配角色任务",
+      "await_task_results": "等待角色结果",
       "answer_question": "回答待处理问题",
-      "test_authoring": "编写测试",
-      "test_execution": "执行测试",
-      "review": "审查",
       "finish": "结束"
     },
-    "assignments": "开发任务 {{completed}}/{{total}}",
     "percent": "{{percent}}%",
-    "activeDevelopers": "进行中的 Developer",
     "waitingReason": {
-      "user_input": "等待用户输入",
-      "pause_boundary": "在暂停边界等待"
+      "user_input": "等待用户输入"
     }
   },
   "input": {
@@ -131,8 +108,6 @@
     "empty": "暂无活动记录。"
   },
   "controls": {
-    "pause": "暂停",
-    "resume": "继续",
     "cancel": "取消执行",
     "failed": "无法更新执行状态",
     "reexecute": "重新执行原始请求"
@@ -144,8 +119,6 @@
     "test_author": "Test Author",
     "test_runner": "Test Runner",
     "reviewer": "Reviewer",
-    "worktree_manager": "Worktree Manager",
-    "team_manager": "执行管理",
     "implementer": "实施者"
   },
   "metadata": {
@@ -271,8 +244,7 @@
     "memories": {
       "title": "Coder 记忆",
       "empty": "暂无 Coder 记忆。",
-      "loadFailed": "无法加载 Coder 记忆。",
-      "allRoles": "全部角色"
+      "loadFailed": "无法加载 Coder 记忆。"
     }
   }
 }

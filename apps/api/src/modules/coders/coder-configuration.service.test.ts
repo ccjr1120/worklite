@@ -46,9 +46,9 @@ async function setup() {
   return new AgentTeamConfigurationService(database, resources as never);
 }
 
-function dispatcher(skillIds: string[]): Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'> & { skillIds: string[]; mcpServerIds: string[] } {
+function planner(skillIds: string[]): Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'> & { skillIds: string[]; mcpServerIds: string[] } {
   return {
-    role: 'dispatcher',
+    role: 'planner',
     publicModelId: '',
     instructions: 'Dispatch the request.',
     entryPoints: [],
@@ -62,7 +62,7 @@ describe('AgentTeamConfigurationService Skill capture', () => {
   it('captures the Skill instruction text and package files for a role skillId', async () => {
     const configuration = await setup();
 
-    const updated = await configuration.update('workspace_personal', 'team_1', { roles: [dispatcher(['sk_dino'])] });
+    const updated = await configuration.update('workspace_personal', 'team_1', { roles: [planner(['sk_dino'])] });
 
     expect(updated.roles[0]?.skills).toEqual([{
       id: 'sk_dino',
@@ -78,8 +78,16 @@ describe('AgentTeamConfigurationService Skill capture', () => {
   it('rejects a Skill id that is not in this workspace', async () => {
     const configuration = await setup();
 
-    await expect(configuration.update('workspace_personal', 'team_1', { roles: [dispatcher(['sk_missing'])] }))
+    await expect(configuration.update('workspace_personal', 'team_1', { roles: [planner(['sk_missing'])] }))
       .rejects.toThrow('A selected Skill was not found in this workspace.');
+  });
+
+  it('rejects roles retired from the Router configuration', async () => {
+    const configuration = await setup();
+    for (const role of ['dispatcher', 'executor-manager', 'worktree-manager']) {
+      await expect(configuration.update('workspace_personal', 'team_1', { roles: [{ ...planner([]), role }] }))
+        .rejects.toThrow('Dispatcher, Executor Manager, and Worktree Manager roles are retired');
+    }
   });
 });
 
@@ -87,7 +95,7 @@ describe('Coder lifecycle', () => {
   it('persists created configuration, copies a template and soft deletes independently', async () => {
     const configuration = await setup();
     const created = await configuration.create('workspace_personal', { name: 'Research', description: 'Investigate projects' });
-    expect(created.roles.map((role) => role.role)).toEqual(['planner', 'implementer']);
+    expect(created.roles.map((role) => role.role)).toEqual(['planner', 'implementer', 'router']);
     const changed = await configuration.updateRole('workspace_personal', created.id, 'planner', { instructions: 'Investigate carefully.' });
     await configuration.update('workspace_personal', created.id, { description: 'Updated purpose' });
     const copy = await configuration.create('workspace_personal', { name: 'Research copy', templateCoderId: created.id });
@@ -105,6 +113,6 @@ describe('Coder lifecycle', () => {
     const configuration = await setup();
     await configuration.deleteTeam('workspace_personal', 'team_1', 'team_1');
     const replacement = await configuration.create('workspace_personal', { name: 'Replacement' });
-    expect(replacement.roles).toHaveLength(2);
+    expect(replacement.roles).toHaveLength(3);
   });
 });

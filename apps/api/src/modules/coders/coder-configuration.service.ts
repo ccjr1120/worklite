@@ -18,12 +18,12 @@ import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { PROJECT_EXECUTOR_PROTOCOLS } from '../agents/project-executor.types';
 import {
   CODER_ROLE_TOOL_NAMES,
-  CODER_DISPATCHER_ROLE,
   DIRECT_PLANNER_INSTRUCTIONS,
   DEFAULT_DIRECT_GIT_POLICY,
   CODER_PROCESS_ID,
   CODER_PROCESS_VERSION,
   CODER_ROLE_INSTRUCTIONS,
+  CODER_ROUTER_ROLE,
   RETIRED_AGENT_TEAM_IDS,
   agentTeamEntryPoints,
   isValidAgentTeamRoleId,
@@ -69,10 +69,10 @@ export class AgentTeamConfigurationService {
     if (template?.deletedAt) throw new NotFoundException('Coder template not found.');
     const id = `coder_${randomUUID()}`;
     await this.assertCoderNameAvailable(workspaceId, id, name);
-    const roles = template?.roles ?? [
+    const roles = ensureRouterRoleConfiguration(template?.roles ?? [
       { role: 'planner', publicModelId: '', instructions: DIRECT_PLANNER_INSTRUCTIONS, entryPoints: [], skills: [], mcpServers: [], toolNames: [...CODER_ROLE_TOOL_NAMES.planner!] },
       { role: 'implementer', displayName: 'Implementer', publicModelId: '', instructions: CODER_ROLE_INSTRUCTIONS.implementer!, entryPoints: [], skills: [], mcpServers: [], toolNames: [...CODER_ROLE_TOOL_NAMES.implementer!], executor: 'claude' as const },
-    ];
+    ]);
     try {
       const [created] = await this.db.insert(coders).values({ id, workspaceId, name, description: input.description?.trim() ?? template?.description ?? '', processId: template?.processId ?? CODER_PROCESS_ID, processVersion: template?.processVersion ?? CODER_PROCESS_VERSION, roles, workingPractice: template?.workingPractice ?? '', projectGitPolicy: template?.projectGitPolicy ?? DEFAULT_DIRECT_GIT_POLICY, maxConcurrentRuns: template?.maxConcurrentRuns ?? 3 }).returning();
       return created!;
@@ -178,17 +178,14 @@ export class AgentTeamConfigurationService {
     const team = await this.getTeam(workspaceId, coderId);
     if (team.deletedAt) throw new ConflictException('This Coder has been deleted.');
     if (!team.roles.some((role) => role.role === roleId)) throw new NotFoundException('Coder role not found.');
+    if (roleId === CODER_ROUTER_ROLE) throw new BadRequestException('Router is required for new Coder Runs and cannot be removed.');
     const remainingRoles = team.roles.filter((role) => role.role !== roleId);
-    const hasDispatcher = remainingRoles.some((role) => role.role === CODER_DISPATCHER_ROLE);
-    const hasPlanner = remainingRoles.some((role) => role.role === 'planner');
-    if (!hasDispatcher && !hasPlanner) {
-      throw new BadRequestException('A Dispatcher or Planner role is required as the Coder entry role.');
-    }
     return this.update(workspaceId, coderId, { roles: remainingRoles.map(toPublicRole) });
   }
 
   private async resolveRoles(workspaceId: string, values: AgentTeamRoleConfiguration[]): Promise<StoredAgentTeamRoleConfiguration[]> {
     if (!Array.isArray(values) || values.length < 1) throw new BadRequestException('At least one Coder role is required.');
+    values = ensureRouterRole(values);
     const byRole = new Map<AgentTeamRoleId, AgentTeamRoleConfiguration>();
     for (const value of values) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Every Coder role configuration must be an object.');
@@ -196,21 +193,16 @@ export class AgentTeamConfigurationService {
       if (!isValidAgentTeamRoleId(value.role) || byRole.has(value.role)) throw new BadRequestException('Coder role ids must be unique lowercase identifiers.');
       byRole.set(value.role, value);
     }
-    if (byRole.has('executor-manager')) throw new BadRequestException('Executor Manager is not an active work role.');
-    const hasDispatcher = byRole.has(CODER_DISPATCHER_ROLE);
-    const hasPlanner = byRole.has('planner');
-    if (!hasDispatcher && !hasPlanner) {
-      throw new BadRequestException('A Dispatcher or Planner role is required as the Coder entry role.');
+    if (['dispatcher', 'executor-manager', 'worktree-manager'].some((role) => byRole.has(role))) {
+      throw new BadRequestException('Dispatcher, Executor Manager, and Worktree Manager roles are retired; Router coordinates work roles.');
     }
-
     const normalized: Array<Omit<StoredAgentTeamRoleConfiguration, 'skills' | 'mcpServers'>> = [];
     for (const [role, value] of byRole) {
       if (typeof value.publicModelId !== 'string' && (!Array.isArray(value.publicModelId) || value.publicModelId.some((id) => typeof id !== 'string'))) {
         throw new BadRequestException(`A public model id for Coder role ${role} must be a string or an array of strings.`);
       }
       const publicModelIds = normalizePublicModelList(value.publicModelId);
-      // A single empty string keeps the historical "use the role/executor default" meaning; an
-      // array is always a declared fallback list, with its first candidate taking that role.
+      // An empty string uses the role or executor default; an array is an ordered fallback list.
       const publicModelId: string | string[] = Array.isArray(value.publicModelId) ? publicModelIds : (publicModelIds[0] ?? '');
       if (value.executor !== undefined && value.executor !== null && value.executor !== 'claude' && value.executor !== 'codex') throw new BadRequestException(`The executor for Coder role ${role} must be claude or codex.`);
       const executor = role === 'developer' ? value.executor ?? 'claude' : value.executor ?? undefined;
@@ -289,8 +281,7 @@ export class AgentTeamConfigurationService {
     if (!team) throw new NotFoundException('Coder not found.');
     if (team.deletedAt) throw new ConflictException('This Coder has already been deleted.');
 
-    // Check for active runs using active statuses: queued, running, waiting_for_input, paused
-    const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input', 'paused'] as const;
+    const ACTIVE_RUN_STATUSES = ['queued', 'running', 'waiting_for_input'] as const;
     const [activeRunCount] = await this.db.select({ count: coderRuns.id }).from(coderRuns)
       .where(and(
         eq(coderRuns.coderId, coderId),
@@ -329,6 +320,34 @@ export class AgentTeamConfigurationService {
 
     return { coderId, deletedAt };
   }
+}
+
+function ensureRouterRole(roles: readonly AgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {
+  if (roles.some((role) => role.role === CODER_ROUTER_ROLE)) return [...roles];
+  return [...roles, {
+    role: CODER_ROUTER_ROLE,
+    displayName: 'Router',
+    publicModelId: '',
+    instructions: CODER_ROLE_INSTRUCTIONS[CODER_ROUTER_ROLE]!,
+    entryPoints: [],
+    skillIds: [],
+    mcpServerIds: [],
+    toolNames: [...CODER_ROLE_TOOL_NAMES[CODER_ROUTER_ROLE]!],
+  }];
+}
+
+function ensureRouterRoleConfiguration(roles: readonly StoredAgentTeamRoleConfiguration[]): StoredAgentTeamRoleConfiguration[] {
+  if (roles.some((role) => role.role === CODER_ROUTER_ROLE)) return [...roles];
+  return [...roles, {
+    role: CODER_ROUTER_ROLE,
+    displayName: 'Router',
+    publicModelId: '',
+    instructions: CODER_ROLE_INSTRUCTIONS[CODER_ROUTER_ROLE]!,
+    entryPoints: [],
+    skills: [],
+    mcpServers: [],
+    toolNames: [...CODER_ROLE_TOOL_NAMES[CODER_ROUTER_ROLE]!],
+  }];
 }
 
 function toPublicRoles(roles: StoredAgentTeamRoleConfiguration[]): AgentTeamRoleConfiguration[] {

@@ -45,7 +45,7 @@ const DDL = [
     coder_id text NOT NULL REFERENCES coders(id) ON DELETE RESTRICT,
     coder_version_id text NOT NULL REFERENCES coder_versions(id) ON DELETE RESTRICT,
     status text NOT NULL DEFAULT 'queued', intent text NOT NULL, project_directory text NOT NULL,
-    project_instructions text DEFAULT '[]' NOT NULL, mode text NOT NULL,
+    project_instructions text DEFAULT '[]' NOT NULL,
     authorized_commands text DEFAULT '[]' NOT NULL, scope_revision integer DEFAULT 1 NOT NULL,
     desired_control_state text DEFAULT 'none' NOT NULL, lang_graph_thread_id text NOT NULL UNIQUE,
     outcome text, worktree_base_path text, run_branch text,
@@ -57,7 +57,7 @@ const DDL = [
     name text NOT NULL, state text NOT NULL DEFAULT 'draft',
     created_at integer DEFAULT (unixepoch() * 1000) NOT NULL, updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
   )`,
-  'CREATE TABLE workflow_versions (id text PRIMARY KEY NOT NULL)',
+  "CREATE TABLE workflow_versions (id text PRIMARY KEY NOT NULL, nodes text NOT NULL DEFAULT '[]')",
   `CREATE TABLE workflow_runs (
     id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     workflow_id text NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
@@ -80,12 +80,12 @@ function setup(options?: { report?: 'reported' | 'busy' | 'unavailable'; env?: R
   db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run(TASK_ID);
   const reportActiveWorkProgress = vi.fn(async (_workspaceId: string, _executionId: string, _note: string): Promise<'reported' | 'busy' | 'unavailable'> => options?.report ?? 'reported');
   const getRunProgress = vi.fn(async () => ({
-    phase: 'development' as const, nextStep: 'await_assignment_completion' as const,
-    totalAssignments: 2, completedAssignments: 1, activeDeveloperIds: ['developer-1'], waitingReason: null,
+    phase: 'working' as const, nextStep: 'await_task_results' as const,
+    totalTasks: 2, completedTasks: 1, activeTaskKeys: ['task_1'], waitingReason: null,
   }));
   const service = new ChatProgressReportsService(
     db,
-    { getRunProgress } as unknown as AgentTeamRuntimeService,
+    { getRunProgress, getRunView: vi.fn(async () => ({ tasks: [{ status: 'running', roleName: '开发', assignmentTitle: null, progressText: '正在修改服务' }] })) } as unknown as AgentTeamRuntimeService,
     { reportActiveWorkProgress } as unknown as AgentExecutionsService,
     { get: (key: string) => options?.env?.[key] } as unknown as ConfigService,
   );
@@ -102,9 +102,9 @@ function insertTask(db: Database, status: string, activities: Array<Record<strin
 function insertTeamRun(db: Database, status: string, runId = 'trun_progress_test') {
   db.$client.prepare('INSERT INTO coders (id) VALUES (?)').run('team_agent');
   db.$client.prepare('INSERT INTO coder_versions (id) VALUES (?)').run(`tver_${runId}`);
-  db.$client.prepare(`INSERT INTO coder_runs (id, workspace_id, coder_id, coder_version_id, status, intent, project_directory, mode, lang_graph_thread_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(runId, WORKSPACE_ID, 'team_agent', `tver_${runId}`, status, '协作开发任务', '/tmp/project', 'implement_and_validate', `thread_${runId}`);
+  db.$client.prepare(`INSERT INTO coder_runs (id, workspace_id, coder_id, coder_version_id, status, intent, project_directory, lang_graph_thread_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(runId, WORKSPACE_ID, 'team_agent', `tver_${runId}`, status, '协作开发任务', '/tmp/project', `thread_${runId}`);
   db.$client.prepare('INSERT INTO chat_submissions (id, workspace_id, execution_id, message, target, reference) VALUES (?, ?, ?, ?, ?, ?)')
     .run(`sub_${runId}`, WORKSPACE_ID, EXECUTION_ID, '协作开发任务', JSON.stringify({ kind: 'coder', coderId: 'team_agent' }), JSON.stringify({ kind: 'coder', coderId: 'team_agent', runId }));
 }
@@ -150,8 +150,22 @@ describe('ChatProgressReportsService', () => {
     expect(note).not.toContain('50%');
     expect(note).not.toContain('development');
     expect(note).toContain('日报工作流');
-    expect(note).toContain('node_write');
+    expect(note).not.toContain('node_write');
+    expect(note).toContain('正在修改服务');
     expect(getRunProgress).toHaveBeenCalledWith('trun_progress_test');
+  });
+
+  it('reports only the work item whose progress changed', async () => {
+    const { db, tick, reportActiveWorkProgress } = setup();
+    insertTask(db, 'running', [{ phase: 'claude.agent_message', text: '任务一的进展' }]);
+    insertWorkflowRun(db, 'running');
+    await tick();
+    db.$client.prepare('UPDATE chat_codex_tasks SET activities = ? WHERE id = ?')
+      .run(JSON.stringify([{ phase: 'claude.agent_message', text: '任务一的新进展' }]), TASK_ID);
+    await tick();
+    const note = reportActiveWorkProgress.mock.calls[1]![2] as string;
+    expect(note).toContain('任务一的新进展');
+    expect(note).not.toContain('日报工作流');
   });
 
   it('stays silent without active work', async () => {

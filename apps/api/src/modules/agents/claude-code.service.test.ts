@@ -128,13 +128,14 @@ function service(): ClaudeCodeService {
 }
 
 describe('ClaudeCodeService', () => {
-  it('persists Coder sessions and resumes them with the requested model', async () => {
+  it('persists Coder sessions without resuming the session for another task attempt', async () => {
     fakeQuery.impl = () => new FakeQuery([systemInit('saved-session'), resultSuccess('done')]);
-    const { request, prepared } = buildRequest({ owner: 'coder', resumeSessionId: 'saved-session', model: 'provider/replacement' });
+    const { request, prepared } = buildRequest({ owner: 'coder', model: 'provider/model' });
     await service().execute(request, prepared);
-    expect(captured.lastOptions).toMatchObject({ persistSession: true, resume: 'saved-session', model: 'provider/replacement' });
+    expect(captured.lastOptions).toMatchObject({ persistSession: true, model: 'provider/model' });
+    expect(captured.lastOptions).not.toHaveProperty('resume');
     const firstMessage = await captured.lastPrompt![Symbol.asyncIterator]().next();
-    expect(firstMessage.value).toMatchObject({ message: { content: expect.stringContaining('Continue the original task') } });
+    expect(firstMessage.value).toMatchObject({ message: { content: request.input } });
   });
 
   it('records the session activity even when the SDK turn fails immediately', async () => {

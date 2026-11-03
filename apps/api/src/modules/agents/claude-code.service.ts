@@ -57,7 +57,6 @@ export class ClaudeCodeService {
         ...(model ? { model } : {}),
         includePartialMessages: true,
         persistSession: request.owner === 'coder',
-        ...(request.resumeSessionId ? { resume: request.resumeSessionId } : {}),
         // 'user' resolves inside WorkLite's own CLAUDE_CONFIG_DIR (see `env`), so the operator's
         // ~/.claude settings, plugins and login never apply. 'project' is required for CLAUDE.md
         // discovery in the task's working directory (confirmed live: omitting it silently drops
@@ -204,7 +203,7 @@ class ClaudeCodeSession {
   // close() rather than completing on its own (an ended generator in non-persisted mode would
   // let the CLI exit before the result and any trailing control traffic are read).
   async *inputStream(): AsyncGenerator<SDKUserMessage> {
-    const message: SDKUserMessage = { type: 'user', message: { role: 'user', content: this.request.resumeSessionId ? 'The previous model request failed. Continue the original task from the saved conversation and existing project state; do not repeat completed work.' : this.request.input }, parent_tool_use_id: null };
+    const message: SDKUserMessage = { type: 'user', message: { role: 'user', content: this.request.input }, parent_tool_use_id: null };
     yield message;
     this.inputSent?.();
     await new Promise<void>((resolve) => { this.inputSent = resolve; });

@@ -1,14 +1,3 @@
-export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
-
-export type AgentTeamRole =
-  | 'planner'
-  | 'test_designer'
-  | 'developer'
-  | 'test_author'
-  | 'test_runner'
-  | 'reviewer'
-  | 'worktree-manager';
-
 export type AgentTeamRoleId = string;
 
 export type AgentTeamPendingInput = {
@@ -24,31 +13,24 @@ export type AgentTeamPendingInputAnswer = {
 
 export type AgentTeamPendingInputAnswerMap = Record<string, AgentTeamPendingInputAnswer>;
 
-export type AgentTeamDevelopmentAssignmentInput = {
-  developerId?: string;
-  title: string;
-  scopeSummary: string;
-  ownedPaths: string[];
-  repositoryIds?: string[];
-};
-
-export type AgentTeamDevelopmentAssignment = {
-  developerId: string;
-  title: string;
-  scopeSummary: string;
-  ownedPaths: string[];
-  repositoryIds?: string[];
-};
-
 export type AgentTeamGroupRunContext = {
   groupId: string;
   initialMessageId: string;
   initialMessage: string;
   targetRole: AgentTeamRoleId;
-  mode: AgentTeamMode;
+  requestedRole?: AgentTeamRoleId;
+  continuation?: {
+    sourceRunId: string;
+    sourceTaskAttemptId: string;
+    taskKey: string;
+    role: AgentTeamRoleId;
+    goal: string;
+    savedProgress: string;
+    fileReferences: Array<{ documentId: string; revision: number; title: string }>;
+  };
   repositories: Array<{ id: string; memoryRepositoryId: string; name: string; directory: string; projectInstructions: AgentTeamProjectInstructionFile[] }>;
   knownRepositories?: Array<{ name: string; directory: string }>;
-  memories: Array<{ id: string; repositoryId: string | null; role: AgentTeamRoleId | null; content: string }>;
+  memories: Array<{ id: string; repositoryId: string | null; content: string }>;
 };
 
 export type AgentTeamProjectInstructionFile = {
@@ -62,29 +44,12 @@ export type AgentTeamCriterionAssessment = {
   evidence: string[];
 };
 
-export type AgentTeamRepairRequest = {
-  taskKey: string;
-  instruction: string;
-};
-
-export type AgentTeamTargetedRepairRequest = {
-  developerId: string;
-  instruction: string;
-};
-
 export type AgentTeamDocument = {
   key: string;
   title: string;
   content: string;
   producingTaskKey: string;
   upstreamDocumentKeys: string[];
-};
-
-export type AgentTeamProjectGitDecision = {
-  projectPath: string;
-  strategy: 'no_git' | 'current_branch' | 'feature_branch' | 'worktree';
-  branch?: string;
-  worktreePath?: string;
 };
 
 export type AgentTeamInputDocumentVersion = {
@@ -102,11 +67,29 @@ export type AgentTeamTaskDefinition = {
   acceptanceCriterionReferences: readonly string[];
 };
 
+export type AgentTeamRouterAssignment = {
+  id: string;
+  role: AgentTeamRoleId;
+  goal: string;
+  dependencyIds: readonly string[];
+  repositoryIds?: readonly string[];
+};
+
+export type AgentTeamRouterPlan =
+  | { action: 'dispatch'; assignments: readonly AgentTeamRouterAssignment[] }
+  | { action: 'finish' };
+
+export class AgentTeamTaskStoppedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentTeamTaskStoppedError';
+  }
+}
+
 export type AgentTeamTaskRequest = {
   runId: string;
   taskDefinition: AgentTeamTaskDefinition;
   intent: string;
-  mode: AgentTeamMode;
   projectDirectory: string;
   outputDirectory: string;
   scopeRevision: number;
@@ -114,14 +97,9 @@ export type AgentTeamTaskRequest = {
   upstream: readonly AgentTeamDocument[];
   pendingInputId?: string;
   answer?: string;
-  repairInstruction?: string;
-  developerId?: string;
-  assignment?: AgentTeamDevelopmentAssignment;
-  developmentAssignments?: readonly AgentTeamDevelopmentAssignment[];
-  siblingResults?: Readonly<Record<string, Extract<AgentTeamTaskResult, { status: 'completed' }>>>;
   groupContext?: AgentTeamGroupRunContext;
   groupMessage?: string;
-  handoffSummary?: string;
+  taskContextSummary?: string;
   fileReferences?: Array<{ documentId: string; revision: number; title: string }>;
 };
 
@@ -132,53 +110,16 @@ export type AgentTeamTaskResult =
       unresolvedIssues: string[];
       commandIds: string[];
       changedFiles: string[];
-      completedAssignedWork: boolean;
+      completedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
-      projectGitDecisions?: AgentTeamProjectGitDecision[];
-      developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
       repositoryDirectories?: string[];
-      repairRequest?: AgentTeamRepairRequest;
-      repairRequests?: AgentTeamTargetedRepairRequest[];
       message?: string;
-      handoff?: { role: AgentTeamRoleId; goal: string; repositoryIds?: string[] };
-      dispatchDecision?: {
-        mode: AgentTeamMode;
-        rationale: string;
-      };
+      routerPlan?: AgentTeamRouterPlan;
     }
   | {
       status: 'waiting_for_input';
       pendingInput: AgentTeamPendingInput;
     };
-
-export type AgentCoderGraphDelegate = {
-  executeTask(request: AgentTeamTaskRequest): Promise<AgentTeamTaskResult>;
-};
-
-export type AgentCoderGraphOptions = {
-  maxRepairRounds?: number;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
-  developerIds?: readonly string[];
-  developerConcurrency?: number;
-};
-
-export type AgentTeamRunRequest = {
-  runId: string;
-  intent: string;
-  mode: AgentTeamMode;
-  projectDirectory: string;
-  outputDirectory: string;
-  scopeRevision: number;
-  projectInstructions: readonly AgentTeamProjectInstructionFile[];
-};
-
-export type AgentCoderGraphResult = AgentTeamRunRequest & {
-  documents: readonly AgentTeamDocument[];
-  unresolvedIssues: readonly string[];
-  commandIds: readonly string[];
-  criterionAssessments: readonly AgentTeamCriterionAssessment[];
-  developmentAssignments: readonly AgentTeamDevelopmentAssignment[];
-};
 
 export type AgentTeamOperationStatus = 'reserved' | 'completed' | 'uncertain' | 'failed';
 

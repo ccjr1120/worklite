@@ -10,7 +10,7 @@ afterEach(cleanup);
 
 const node: AgentTeamRunNode = {
   nodeRunId: 'attempt', taskKey: 'planning', attemptIndex: 0, name: 'Planner', role: 'planner', roleName: null,
-  developerId: null, status: 'running', startedAt: '2026-10-30T00:00:00Z', endedAt: null, durationMs: 2000,
+  status: 'running', startedAt: '2026-10-30T00:00:00Z', endedAt: null, durationMs: 2000,
   tokens: { tokens: 120, source: 'exact' }, latestActivity: 'read', stepsOmitted: 0,
   steps: [{ id: 'step', kind: 'tool_call', label: 'read src/main.ts', startedAt: '2026-10-30T00:00:00Z', endedAt: null, durationMs: 1000, tokens: { tokens: 987, source: 'estimated' } }],
 };

@@ -89,8 +89,6 @@ export class ChatDispatchService {
         const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
         const runId = `atrun_chat_${digest}`;
         const groupId = `atgroup_chat_${digest}`;
-        // Coders decide their own Run mode; older callers may still send one.
-        if (target.mode !== undefined) this.logger.warn(`Ignoring deprecated executor mode "${String(target.mode)}" for Chat submission ${submission.id}.`);
         const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.coderId, {
           message: input.message,
           projectDirectory: target.projectDirectory,

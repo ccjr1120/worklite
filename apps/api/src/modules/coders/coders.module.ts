@@ -6,7 +6,6 @@ import { ModelProvidersModule } from '../model-providers/model-providers.module'
 import { AgentTeamDocumentsService } from './coder-documents.service';
 import { AgentTeamOperationJournalService } from './coder-operation-journal.service';
 import { AgentTeamConfigurationService } from './coder-configuration.service';
-import { AgentTeamManagerToolsService } from './coder-manager-tools.service';
 import { AgentTeamMemoryToolsService } from './coder-memory-tools.service';
 import { AgentTeamRuntimeService } from './coder-runtime.service';
 import { AgentTeamGroupsService } from './coder-groups.service';
@@ -27,7 +26,6 @@ import { CodersService } from './coders.service';
   providers: [
     AgentTeamDocumentsService,
     AgentTeamConfigurationService,
-    AgentTeamManagerToolsService,
     AgentTeamMemoryToolsService,
     AgentTeamOperationJournalService,
     AgentTeamRuntimeService,
@@ -36,6 +34,6 @@ import { CodersService } from './coders.service';
     TeamMemoryService,
     TeamMemoryMcpTokenService,
   ],
-  exports: [AgentTeamDocumentsService, AgentTeamConfigurationService, AgentTeamManagerToolsService, AgentTeamMemoryToolsService, AgentTeamOperationJournalService, AgentTeamRuntimeService, CodersService, AgentTeamGroupsService, TeamMemoryService, TeamMemoryMcpTokenService],
+  exports: [AgentTeamDocumentsService, AgentTeamConfigurationService, AgentTeamMemoryToolsService, AgentTeamOperationJournalService, AgentTeamRuntimeService, CodersService, AgentTeamGroupsService, TeamMemoryService, TeamMemoryMcpTokenService],
 })
 export class CodersModule {}

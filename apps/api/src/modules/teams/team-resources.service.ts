@@ -296,7 +296,7 @@ function isMissingFile(error: unknown): boolean {
 }
 
 function emptySkillCleanup(): SkillReferenceCleanup {
-  return { agentIds: [], chatConfigurationRevisions: [], workflowDrafts: [], agentTeamRoles: [], agentTeamDeveloperInstances: [] };
+  return { agentIds: [], chatConfigurationRevisions: [], workflowDrafts: [], agentTeamRoles: [] };
 }
 
 function mapSkillIds(ids: readonly string[], mapping: ReadonlyMap<string, string>, remove = false): string[] {
@@ -367,19 +367,8 @@ function rewriteRoleSkillIds(
     return [{ ...current }];
   };
   const skills = role.skills.flatMap(rewrite);
-  const developerInstances = role.developerInstances?.map((instance) => {
-    let instanceChanged = false;
-    const instanceSkills = instance.skills.flatMap((skill) => {
-      const rewritten = rewrite(skill);
-      if (rewritten.length !== 1 || JSON.stringify(rewritten[0]) !== JSON.stringify(skill)) instanceChanged = true;
-      return rewritten;
-    });
-    if (!instanceChanged) return instance;
-    changed = true;
-    return { ...instance, skills: instanceSkills };
-  });
   if (!changed) return null;
-  return { ...role, skills, ...(developerInstances ? { developerInstances } : {}) };
+  return { ...role, skills };
 }
 
 async function writeSkillDirectory(rootDirectory: string, directory: string, files: PackageFile[]): Promise<'created' | 'exists'> {
@@ -893,10 +882,6 @@ export class WorkspaceResourcesService {
           if (!next) return role;
           changed = true;
           cleanup.agentTeamRoles.push({ coderId: team.id, role: role.role });
-          for (const instance of next.developerInstances ?? []) {
-            const previous = role.developerInstances?.find((candidate) => candidate.developerId === instance.developerId);
-            if (previous && previous.skills.length !== instance.skills.length) cleanup.agentTeamDeveloperInstances.push({ coderId: team.id, role: role.role, developerId: instance.developerId });
-          }
           return next;
         });
         if (changed) transaction.update(coders).set({ roles, updatedAt: new Date() }).where(eq(coders.id, team.id)).run();
@@ -1363,7 +1348,7 @@ export class WorkspaceResourcesService {
               groupBy: [...GATEWAY_STATS_GROUP_BYS],
               defaultGroupBy: 'surface',
               scope: 'conversation, executor, coder, workflow and team_run groupings count only requests carrying that identifier; node_run covers Run and Workflow traffic and reports a Run\'s traffic recorded before node attribution as one row with a null nodeRunId; surface covers every request',
-              nodeAttribution: 'nodeRunId is one Coder role task attempt (parallel Developers and retries are separate nodes) or one Workflow node run; statistics recorded before node attribution carry no nodeRunId and are not backfilled',
+              nodeAttribution: 'nodeRunId is one Coder role task attempt or one Workflow node run; retries are separate nodes',
               idLists: 'teamRunId and nodeRunId accept a comma-separated list of ids',
               persistence: 'attribution is written to the permanent statistics as well as the 12-hour request details',
               coverage: 'only traffic that passes through the Gateway; a Codex task with no declared Gateway model runs on local configuration and contributes no tokens, so Coder token usage is never complete',
@@ -1432,7 +1417,7 @@ export class WorkspaceResourcesService {
           memory: { store: 'workspace-level chat_memories rows with content, category, source conversation and timestamps', categories: ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'], categoryMetadata: '@worklite/contracts CHAT_MEMORY_CATEGORY_META is the single source for which categories are always injected (rule, preference) versus on-demand', tools: ['list_memories', 'save_memory', 'update_memory', 'delete_memory'], routes: ['GET /chat/memories', 'GET /chat/memories/:id', 'POST /chat/memories', 'PATCH /chat/memories/:id', 'DELETE /chat/memories/:id'], injection: 'bounded projection captured per accepted turn into the capability snapshot system prompt: rule and preference categories inject full content, other categories inject only an id/category/summary catalog for on-demand reads through list_memories', bounds: { contentChars: 2000, entries: 100, promptEntries: 50, promptChars: 6000, catalogEntries: 50, catalogChars: 2000 }, management: 'Web Chat settings dialog, grouped and filterable by category' },
         },
         upgrades: { operatorDeploymentVersion: { command: 'pnpm deploy:local', source: 'apps/web/package.json', bump: 'patch before compilation on every invocation', initialBaseline: 'builds in the project root before starting managed services', laterDeployment: 'installs dependencies and builds in the project root while current services keep running; after success, verifies port ownership, then restarts API, Web and Gateway from project-root build outputs', legacyTakeover: 'reads old current.json release fields and verifies the recorded process paths, groups and target listeners before stopping them', unknownListeners: 'left untouched; deployment fails', failedAttempt: 'consumes source version; build failure leaves current processes untouched; startup failure leaves current.json at the last successful deployment and does not restore the stopped program or data', webVersion: 'version from the last successful deployment', gitMutations: false, databaseBackups: false, automaticRollback: false, releaseSnapshots: false }, proposeRoute: 'POST /upgrades', redeployRoute: 'POST /upgrades/redeploy', redeployTool: 'redeploy', inspectRoute: 'GET /upgrades/:id', authorization: 'explicit current Chat user request; no second confirmation', authorizationBinding: 'persisted user message and immutable release', combinedRepairRedeploy: 'dispatch the change to QuickCoder, then Chat calls redeploy after the Run reports success', deduplication: 'one job per execution and user message', profile: 'current managed runtime only; no model override', progress: 'original conversation; automatic observation after reconnect', requiresManagedBaseline: true, projectRoot: process.env.WORKLITE_PROJECT_ROOT ?? null, phases: ['proposed', 'authorized', 'preflighting', 'draining', 'frozen', 'switching', 'recovering', 'succeeded', 'rolled_back', 'failed'], uninterruptedIngress: false, interruptionPolicy: 'cancel active Agent, Coder, Workflow and Command work after isolated preflight; never automatically resume' },
-        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Coder questions, failures and failed dispatches remain visible', coderDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /coders/:coderId/runs', groupRoute: 'read-only archive at /coder-groups/:groupId', runRoute: 'read-only evidence at /coder-runs/:runId', requires: ['coderId', 'goal', 'absolute existing projectDirectory'], initialRole: 'Coder entry role unless the user names an active role', nameSnapshot: 'the Run captures the Coder name at dispatch', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'pause', 'resume', 'cancel', 'retry', 'reexecute', 'recover'], roleControl: 'Chat task card controls the bound Run; reexecution creates a new group message and Run', commandAuthorization: 'none; every Coder role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['initially addressed role', 'selected repositories', 'working practice and the full Coder memory projection go only to the initially addressed role', 'project Git policy goes to every engine-backed role'], handoffs: 'summary and immutable file references; recipients read document content on demand', busyCoder: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'coder', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Coder task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Coder documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Coder actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
+        chat: { workspaceRoute: '/chat', channelsRoute: 'GET /chat/channels', conversationsRoute: 'GET /chat/conversations', conversationRoute: 'GET /chat/conversations/:id', recordsRoute: 'GET /chat/conversations/:id/records', recordsSnapshots: 'latest snapshot plus all non-snapshot events', maxSkillScriptOutputChars: 60000, diagnosticTool: { name: 'inspect_chat_conversation', records: 'current evidence and status/receipt metadata; repeated snapshots and cards referenced', fullToolOutputInput: 'toolCallId', completeEvidence: 'fullRecordsRoute', inferenceHistory: 'raw replay snapshots replaced with explicit retained-evidence references; original history unchanged' }, channels: [{ id: 'web', builtIn: true, presentation: ['streaming', 'markdown', 'questions'] }, { id: 'feishu', builtIn: false, presentation: ['native streamed cards', 'collapsed task details', 'forms', 'QR images', 'files'] }, { id: 'wechat', builtIn: false, presentation: ['text messages', 'QR images', 'Chat attachment images'] }], histories: 'server-persisted; unrelated conversations remain separate', backgroundConversations: { start: 'start_chat_conversation', monitor: ['wait_chat_conversation', 'inspect_chat_conversation'], reply: 'message_chat_conversation', userActivation: false, origin: 'first user message names the starting conversation', messaging: 'only conversations started from the current conversation', nesting: false, recoveryQuestions: 'user only' }, masterAgentId: 'agt_system_helper_chat', dispatchRoute: 'POST /chat/dispatch', taskFeedback: 'task state is independent of Chat turn; Coder questions, failures and failed dispatches remain visible', coderDispatch: { owner: 'Chat Agent', recordsRoute: 'GET /coders/:coderId/runs', groupRoute: 'current read-only transcript at /coder-groups/:groupId', runRoute: 'read-only evidence at /coder-runs/:runId', requires: ['coderId', 'goal', 'absolute existing projectDirectory'], initialRole: 'Router for every new Run; a user-named role remains a Router request', nameSnapshot: 'the Run captures the Coder name at dispatch', submissionReference: ['groupId', 'runId'], entry: 'dispatch_task creates a hidden persistent group and bound Run; Chat owns the task card and all follow-up actions', controls: ['answer', 'cancel', 'stop_task', 'continue_task', 'reexecute'], roleControl: 'Chat cancels a whole Run or stops and continues one exact Router task; reexecution creates a new group message and Run', commandAuthorization: 'none; every Coder role executes its commands directly on any channel through its configured tool surface, and WorkLite records command text, exit code, output and Command references as evidence', contextIsolation: ['Router coordinates the Run', 'selected repositories', 'working practice and full Coder memory projection go to Router; assigned roles receive a bounded memory index', 'project Git policy goes to every engine-backed role'], assignments: 'Router assigns tasks with summaries; roles return results to Router and read immutable document references on demand', busyCoder: 'queue the bound Run when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens' }, targets: ['conversation', 'coder', 'workflow'], workflowVersions: 'published only', externalPluginId: 'feishu-bot', mergeHistories: false, webAccess: 'inspect and continue selected persisted conversation', feishu: { privateChat: true, defaultTarget: 'conversation', persistentTargetSelection: false, choices: 'current pending Agent question; plan not required', replyProgress: 'separate queued, thinking, responding and processing component in the same CardKit entity', cardPresentation: { transport: 'CardKit JSON 2.0 entity', requiredPermission: 'cardkit:card:write', replyAnimation: 'native fast typewriter', updates: 'component-local; full card for structural transitions', progressIcon: 'neutral native loading icon; no custom animation', taskDetails: 'default-collapsed Coder task attempts and Workflow node execution statuses', visibleContext: ['current task or step', 'outcome', 'questions', 'failures', 'QR images', 'answer forms', 'controls'], streamingLifecycle: 'model output only; close for tools, questions and terminal states; renew platform window', persistedDelivery: ['cardId', 'sequence', 'last delivered card', 'streaming start', 'pending idempotent UUID and exact payload'], legacyCardConversion: false }, completedDialogue: 'content without task header or completion label', taskAnswers: 'reply to the task card or submit its form', groupChat: false, inbound: ['text', 'card actions'], outbound: ['updated response cards', 'task questions and controls', 'QR images', 'Coder documents', 'Workflow Artifacts'], configurationRoute: '/chat?view=channels', applicationRegistration: { available: true, archetype: 'PersonalAgent', startRoute: 'POST /plugins/feishu-bot/feishu/registration', cancelRoute: 'DELETE /plugins/feishu-bot/feishu/registration', operator: 'user through Web configuration', automaticCredentialPersistence: true, userBinding: 'automatic when returned, otherwise manual', resumable: true, manualExistingApplication: true, platformSetup: ['bot capability', 'IM permissions', 'long-connection message and card subscriptions', 'publication'], userOAuth: false, runtimeCompatibility: 'requires authorized real integration' }, wechat: { pluginId: 'wechat-bot', protocol: 'Tencent iLink bot long-poll', login: { startRoute: 'POST /plugins/wechat-bot/wechat/login', cancelRoute: 'DELETE /plugins/wechat-bot/wechat/login', mechanism: 'QR scan; scanning user becomes the allowed user', credentialStorage: 'encrypted bot token in the plugin row' }, privateChat: true, groupChat: false, inbound: ['text'], outbound: ['whole text replies', 'conversation question prompts', 'task status notifications', 'Workflow QR images', 'Chat attachment images'], streaming: false, cards: false, media: 'images outbound only', defaultTarget: 'conversation', questionAnswers: 'plain text answers to Chat pending questions; Chat Agent handles Coder actions', disconnectRoute: 'POST /plugins/wechat-bot/wechat/disconnect', configurationRoute: '/chat?view=channels', staleToken: 'status error; user re-logins by QR' } } },
         supportedResourceOperations: [
           'inspect Gateway statistics and request logs',
           'delegate independent project work to a Coder whose roles run on the Codex or Claude Code execution engine',
@@ -1451,9 +1436,9 @@ export class WorkspaceResourcesService {
           'locate local projects from the read-only metadata index',
           'inspect Workflow capabilities',
           'inspect, rename and configure Coders by stable id',
-          'inspect Coder Run records, archived group transcripts, Runs and documents',
+          'inspect Coder Run records, current group transcripts and documents',
           'manage Coder/repository-scoped memories and working practice through Chat',
-          'answer, control, recover and retry Coder Runs from Chat',
+          'answer Coder questions, cancel Runs, and stop or continue exact Router tasks from Chat',
           'dispatch Chat-owned Coder Runs and published Workflow tasks',
           'navigate to known WorkLite pages and a Workflow editor by name or id',
           'create non-secret model Provider draft',
@@ -1519,44 +1504,38 @@ export class WorkspaceResourcesService {
           chatAgentDispatchOnly: true,
           dispatchRoute: 'POST /chat/dispatch',
           dispatchRequires: ['coderId', 'goal in message', 'absolute existing projectDirectory'],
-          initialRole: 'the Coder entry role: its Dispatcher when present, otherwise its Planner; a user-named active role bypasses it',
+          initialRole: 'Router for every new Run; a user-named role remains a request in Router context',
           busyDispatch: 'persist as queued when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens',
           maxConcurrentRuns: { configurable: true, minimum: 1, default: 3 },
           submissionBinding: 'stable submission id atomically binds groupId and runId; repeated delivery is idempotent',
           groupRoutes: {
             persistence: 'groups bind Chat submissions and preserve transcript and repository context for captured Runs',
-            archive: 'GET /coder-groups/:groupId is read-only history; no user-facing composer, answer, repository mutation or controls',
+            transcript: 'GET /coder-groups/:groupId is the current read-only transcript; controls are Chat-owned',
             operations: 'Chat dispatch and protected Chat platform tools own user-requested actions',
           },
-          memory: { routes: 'GET/POST/PATCH/DELETE /coders/:coderId/memories through protected Chat platform tools', scope: ['coder', 'canonical repository'], injection: 'the initially addressed role receives the full captured projection and every other role a bounded index', roleTools: ['coder_memory_search', 'coder_memory_read', 'coder_memory_write', 'coder_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write executor memories within the Run repository scope through managed tools or the per-task executor memory MCP endpoint' },
-          workingPractice: 'captured by each new group Run and injected into the initially addressed role only',
+          memory: { routes: 'GET/POST/PATCH/DELETE /coders/:coderId/memories through protected Chat platform tools', scope: ['coder', 'canonical repository'], injection: 'Router receives the full captured projection and assigned roles receive a bounded index', roleTools: ['coder_memory_search', 'coder_memory_read', 'coder_memory_write', 'coder_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write memories within the Run repository scope through managed tools or the per-task memory MCP endpoint' },
+          workingPractice: 'captured by each new Run and injected into Router context',
           projectGitPolicy: { perCoder: true, editableThrough: 'update_coder with coderId', capturedBy: 'new Coder version', injection: 'every engine-backed role in the captured Run', enforcement: 'guidance for execution engines; WorkLite does not create, merge, or clean Git branches or worktrees' },
-          deletion: { tool: 'delete_coder', deleteRoute: 'DELETE /coders/:coderId', deleteRequires: 'path coderId and body confirmTeamId matching', softDelete: true, deletedCodersExcludedFrom: ['Coder list', 'inspect_coder', 'update_coder', 'role CRUD', 'dispatch targets'], deletedCodersPreserve: ['historical Run data', 'executor version snapshots', 'executor memories', 'group archives', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
+          deletion: { tool: 'delete_coder', deleteRoute: 'DELETE /coders/:coderId', deleteRequires: 'path coderId and body confirmTeamId matching', softDelete: true, deletedCodersExcludedFrom: ['Coder list', 'inspect_coder', 'update_coder', 'role CRUD', 'dispatch targets'], deletedCodersPreserve: ['Router Run data', 'current version snapshots', 'Coder memories', 'group transcripts', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
           runWebRoute: '/coding/runs/:runId',
           roles: [...CODER_ROLES],
-          roleDisplayNames: { executor: 'Implementer' },
           dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', roleCrud: ['POST /coders/:coderId/roles', 'PATCH /coders/:coderId/roles/:roleId', 'DELETE /coders/:coderId/roles/:roleId'] },
-          developerExecution: {
+          roleExecution: {
             engines: ['claude', 'codex'],
             roleField: 'developer defaults to claude; new Runs capture execution engine launches for configured roles with an executor engine',
             capturedLaunch: true,
-            olderSnapshots: 'new Run required',
             nativeTools: true,
             operationJournal: false,
             processReferences: 'materialized read-only files listed in the task prompt',
             sharedEngines: 'same execution engines as historical Chat project tasks', commandAuthorization: 'direct execution; no WorkLite proposal confirmation or command grants',
             evidence: 'task.activity engine events and the engine process Command; the executor owns final results',
           },
-          multiDeveloper: {
-            configuration: 'single developer role; the Planner decides per Run how many of the fixed 4 lanes (developer, developer-2, developer-3, developer-4) execute via developmentAssignments without developerId',
-            reservedPrimaryId: 'developer',
-            assignments: 'planner-produced non-overlapping ownedPaths mapped to lanes in order; targeted repairRequests per developerId; a role output that fails validation earns exactly one corrective re-invocation',
-            retryBarrier: 'one retry resumes all failed assignments in the same fan-out; completed siblings never rerun',
-            progress: 'run.progress events and run progress view: phase, next step, assignment completion, active developerIds; task events carry developerId and assignmentTitle; attempts carry progressText',
+          routerCoordination: {
+            assignments: 'Router assignments declare a stable task id, configured role, goal, repository scope and dependencies; every result returns to Router',
+            progress: 'Router progress reports task totals, active task keys and persisted task attempts',
             pendingInputs: 'Chat task cards list every waiting question; each answer uses its own pendingInputId and scopeRevision',
           },
-          modes: ['plan_only', 'validate_existing', 'implement_and_validate'],
-          modeSelection: 'Executors do not accept a mode on dispatch. An executor without a Dispatcher starts at its Planner; otherwise the Dispatcher decides it and records modeRationale and modeDecidedAt on the Run. Historical Runs keep their captured mode.',
+          dispatchPolicy: 'dispatch accepts no execution mode; Router decides each step from the user goal and persisted task results.',
           coderRoutes: {
             create: 'POST /coders (name, optional description and templateCoderId)',
             detail: 'GET /coders/:coderId',
@@ -1566,7 +1545,7 @@ export class WorkspaceResourcesService {
             updateRole: 'PATCH /coders/:coderId/roles/:roleId',
             deleteRole: 'DELETE /coders/:coderId/roles/:roleId',
             records: 'GET /coders/:coderId/runs (read-only Run summaries)',
-            archive: 'GET /coder-groups/:groupId (read-only transcript)',
+            transcript: 'GET /coder-groups/:groupId (current read-only transcript)',
             memories: 'GET/POST/PATCH/DELETE /coders/:coderId/memories',
           },
           documentRoutes: {
@@ -1578,14 +1557,12 @@ export class WorkspaceResourcesService {
             events: 'GET /coder-runs/:runId/events',
             answer: 'POST /coder-runs/:runId/answer',
             recoverOperation: 'POST /coder-runs/:runId/operations/:operationKey/recovery',
-            pause: 'POST /coder-runs/:runId/pause',
-            resume: 'POST /coder-runs/:runId/resume',
             cancel: 'POST /coder-runs/:runId/cancel',
-            retryTask: 'POST /coder-runs/:runId/tasks/:taskKey/retry',
           },
-          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'developer executor process, session or thread, and command, file and tool activity' },
+          groupControlRoute: 'POST /coder-groups/:groupId/controls supports reexecute, stop_task and continue_task; only exact task attempts can be stopped or continued',
+          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'role attempt activity and command, file and tool activity' },
           directRunCreationApi: false,
-          commandAuthorization: 'none; every work role executes commands directly. Non-executor roles run them through the WorkLite bash tool when their configured tool surface includes it, which Test Runner and Reviewer do by default, with recorded Command evidence, and engine-backed roles keep native direct execution. Historical Runs retain their recorded authorizedCommands as read-only evidence',
+          commandAuthorization: 'none; every work role executes commands directly. Non-executor roles run them through the WorkLite bash tool when their configured tool surface includes it, which Test Runner and Reviewer do by default, with recorded Command evidence, and engine-backed roles keep native direct execution.',
           recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
           uncertainOperationRecovery: {
             cancellationPreservesRecoveryInput: true,

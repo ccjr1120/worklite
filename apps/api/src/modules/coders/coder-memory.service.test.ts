@@ -126,20 +126,6 @@ describe('TeamMemoryService write semantics', () => {
     expect(await db.select().from(coderMemories)).toHaveLength(2);
   });
 
-  it('hides legacy role-scoped entries from the role tool surface', async () => {
-    await db.insert(coderMemories).values({
-      id: 'legacy_role_memory',
-      workspaceId: 'workspace_a',
-      coderId: 'team_a',
-      role: 'developer',
-      content: 'Legacy role memory.',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    expect(await service.search(actor(), { query: 'legacy' })).toEqual([]);
-  });
-
   it('records role provenance on a written memory', async () => {
     const written = await service.write(actor(), { content: 'Provenance fact.' });
     expect(written.memory).toMatchObject({
@@ -147,7 +133,6 @@ describe('TeamMemoryService write semantics', () => {
       sourceRole: 'developer',
       sourceRunId: 'atrun_a',
       sourceTaskAttemptId: 'attempt_a',
-      role: null,
     });
   });
 });

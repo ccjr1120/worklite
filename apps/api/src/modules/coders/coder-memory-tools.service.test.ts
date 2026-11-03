@@ -9,10 +9,9 @@ import {
   type Database,
 } from '@worklite/db';
 import { AgentTeamMemoryToolsService } from './coder-memory-tools.service';
-import { roleMemoryManagedToolsEnabled } from './coder-runtime.service';
 import { TeamMemoryService } from './coder-memory.service';
 
-// The managed memory tools are available to ordinary v11 roles only. Their Coder,
+// The managed memory tools are available to v12 Router assignments. Their Coder,
 // Run, attempt, role and repository scope come from the runtime closure; tool input
 // can choose content, an in-scope repository and an upsert key, nothing else.
 
@@ -46,23 +45,6 @@ const context = {
   role: 'developer',
   allowedRepositoryIds: ['repo_a1'],
 };
-
-describe('roleMemoryManagedToolsEnabled', () => {
-  it('enables the tools for ordinary roles from orchestration v11', () => {
-    expect(roleMemoryManagedToolsEnabled(11, 'developer')).toBe(true);
-    expect(roleMemoryManagedToolsEnabled(11, 'planner')).toBe(true);
-  });
-
-  it('keeps v10 and earlier roles without Coder memory tools', () => {
-    expect(roleMemoryManagedToolsEnabled(10, 'developer')).toBe(false);
-    expect(roleMemoryManagedToolsEnabled(9, 'developer')).toBe(false);
-    expect(roleMemoryManagedToolsEnabled(undefined, 'developer')).toBe(false);
-  });
-
-  it('does not give the Executor Manager the role memory tool surface', () => {
-    expect(roleMemoryManagedToolsEnabled(11, 'executor-manager')).toBe(false);
-  });
-});
 
 describe('AgentTeamMemoryToolsService', () => {
   it('exposes exactly the four role memory tools', () => {

@@ -22,10 +22,11 @@ export class PluginsService {
 
   async list(): Promise<PluginView[]> {
     const rows = await this.db.select().from(plugins).orderBy(plugins.name);
-    return Promise.all(rows.map((row) => this.toView(row)));
+    return Promise.all(rows.filter((row) => row.id !== FEISHU_PLUGIN_ID).map((row) => this.toView(row)));
   }
 
   async get(pluginId: string): Promise<PluginView> {
+    if (pluginId === FEISHU_PLUGIN_ID) throw new NotFoundException('Plugin not found.');
     const [row] = await this.db.select().from(plugins).where(eq(plugins.id, pluginId)).limit(1);
     if (!row) throw new NotFoundException('Plugin not found.');
     return this.toView(row);
@@ -48,6 +49,7 @@ export class PluginsService {
   }
 
   async update(pluginId: string, input: UpdatePluginRequest): Promise<PluginView> {
+    if (pluginId === FEISHU_PLUGIN_ID) throw new NotFoundException('Plugin not found.');
     if (pluginId === FEISHU_PLUGIN_ID) {
       const config = input?.feishu;
       if (!config?.appId?.trim() || !config.allowedUserId?.trim()) throw new BadRequestException('Feishu App ID and allowed user open id are required.');

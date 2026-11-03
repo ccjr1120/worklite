@@ -134,7 +134,7 @@
       "typeVersion": "1",
       "config": {
         "label": "配图批量生成",
-        "description": "按图片清单逐张生成示意图，并按清单顺序聚合成 images[]。",
+        "description": "并发生成示意图，并按图片清单顺序聚合成 images[]。",
         "itemsPath": "images",
         "maxItems": 3,
         "entryPort": "context",

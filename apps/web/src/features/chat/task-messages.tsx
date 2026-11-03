@@ -1,9 +1,10 @@
 import { useTranslation } from 'react-i18next';
-import { useContext, useEffect, useState, type FormEvent } from 'react';
-import { LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square, Users } from 'lucide-react';
+import { useContext, useState, type FormEvent } from 'react';
+import { LoaderCircle, RefreshCw, Square, Users } from 'lucide-react';
 import type { AgentTeamPendingInputView, AgentTeamRunView, ChatSubmissionView } from '@worklite/contracts';
-import { agentTeamGroupQueryKey, agentTeamRunQueryKey, coderRunStatusCountsQueryKey, useAgentTeamRunQuery, useAgentTeamRunUsageQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
+import { agentTeamGroupQueryKey, agentTeamRunQueryKey, coderRunStatusCountsQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
+import { ExecutionChecklist } from './execution-checklist';
 import { PinTrackingContext } from './pinned-executions';
 import { MessageResponse } from '@/components/ai-elements/message';
 import { api } from '@/api/client';
@@ -17,8 +18,7 @@ import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
 import { cn } from '@/lib/utils';
 import { CoderRunDialog } from '@/features/coders/coder-run-detail';
-import { isSettledTeamRun, teamCurrentLabel } from '@/features/coders/coder-run-summary';
-import { TokenFigure } from '@/features/coders/run-nodes';
+import { isSettledTeamRun } from '@/features/coders/coder-run-summary';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -104,14 +104,9 @@ function TeamRunActions({ run, groupId, onRunUpdate }: { run: AgentTeamRunView; 
 
   return <div className="flex flex-wrap items-center justify-end gap-2">
       {active ? <>
-        {run.desiredControlState !== 'pause_requested' ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('pause', () => api.pauseAgentTeamRun(run.id))}><Pause className="size-3.5" aria-hidden="true" />{t('controls.pause')}</Button> : null}
-        <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('cancel', () => api.cancelAgentTeamRun(run.id))}><Square className="size-3.5" aria-hidden="true" />{t('controls.cancel')}</Button>
-      </> : run.status === 'paused' ? <>
-        <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('resume', () => api.resumeAgentTeamRun(run.id))}><Play className="size-3.5" aria-hidden="true" />{t('controls.resume')}</Button>
         <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform('cancel', () => api.cancelAgentTeamRun(run.id))}><Square className="size-3.5" aria-hidden="true" />{t('controls.cancel')}</Button>
       </> : null}
       {groupId && ['succeeded', 'failed', 'cancelled'].includes(run.status) && !reexecutedRunId ? <Button type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void reexecute()}><RefreshCw className="size-3.5" aria-hidden="true" />{t('controls.reexecute')}</Button> : null}
-    {run.tasks.filter((task) => task.status === 'failed' && task.retryable).map((task) => <Button key={task.taskKey} type="button" variant="secondary" size="compact" disabled={Boolean(busy)} onClick={() => void perform(`retry:${task.taskKey}`, () => api.retryAgentTeamTask(run.id, task.taskKey))}><RotateCcw className="size-3.5" aria-hidden="true" />{t('tasks.retryTask', { taskKey: task.taskKey })}</Button>)}
     {reexecutedRunId ? <CoderRunDialog runId={reexecutedRunId}><button type="button" className="text-[13px] text-brand-text underline underline-offset-4">{t('run.detail.title')}</button></CoderRunDialog> : null}
     {error ? <p className="basis-full text-right text-[13px] text-danger" role="alert">{error}</p> : null}
   </div>;
@@ -139,47 +134,13 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
   </form>;
 }
 
-/**
- * Format duration in ms to compact form: 45s / 3m12s / 1h05m / 2d03h
- */
-function formatCompactDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  if (totalMinutes < 60) {
-    const mins = totalMinutes;
-    const secs = totalSeconds % 60;
-    return `${mins}m${String(secs).padStart(2, '0')}s`;
-  }
-  const totalHours = Math.floor(totalMinutes / 60);
-  if (totalHours < 24) {
-    const hours = totalHours;
-    const mins = totalMinutes % 60;
-    return `${hours}h${String(mins).padStart(2, '0')}m`;
-  }
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  return `${days}d${String(hours).padStart(2, '0')}h`;
-}
-
-// Mirrors the project task card: displays four key metrics (current progress, current role,
-// current role's token/elapsed, Run total token/elapsed) plus task-level evidence.
-// Pending questions and recovery decisions stay visible because the Run is blocked on them.
 function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
   const { t: tTeams } = useTranslation('coders');
   const pins = useContext(PinTrackingContext);
   const query = useAgentTeamRunQuery('personal', runId);
   const run = query.data;
-  const usage = useAgentTeamRunUsageQuery(runId, !submission.error && (run ? !isSettledTeamRun(run) : !submission.settled));
-  const [clockNow, setClockNow] = useState(() => Date.now());
   const live = !submission.error && (run ? !isSettledTeamRun(run) : !submission.settled);
-  useEffect(() => {
-    if (!live) return;
-    setClockNow(Date.now());
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [live, runId]);
   function onRunUpdate(updated: AgentTeamRunView) {
     queryClient.setQueryData(agentTeamRunQueryKey(updated.id), updated);
     void queryClient.invalidateQueries({ queryKey: coderRunStatusCountsQueryKey() });
@@ -189,28 +150,12 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   const recoveries = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'operation_recovery') ?? [];
   const current = run && live ? run.current : null;
 
-  // Find current node in usage data
-  const currentNode = current && current.activeCount === 1 && usage.data?.nodes
-    ? usage.data.nodes.find(n => n.nodeRunId === current.taskAttemptId)
-    : null;
-
-  // Current role elapsed: prefer local clock calculation for smooth updates
-  const roleElapsedMs = current && current.activeCount === 1
-    ? clockNow - Date.parse(current.startedAt as string)
-    : currentNode?.durationMs ?? null;
-  const roleElapsedStr = roleElapsedMs !== null && roleElapsedMs >= 0 ? formatCompactDuration(roleElapsedMs) : null;
-
-  // Run total elapsed
-  const runEndMs = run && !live ? Date.parse(run.finishedAt ?? run.updatedAt) : clockNow;
-  const totalElapsedMs = run ? runEndMs - Date.parse(run.createdAt as string) : null;
-  const totalElapsedStr = totalElapsedMs !== null && totalElapsedMs >= 0 ? formatCompactDuration(totalElapsedMs) : null;
-
-  // Phase + step progress line
+  const activeTasks = run?.tasks.filter((task) => task.status === 'running' || task.status === 'stop_requested' || task.status === 'waiting_for_input') ?? [];
   const phase = run && live && run.progress.phase
     ? tTeams(`progress.phaseValue.${run.progress.phase}` as never, { defaultValue: run.progress.phase })
     : null;
-  const step = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? currentNode?.latestActivity ?? null;
-  const progressLine = [phase, step].filter(Boolean).join(' · ');
+  const checklistTasks = run?.tasks.filter((task) => task.checklist?.length) ?? [];
+  const progressLine = checklistTasks.length ? null : current?.progressText.trim() || current?.assignmentTitle || phase;
 
   const statusKey = submission.error ? 'failed' : run ? toStatusKey(run.status) : 'queued';
 
@@ -231,68 +176,25 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
         <TruncatedText text={toSingleLine(submission.message)} title={submission.message} className="block text-[13px] font-semibold" />
         <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <StatusBadge key={statusKey} status={statusKey} label={t(`status.${submission.error ? 'failed' : run?.status ?? 'queued'}`)} />
-          {progressLine ? <TruncatedText text={progressLine} title={progressLine} /> : null}
+          {progressLine ? <span className="min-w-0 whitespace-pre-line break-words">{progressLine}</span> : null}
         </span>
       </span>
     </button>
     </CoderRunDialog>
 
-    {/* Metrics: current role + run total (only when live or between loading and completion) */}
-    {live || (run && !isSettledTeamRun(run)) ? <div className="border-t border-border px-3 py-2">
-      {/* Current role row: only show metrics when single active role */}
-      {current && current.activeCount === 1 ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs">
-        <span className="text-muted-foreground">{t('teamRun.currentRole')}</span>
-        <div className="flex items-center gap-2 text-right tabular-nums text-muted-foreground">
-          <span>{teamCurrentLabel(t, tTeams, current)}</span>
-          <span>{roleElapsedStr ?? '—'}</span>
-          <span>·</span>
-          {currentNode?.tokens ? (
-            <>
-              <TokenFigure value={currentNode.tokens} retentionHours={usage.data?.retentionHours} />
-              <span>{t('teamRun.tokensUnit')}</span>
-            </>
-          ) : (
-            <>
-              <span>—</span>
-              <span>{t('teamRun.tokensUnit')}</span>
-            </>
-          )}
-        </div>
-      </div> : current ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs text-muted-foreground">
-        <span>{teamCurrentLabel(t, tTeams, current)}</span>
-      </div> : live ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs text-muted-foreground">
-        <span>{t('teamRun.betweenRoles')}</span>
-      </div> : null}
+    {checklistTasks.length ? <div className="space-y-2 px-3 pb-2">
+      {checklistTasks.map((task) => <ExecutionChecklist key={task.id} steps={task.checklist ?? []} />)}
     </div> : null}
-
-    {/* Run total (always shown, including after settled) */}
-    {run ? <div className="border-t border-border px-3 py-2">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs">
-        <span className="text-muted-foreground">{t('teamRun.runTotal')}</span>
-        <div className="flex items-center gap-2 text-right tabular-nums text-muted-foreground">
-          <span>{totalElapsedStr ?? '—'}</span>
-          <span>·</span>
-          {usage.data?.totalTokens ? (
-            <>
-              <TokenFigure value={usage.data.totalTokens} retentionHours={usage.data.retentionHours} />
-              <span>{t('teamRun.tokensUnit')}</span>
-            </>
-          ) : (
-            <>
-              <span>—</span>
-              <span>{t('teamRun.tokensUnit')}</span>
-            </>
-          )}
-        </div>
-      </div>
-    </div> : null}
+    {!checklistTasks.length && activeTasks.length > 1 ? <ul className="space-y-1 px-3 pb-2 text-xs text-muted-foreground">
+      {activeTasks.map((task) => <li key={task.id} className="break-words whitespace-pre-line">{[task.roleName || task.assignmentTitle, task.progressText.trim() || (task.roleName ? task.assignmentTitle : null)].filter(Boolean).join('：')}</li>)}
+    </ul> : null}
 
     {/* Actions */}
-    <div className="flex min-h-9 items-center justify-end gap-2 border-t border-border px-3 py-1.5">
+    <div className="flex min-h-9 items-center justify-end gap-2 px-3 pb-2">
       {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : !run && query.isPending ? <span role="status" className="text-[13px] text-muted-foreground">{t('records.taskLoading')}</span> : null}
     </div>
 
-    {submission.error || query.isError || failure || questions.length || recoveries.length ? <div className="space-y-2 border-t border-border px-3 py-2.5">
+    {submission.error || query.isError || failure || questions.length || recoveries.length ? <div className="space-y-2 px-3 pb-3">
       {submission.error ? <TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /> : null}
       {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}
       {failure ? <TruncatedText as="p" text={toSingleLine(failure)} title={failure} className="text-[13px] text-danger" role="alert" /> : null}

@@ -133,7 +133,7 @@ function HomePage() {
         <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
           {firstUseStateReady && !chatConfigured ? <FirstUseGuide providerConfigured={providerConfigured} /> : null}
 
-          <div className="mt-8">
+          <div className={firstUseStateReady && !chatConfigured ? "mt-8" : ""}>
             <PageHeading
               title={t('home:boards.title')}
               actions={(

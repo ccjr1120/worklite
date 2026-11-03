@@ -463,6 +463,83 @@
       "when": 1794000000000,
       "tag": "0066_rename_executor_role_to_implementer",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794100000000,
+      "tag": "0067_remove_feishu_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0068_workflow_node_rerun",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0069_coding_team_router",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794400000000,
+      "tag": "0070_coding_team_continuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0071_drop_legacy_coder_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0072_retire_legacy_coder_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794700000000,
+      "tag": "0073_remove_coder_run_pause",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0074_remove_legacy_coder_lanes",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0075_router_group_message_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0076_remove_coder_execution_modes",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1795100000000,
+      "tag": "0077_remove_legacy_coder_history",
+      "breakpoints": true
     }
   ]
 }

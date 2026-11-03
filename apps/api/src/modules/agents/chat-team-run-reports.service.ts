@@ -99,10 +99,7 @@ export class ChatTeamRunReportsService implements OnModuleInit {
       ? `[后台 Coder 任务提醒] Coder 任务 ${view.id}（目录 ${view.projectDirectory}）已完成。${groupContext}结果摘要：${view.outcome?.summary ?? '无'}。请用简短回复向用户汇报该结果；不要向用户复述本提醒本身。`
       : (() => {
         const failedTask = [...view.tasks].reverse().find((task) => task.status === 'failed');
-        const retryHint = failedTask?.retryable
-          ? '该失败任务标记为可重试；不要自行调用 control_coder_run 重试，先向用户汇报失败原因，由用户决定是否重试。'
-          : '该失败任务不可重试；向用户汇报失败原因，由用户决定是否通过 dispatch_task 重新派发。';
-        return `[后台 Coder 任务提醒] Coder 任务 ${view.id}（目录 ${view.projectDirectory}）失败。${groupContext}失败任务 ${failedTask?.taskKey ?? '未知'}：${failedTask?.error ?? '未知错误'}。${retryHint}请用简短回复向用户汇报失败原因与建议的下一步；不要向用户复述本提醒本身；不要在未经用户确认前执行重试或重新派发。`;
+        return `[后台 Coder 任务提醒] Coder 任务 ${view.id}（目录 ${view.projectDirectory}）失败。${groupContext}失败任务 ${failedTask?.taskKey ?? '未知'}：${failedTask?.error ?? '未知错误'}。请用简短回复向用户汇报失败原因；用户要求继续时，通过 Router 为失败角色创建关联的新尝试；不要恢复旧执行器会话，也不要自行重新派发。`;
       })();
     const result = await this.executions.reportTeamRunSettled(workspaceId, executionId, submissionId, note);
     // A conversation blocked for hours keeps its unreported marker for the startup sweep instead of polling forever.

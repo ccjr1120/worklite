@@ -2,16 +2,13 @@ import type { AgentTeamRunCurrentView, AgentTeamTaskAttemptView } from '@worklit
 import type { StoredAgentTeamVersionSnapshot } from '@worklite/db';
 import { normalizePublicModelList } from '@worklite/model-gateway';
 
-const RESERVED_DEVELOPER_ID = 'developer';
 const IN_FLIGHT_STATUSES: ReadonlySet<AgentTeamTaskAttemptView['status']> = new Set(['running', 'waiting_for_input', 'waiting_for_recovery']);
 
-type AttemptIdentity = { role: string; developerId: string | null };
+type AttemptIdentity = { role: string };
 
-// Display name of the Coder that ran a Run: the name captured by value at dispatch
-// (in the bound Coder version), falling back to the Coder's current name only when
-// that version predates name capture and was not backfilled.
-export function capturedCoderName(snapshot: Pick<StoredAgentTeamVersionSnapshot, 'coderName'>, currentName: string): string {
-  return snapshot.coderName?.trim() || currentName;
+// Display name captured by value when the current Router Run was dispatched.
+export function capturedCoderName(snapshot: Pick<StoredAgentTeamVersionSnapshot, 'coderName'>): string {
+  return snapshot.coderName.trim();
 }
 
 export function taskRoleName(snapshot: StoredAgentTeamVersionSnapshot, role: string): string | null {
@@ -23,19 +20,11 @@ export function taskRoleName(snapshot: StoredAgentTeamVersionSnapshot, role: str
 // keep the captured launch model; WorkLite Agent roles fall back to the Coder default.
 export function effectiveTaskModel(snapshot: StoredAgentTeamVersionSnapshot, task: AttemptIdentity, teamDefaultModel = ''): string | null {
   const role = snapshot.roles.find((item) => item.role === task.role);
-  const developerId = task.developerId ?? RESERVED_DEVELOPER_ID;
-  const instance = role?.developerInstances?.find((candidate) => candidate.developerId === developerId);
   // The view reports the primary (first) candidate when a fallback list is declared.
-  const configured = normalizePublicModelList((instance ?? role)?.publicModelId ?? '')[0];
+  const configured = normalizePublicModelList(role?.publicModelId ?? '')[0];
   if (configured) return configured;
-  const orchestrationVersion = snapshot.orchestrationVersion ?? 1;
-  const executorBacked = task.role === 'developer' || (orchestrationVersion >= 7 && Boolean(role?.executor));
-  if (!executorBacked) return teamDefaultModel.trim() || null;
-  const launch = (orchestrationVersion >= 7 ? snapshot.projectExecutorLaunches?.[task.role] : undefined)
-    ?? snapshot.developerExecutions?.[developerId]
-    ?? snapshot.developerExecutions?.[RESERVED_DEVELOPER_ID]
-    ?? snapshot.developerExecution;
-  return launch && 'executor' in launch ? launch.model?.trim() || null : null;
+  if (!role?.executor) return teamDefaultModel.trim() || null;
+  return snapshot.projectExecutorLaunches[task.role]?.model?.trim() || null;
 }
 
 export function deriveRunCurrent(tasks: readonly AgentTeamTaskAttemptView[]): AgentTeamRunCurrentView | null {

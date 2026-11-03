@@ -36,19 +36,16 @@ describe('UpgradesService.complete', () => {
     return new UpgradesService({} as never, modules as never);
   }
 
-  it('reconnects Feishu and WeChat after a succeeded upgrade', async () => {
-    const feishu = { connect: vi.fn(async () => undefined) };
+  it('reconnects WeChat after a succeeded upgrade', async () => {
     const wechat = { connect: vi.fn(async () => undefined) };
-    const service = setup('succeeded', { FEISHU_UPGRADE_TRANSPORT: feishu, WECHAT_UPGRADE_TRANSPORT: wechat });
+    const service = setup('succeeded', { WECHAT_UPGRADE_TRANSPORT: wechat });
     await expect(service.complete(JOB_ID)).resolves.toEqual({ connected: true });
-    expect(feishu.connect).toHaveBeenCalledOnce();
     expect(wechat.connect).toHaveBeenCalledOnce();
   });
 
   it('isolates a WeChat reconnect failure from upgrade completion', async () => {
-    const feishu = { connect: vi.fn(async () => undefined) };
     const wechat = { connect: vi.fn(async () => { throw new Error('ilink unreachable'); }) };
-    const service = setup('succeeded', { FEISHU_UPGRADE_TRANSPORT: feishu, WECHAT_UPGRADE_TRANSPORT: wechat });
+    const service = setup('succeeded', { WECHAT_UPGRADE_TRANSPORT: wechat });
     await expect(service.complete(JOB_ID)).resolves.toEqual({ connected: true });
     expect(wechat.connect).toHaveBeenCalledOnce();
   });

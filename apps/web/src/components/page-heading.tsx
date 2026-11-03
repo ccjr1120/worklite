@@ -12,10 +12,10 @@ type PageHeadingProps = {
 
 function PageHeading({ title, description, actions, meta, className }: PageHeadingProps) {
   return (
-    <div className={cn('wl-enter flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between', className)}>
+    <div className={cn('flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between', className)}>
       <div className="min-w-0 space-y-1.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <h1 className="truncate text-2xl font-semibold tracking-[-0.02em]">{title}</h1>
+          <h1 className="truncate text-xl font-semibold tracking-[-0.02em]">{title}</h1>
           {meta}
         </div>
         {description ? <p className="max-w-2xl text-[13px] leading-5 text-muted-foreground">{description}</p> : null}
@@ -30,7 +30,7 @@ function PageContainer({ width = 'collection', className, children }: { width?: 
   return (
     <div
       className={cn(
-        'mx-auto flex w-full flex-col gap-7 px-4 py-6 md:px-6 md:py-8',
+        'mx-auto flex w-full flex-col gap-6 px-4 py-6 md:px-6 md:py-7',
         width === 'collection' && 'max-w-[1440px]',
         width === 'detail' && 'max-w-[1200px]',
         width === 'form' && 'max-w-[840px]',

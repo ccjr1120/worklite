@@ -13,7 +13,6 @@ type StartOptions = { cwd?: string; reserveCommand?: CommandReservation; outputL
 const READ_ONLY_TOOL_NAMES = ['read', 'glob', 'grep', 'process_reference'];
 const ROLE_ALLOWED_TOOL_NAMES: Partial<Record<string, readonly string[]>> = {
   planner: [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
-  'worktree-manager': [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
   test_designer: [...READ_ONLY_TOOL_NAMES, 'read_coder_document'],
   developer: ['bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document'],
   test_author: ['read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document'],

@@ -1191,7 +1191,6 @@
     ]
   },
   "deferredEntryPoints": {
-    "test_runner": "The WorkLite Commands execution path supplies this role; no upstream process entry point is imported.",
-    "worktree-manager": "The WorkLite runtime executes this role's worktree lifecycle from its validated structured output; no upstream process entry point is imported."
+    "test_runner": "The WorkLite Commands execution path supplies this role; no upstream process entry point is imported."
   }
 }

@@ -53,7 +53,7 @@ export const feishuRegistrations = sqliteTable('feishu_registrations', {
 
 export type StoredChatTarget =
   | { kind: 'conversation' }
-  | { kind: 'coder'; coderId: string; projectDirectory: string; role?: string; /** @deprecated Ignored on new dispatch. */ mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  | { kind: 'coder'; coderId: string; projectDirectory: string; role?: string }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
   | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
@@ -209,6 +209,15 @@ export type StoredWorkflowDefinition = {
   edges: StoredWorkflowEdge[];
 };
 
+export type StoredWorkflowNodeRerunEvidence = {
+  sourceNodeRunId: string;
+  requestedBy: string;
+  requestedAt: string;
+  modelOverride: string | null;
+  supersededNodeRunIds: string[];
+  sideEffectsConfirmed: boolean;
+};
+
 export type StoredWorkflowEditOperation =
   | { type: 'addNode'; node: StoredWorkflowNode; index: number }
   | { type: 'removeNode'; nodeId: string }
@@ -276,7 +285,7 @@ export const workflowRuns = sqliteTable('workflow_runs', {
 }, (table) => [index('workflow_runs_workspace_created_idx').on(table.workspaceId, table.createdAt), index('workflow_runs_workflow_created_idx').on(table.workflowId, table.createdAt)]);
 
 export const workflowNodeRuns = sqliteTable('workflow_node_runs', {
-  id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'),
+  id: text('id').primaryKey(), runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), nodeId: text('node_id').notNull(), position: integer('position').notNull(), type: text('type').notNull(), typeVersion: text('type_version').notNull(), status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'superseded'>().notNull().default('queued'), input: text('input', { mode: 'json' }).$type<unknown>(), output: text('output', { mode: 'json' }).$type<unknown>(), artifactIds: text('artifact_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), error: text('error'), retryCount: integer('retry_count').notNull().default(0), startedAt: integer('started_at', { mode: 'timestamp_ms' }), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }), createdAt: timestamp('created_at'), rerunEvidence: text('rerun_evidence', { mode: 'json' }).$type<StoredWorkflowNodeRerunEvidence>(), supersededByNodeRunId: text('superseded_by_node_run_id'),
 }, (table) => [index('workflow_node_runs_run_position_idx').on(table.runId, table.position)]);
 
 export const workflowPendingActions = sqliteTable('workflow_pending_actions', {
@@ -350,7 +359,7 @@ export const wechatDraftRevisions = sqliteTable('wechat_draft_revisions', {
 }, (table) => [index('wechat_draft_revisions_publication_status_idx').on(table.publicationId, table.status)]);
 
 export const workflowRunEvents = sqliteTable('workflow_run_events', {
-  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
+  runId: text('run_id').notNull().references(() => workflowRuns.id, { onDelete: 'cascade' }), sequence: integer('sequence').notNull(), type: text('type').$type<'run.status' | 'node.rerun' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created'>().notNull(), payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(), createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
 
 export const commandExecutions = sqliteTable('command_executions', {
@@ -646,11 +655,7 @@ export type StoredAgentTeamRole =
   | 'test_author'
   | 'test_runner'
   | 'reviewer'
-  | 'worktree-manager'
-  | 'executor-manager'
   | (string & {});
-
-export type StoredAgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
 export type StoredAgentTeamOperationRecoveryDecision =
   | { type: 'adopt_command' }
@@ -677,26 +682,11 @@ export type StoredAgentTeamProjectInstructionFile = {
   content: string;
 };
 
-export type StoredAgentTeamDeveloperInstanceConfiguration = {
-  developerId: string;
-  label: string;
-  // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
-  // historical "use the role/executor default" meaning.
-  publicModelId: string | string[];
-  instructions: string;
-  entryPoints: string[];
-  processReferences?: string[];
-  skills: StoredAgentTeamSkillSnapshot[];
-  mcpServers: StoredAgentTeamMcpServerSnapshot[];
-  toolNames: string[];
-  executor?: StoredProjectExecutor;
-};
-
 export type StoredAgentTeamRoleConfiguration = {
   role: StoredAgentTeamRole;
   displayName?: string;
-  // One declared model id, or an ordered list of fallback candidates; an empty string keeps the
-  // historical "use the role/executor default" meaning.
+  // One declared model id, or an ordered list of fallback candidates; an empty string uses the
+  // role or executor default.
   publicModelId: string | string[];
   instructions: string;
   entryPoints: string[];
@@ -705,25 +695,18 @@ export type StoredAgentTeamRoleConfiguration = {
   mcpServers: StoredAgentTeamMcpServerSnapshot[];
   toolNames: string[];
   executor?: StoredProjectExecutor;
-  developerInstances?: StoredAgentTeamDeveloperInstanceConfiguration[];
-  developerConcurrency?: number;
 };
 
 export type StoredAgentTeamRecipeDefaults = {
   maxRepairRounds: number;
-  maxDeveloperConcurrency?: number;
 };
 
 export type StoredAgentTeamVersionSnapshot = {
   processId: string;
   processVersion: string;
-  developerExecution: StoredProjectExecutorLaunch | { kind: 'codex_app_server' };
-  developerExecutions?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  projectExecutorLaunches?: Record<string, StoredProjectExecutorLaunch | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
-  // Coder display name captured by value at dispatch; versions written before
-  // Coder renaming were backfilled by migration 0060.
-  coderName?: string;
+  projectExecutorLaunches: Record<string, StoredProjectExecutorLaunch>;
+  orchestrationVersion: 12;
+  coderName: string;
   workingPractice?: string;
   projectGitPolicy?: string;
   roles: StoredAgentTeamRoleConfiguration[];
@@ -769,7 +752,6 @@ export const coderGroups = sqliteTable('coder_groups', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   coderId: text('coder_id').notNull().references(() => coders.id, { onDelete: 'cascade' }),
   title: text('title').notNull().default(''),
-  mode: text('mode').$type<StoredAgentTeamMode>().notNull().default('implement_and_validate'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [index('coder_groups_workspace_updated_idx').on(table.workspaceId, table.updatedAt)]);
@@ -784,7 +766,16 @@ export const coderGroupRepositories = sqliteTable('coder_group_repositories', {
   createdAt: timestamp('created_at'),
 }, (table) => [unique().on(table.groupId, table.directory), index('coder_group_repositories_group_idx').on(table.groupId)]);
 
-export type StoredAgentTeamGroupMessageKind = 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
+export type StoredAgentTeamGroupMessageKind = 'text' | 'question' | 'assignment' | 'result' | 'control' | 'status' | 'file';
+export type StoredAgentTeamGroupContinuation = {
+  sourceRunId: string;
+  sourceTaskAttemptId: string;
+  taskKey: string;
+  role: StoredAgentTeamRole;
+  goal: string;
+  savedProgress: string;
+  fileReferences: Array<{ documentId: string; revision: number; title: string }>;
+};
 
 export const coderGroupMessages = sqliteTable('coder_group_messages', {
   id: text('id').primaryKey(),
@@ -806,7 +797,7 @@ export const coderGroupMessages = sqliteTable('coder_group_messages', {
 }, (table) => [
   unique().on(table.groupId, table.sequence),
   unique().on(table.groupId, table.submissionId),
-  uniqueIndex('coder_group_messages_attempt_completion_idx').on(table.taskAttemptId).where(sql`${table.kind} IN ('text', 'handoff')`),
+  uniqueIndex('coder_group_messages_attempt_completion_idx').on(table.taskAttemptId).where(sql`${table.kind} IN ('text', 'result')`),
   index('coder_group_messages_run_idx').on(table.runId),
 ]);
 
@@ -825,8 +816,6 @@ export const coderMemories = sqliteTable('coder_memories', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   coderId: text('coder_id').notNull().references(() => coders.id, { onDelete: 'cascade' }),
   repositoryId: text('coder_repository_id').references(() => coderRepositories.id, { onDelete: 'cascade' }),
-  // Legacy role-scoped memories are retained but never injected into prompts.
-  role: text('role').$type<StoredAgentTeamRole>(),
   content: text('content').notNull(),
   sourceMessageId: text('source_message_id').references(() => coderGroupMessages.id, { onDelete: 'set null' }),
   // v11 role-scoped provenance. Chat-created memories keep these null.
@@ -839,66 +828,11 @@ export const coderMemories = sqliteTable('coder_memories', {
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
 }, (table) => [
-  index('coder_memories_scope_idx').on(table.coderId, table.repositoryId, table.role, table.updatedAt),
+  index('coder_memories_scope_idx').on(table.coderId, table.repositoryId, table.updatedAt),
   unique('coder_memories_upsert_idx').on(table.coderId, table.repositoryId, table.upsertKey),
   index('coder_memories_source_run_idx').on(table.sourceRunId),
 ]);
 
-
-export type StoredAgentTeamIntakeStatus = 'queued' | 'collecting' | 'starting' | 'started' | 'failed';
-
-export const coderConversations = sqliteTable('coder_conversations', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  coderId: text('coder_id').notNull().references(() => coders.id, { onDelete: 'cascade' }),
-  latestProjectDirectory: text('latest_project_directory'),
-  createdAt: timestamp('created_at'),
-  updatedAt: timestamp('updated_at'),
-}, (table) => [unique().on(table.workspaceId, table.coderId)]);
-
-export const coderIntakes = sqliteTable('coder_intakes', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  conversationId: text('conversation_id').notNull().references(() => coderConversations.id, { onDelete: 'cascade' }),
-  submissionId: text('submission_id').notNull(),
-  goal: text('goal'),
-  projectDirectory: text('project_directory'),
-  mode: text('mode').$type<StoredAgentTeamMode>(),
-  unresolvedField: text('unresolved_field').$type<'goal' | 'projectDirectory' | 'mode'>(),
-  status: text('status').$type<StoredAgentTeamIntakeStatus>().notNull().default('collecting'),
-  runId: text('run_id').references(() => coderRuns.id, { onDelete: 'set null' }),
-  createdAt: timestamp('created_at'),
-  updatedAt: timestamp('updated_at'),
-}, (table) => [
-  unique().on(table.conversationId, table.submissionId),
-  index('coder_intakes_conversation_status_idx').on(table.conversationId, table.status),
-]);
-
-export const coderConversationMessages = sqliteTable('coder_conversation_messages', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  conversationId: text('conversation_id').notNull().references(() => coderConversations.id, { onDelete: 'cascade' }),
-  sequence: integer('sequence').notNull(),
-  intakeId: text('intake_id').references(() => coderIntakes.id, { onDelete: 'set null' }),
-  runId: text('run_id').references(() => coderRuns.id, { onDelete: 'set null' }),
-  speaker: text('speaker').$type<'user' | 'coordinator' | 'member' | 'system'>().notNull(),
-  kind: text('kind').$type<'task_request' | 'coordinator_question' | 'answer' | 'run_answer' | 'note' | 'member_question' | 'status' | 'file_delivery' | 'delivery_failed' | 'run_state'>().notNull(),
-  payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
-  deduplicationKey: text('deduplication_key'),
-  createdAt: timestamp('created_at'),
-}, (table) => [
-  primaryKey({ columns: [table.conversationId, table.sequence] }),
-  unique().on(table.conversationId, table.deduplicationKey),
-  index('coder_conversation_messages_run_idx').on(table.runId),
-]);
-
-export const coderConversationEvents = sqliteTable('coder_conversation_events', {
-  conversationId: text('conversation_id').notNull().references(() => coderConversations.id, { onDelete: 'cascade' }),
-  sequence: integer('sequence').notNull(),
-  type: text('type').$type<'message' | 'intake.updated' | 'run.state'>().notNull(),
-  payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
-  createdAt: timestamp('created_at'),
-}, (table) => [primaryKey({ columns: [table.conversationId, table.sequence] })]);
 
 export const coderVersions = sqliteTable('coder_versions', {
   id: text('id').primaryKey(),
@@ -923,29 +857,21 @@ export const coderRuns = sqliteTable('coder_runs', {
     initialMessageId: string;
     initialMessage: string;
     targetRole: StoredAgentTeamRole;
-    mode: StoredAgentTeamMode;
+    requestedRole?: StoredAgentTeamRole;
+    continuation?: StoredAgentTeamGroupContinuation;
     repositories: Array<{ id: string; memoryRepositoryId: string; name: string; directory: string; projectInstructions: StoredAgentTeamProjectInstructionFile[] }>;
     knownRepositories?: Array<{ name: string; directory: string }>;
-    memories: Array<{ id: string; repositoryId: string | null; role: StoredAgentTeamRole | null; content: string }>;
+    memories: Array<{ id: string; repositoryId: string | null; content: string }>;
   }>(),
-  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'paused' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'),
+  status: text('status').$type<'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled'>().notNull().default('queued'),
   intent: text('intent').notNull(),
   projectDirectory: text('project_directory').notNull(),
   projectInstructions: text('project_instructions', { mode: 'json' }).$type<StoredAgentTeamProjectInstructionFile[]>().notNull().default([]),
-  mode: text('mode').$type<StoredAgentTeamMode>().notNull(),
-  // v1-v9 keep the mode captured at dispatch. v10 stores a conservative
-  // placeholder until its Dispatcher commits the decision and rationale.
-  modeRationale: text('mode_rationale'),
-  modeDecidedAt: integer('mode_decided_at', { mode: 'timestamp_ms' }),
-  // Retired grant model, retained as read-only historical evidence: Coder work roles now
-  // execute commands directly, so new Runs never write this column.
-  authorizedCommands: text('authorized_commands', { mode: 'json' }).$type<string[]>().notNull().default([]),
   scopeRevision: integer('scope_revision').notNull().default(1),
-  desiredControlState: text('desired_control_state').$type<'none' | 'pause_requested' | 'cancel_requested'>().notNull().default('none'),
+  desiredControlState: text('desired_control_state').$type<'none' | 'cancel_requested'>().notNull().default('none'),
   langGraphThreadId: text('lang_graph_thread_id').notNull().unique(),
   outcome: text('outcome', { mode: 'json' }).$type<unknown>(),
-  // Run-level worktree evidence written by the Worktree Manager stage
-  // (orchestration v4); retained on conflict, failure, or interruption.
+  // Run-level worktree evidence retained on conflict, failure, or interruption.
   worktreeBasePath: text('worktree_base_path'),
   runBranch: text('run_branch'),
   createdAt: timestamp('created_at'),
@@ -960,9 +886,9 @@ export const coderTaskAttempts = sqliteTable('coder_task_attempts', {
   taskKey: text('task_key').notNull(),
   attemptIndex: integer('attempt_index').notNull(),
   role: text('role').$type<StoredAgentTeamRole>().notNull(),
-  developerId: text('developer_id'),
+  continuedFromAttemptId: text('continued_from_attempt_id').references((): AnySQLiteColumn => coderTaskAttempts.id, { onDelete: 'set null' }),
   assignmentTitle: text('assignment_title'),
-  status: text('status').$type<'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'),
+  status: text('status').$type<'running' | 'stop_requested' | 'waiting_for_input' | 'waiting_for_recovery' | 'completed' | 'failed' | 'stopped' | 'cancelled'>().notNull().default('running'),
   inputRevision: text('input_revision', { mode: 'json' }).$type<unknown>().notNull(),
   inputFingerprint: text('input_fingerprint').notNull(),
   result: text('result', { mode: 'json' }).$type<unknown>(),
@@ -997,7 +923,7 @@ export const coderDocuments = sqliteTable('coder_documents', {
 export const coderRunEvents = sqliteTable('coder_run_events', {
   runId: text('run_id').notNull().references(() => coderRuns.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
-  type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome' | 'run.progress'>().notNull(),
+  type: text('type').$type<'run.status' | 'task.started' | 'task.activity' | 'task.delta' | 'task.waiting' | 'task.completed' | 'task.failed' | 'task.stop_requested' | 'task.stopped' | 'document.committed' | 'document.delivered' | 'document.delivery_failed' | 'operation.updated' | 'input.requested' | 'input.answered' | 'run.outcome' | 'run.progress'>().notNull(),
   payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.runId, table.sequence] })]);
@@ -1045,7 +971,7 @@ export const modelProviders = sqliteTable('model_providers', {
 });
 
 export const artifacts = sqliteTable('artifacts', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').references(() => workflows.id, { onDelete: 'set null' }), runId: text('run_id').references(() => workflowRuns.id, { onDelete: 'set null' }), name: text('name').notNull(), format: text('format').$type<'json' | 'text' | 'markdown' | 'image' | 'unsupported'>().notNull(), size: text('size').notNull().default('0 B'), content: text('content').notNull().default(''), objectKey: text('object_key'), mimeType: text('mime_type'), width: integer('width'), height: integer('height'), sizeBytes: integer('size_bytes'), imageKey: text('image_key'), imagePosition: integer('image_position'), placement: text('placement').$type<'inline' | 'asset'>(), createdAt: timestamp('created_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), workflowId: text('workflow_id').references(() => workflows.id, { onDelete: 'set null' }), runId: text('run_id').references(() => workflowRuns.id, { onDelete: 'set null' }), name: text('name').notNull(), format: text('format').$type<'json' | 'text' | 'markdown' | 'image' | 'unsupported'>().notNull(), size: text('size').notNull().default('0 B'), content: text('content').notNull().default(''), objectKey: text('object_key'), mimeType: text('mime_type'), width: integer('width'), height: integer('height'), sizeBytes: integer('size_bytes'), imageKey: text('image_key'), imagePosition: integer('image_position'), placement: text('placement').$type<'inline' | 'asset'>(), createdAt: timestamp('created_at'), supersededByNodeRunId: text('superseded_by_node_run_id'), supersededAt: integer('superseded_at', { mode: 'timestamp_ms' }),
 }, (table) => [index('artifacts_run_created_idx').on(table.runId, table.createdAt)]);
 
 export const auditLogs = sqliteTable('audit_logs', {
@@ -1102,10 +1028,6 @@ export type AgentTeamGroupMessage = typeof coderGroupMessages.$inferSelect;
 export type AgentTeamGroupEvent = typeof coderGroupEvents.$inferSelect;
 export type AgentTeamMemory = typeof coderMemories.$inferSelect;
 export type AgentTeamVersion = typeof coderVersions.$inferSelect;
-export type AgentTeamConversation = typeof coderConversations.$inferSelect;
-export type AgentTeamIntake = typeof coderIntakes.$inferSelect;
-export type AgentTeamConversationMessage = typeof coderConversationMessages.$inferSelect;
-export type AgentTeamConversationEvent = typeof coderConversationEvents.$inferSelect;
 export type AgentTeamRun = typeof coderRuns.$inferSelect;
 export type AgentTeamTaskAttempt = typeof coderTaskAttempts.$inferSelect;
 export type AgentTeamDocument = typeof coderDocuments.$inferSelect;

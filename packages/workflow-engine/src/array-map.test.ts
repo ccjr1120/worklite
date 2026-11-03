@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { WorkflowDefinition } from '@worklite/contracts';
 import {
   commitWorkflowInvocation,
@@ -93,6 +93,81 @@ describe('worklite/map capability', () => {
       },
     });
     expect(output).toEqual(['first', 'second', 'third']);
+  });
+
+  it('runs image elements concurrently with a limit and retains input order', async () => {
+    const started: number[] = [];
+    const releases: Array<(() => void) | undefined> = [];
+    const output = executeWorkflowMap({
+      itemsValue: ['a', 'b', 'c', 'd'], context: {},
+      config: { subgraph: { nodes: [node('render', 'worklite/canvas-render', {})], edges: [] } },
+      signal: new AbortController().signal,
+      executeNode: async ({ index, item }) => {
+        started.push(index);
+        await new Promise<void>((resolve) => { releases[index] = resolve; });
+        return item;
+      },
+    });
+    expect(started).toEqual([0, 1, 2]);
+    releases[2]!();
+    await vi.waitFor(() => expect(started).toEqual([0, 1, 2, 3]));
+    releases[3]!(); releases[1]!(); releases[0]!();
+    await expect(output).resolves.toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('aborts other image elements and does not start new ones when an element fails', async () => {
+    const started: number[] = [];
+    const aborted: number[] = [];
+    await expect(executeWorkflowMap({
+      itemsValue: [0, 1, 2, 3], context: {},
+      config: { subgraph: { nodes: [node('render', 'worklite/canvas-render', {})], edges: [] } },
+      signal: new AbortController().signal,
+      executeNode: async ({ index, signal }) => {
+        started.push(index);
+        if (index === 1) { await Promise.resolve(); throw new Error('failed'); }
+        return new Promise((_, reject) => signal.addEventListener('abort', () => { aborted.push(index); reject(new Error('aborted')); }, { once: true }));
+      },
+    })).rejects.toThrow('Map element 1 failed: failed');
+    expect(started).toEqual([0, 1, 2]);
+    expect(aborted.sort()).toEqual([0, 2]);
+  });
+
+  it('cancels active image elements when the workflow is cancelled', async () => {
+    const controller = new AbortController();
+    const aborted: number[] = [];
+    const run = executeWorkflowMap({
+      itemsValue: [0, 1, 2, 3], context: {},
+      config: { subgraph: { nodes: [node('render', 'worklite/canvas-render', {})], edges: [] } },
+      signal: controller.signal,
+      executeNode: async ({ index, signal }) => new Promise((_, reject) => signal.addEventListener('abort', () => { aborted.push(index); reject(new Error('aborted')); }, { once: true })),
+    });
+    controller.abort();
+    await expect(run).rejects.toThrow();
+    expect(aborted.sort()).toEqual([0, 1, 2]);
+  });
+
+  it('skips failed image elements while retaining successful input order', async () => {
+    const failures: number[] = [];
+    const result = await executeWorkflowMap({
+      itemsValue: [0, 1, 2], context: {},
+      config: { continueOnError: true, subgraph: { nodes: [node('render', 'worklite/canvas-render', {})], edges: [] } },
+      signal: new AbortController().signal,
+      executeNode: async ({ index }) => { if (index === 1) throw new Error('failed'); return index; },
+      onElementError: (_error, index) => { failures.push(index); },
+    });
+    expect(result).toEqual([0, 2]);
+    expect(failures).toEqual([1]);
+  });
+
+  it('keeps maps with non-image outputs serial', async () => {
+    let active = 0;
+    let maxActive = 0;
+    await executeWorkflowMap({
+      itemsValue: [1, 2, 3], context: {}, config: { subgraph: { nodes: [node('step')], edges: [] } },
+      signal: new AbortController().signal,
+      executeNode: async ({ item }) => { active += 1; maxActive = Math.max(maxActive, active); await Promise.resolve(); active -= 1; return item; },
+    });
+    expect(maxActive).toBe(1);
   });
 
   it('reruns a failed element from its first node when the subgraph opts into retries', async () => {

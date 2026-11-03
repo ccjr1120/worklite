@@ -11,9 +11,9 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          'bg-brand bg-[image:var(--brand-gradient)] text-brand-foreground shadow-xs hover:bg-brand-hover hover:bg-none hover:shadow-sm active:bg-brand-active disabled:hover:bg-[image:var(--brand-gradient)] disabled:hover:shadow-xs',
+          'bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active disabled:hover:bg-brand',
         secondary:
-          'border border-border bg-surface text-foreground shadow-xs hover:border-foreground/15 hover:bg-surface-subtle active:bg-border disabled:hover:border-border disabled:hover:bg-surface',
+          'border border-border bg-surface text-foreground hover:border-foreground/15 hover:bg-surface-subtle active:bg-border disabled:hover:border-border disabled:hover:bg-surface',
         ghost: 'text-foreground hover:bg-surface-subtle active:bg-border disabled:hover:bg-transparent',
         destructive: 'bg-danger text-danger-foreground shadow-xs hover:bg-danger/90 active:bg-danger/80 disabled:hover:bg-danger',
         link: 'h-auto px-0 text-brand-text underline-offset-4 hover:underline disabled:hover:no-underline',

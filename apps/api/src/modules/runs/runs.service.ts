@@ -1,12 +1,14 @@
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { Lexer } from 'marked';
-import { BadRequestException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { ArtifactView, CreateRunRequest, RunListPage, RunProgressEvent, RunView, WorkflowNodeActivityDetail, WorkflowNodeActivityEventPayload, WorkflowNodeActivityView, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
+import type { ArtifactView, CreateRunRequest, RerunWorkflowNodeRequest, RunListPage, RunProgressEvent, RunView, WorkflowNodeActivityDetail, WorkflowNodeActivityEventPayload, WorkflowNodeActivityView, WorkflowNodeRerunEvidence, WorkflowNodeRunView, WorkflowPendingActionView } from '@worklite/contracts';
+import { workflowNodeRequiresSideEffectConfirmation, workflowRerunAffectedNodeIds } from '@worklite/contracts';
 import {
   artifacts,
+  auditLogs,
   workflowNodeRuns,
   workflowPendingActions,
   workflowRunEvents,
@@ -19,7 +21,7 @@ import {
   type StoredWorkflowExecutionState,
   type StoredWorkflowNode,
 } from '@worklite/db';
-import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionContext, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
+import { commitWorkflowInvocation, composeWorkflowArticle, createWorkflowRerunState, createWorkflowSchedulerState, executeWorkflowMap, NodeTypeRegistry, readWorkflowOutputPath, resolveWorkflowNodeCapability, takeNextWorkflowInvocation, workflowRunResult, type NodeExecutionContext, type NodeExecutionRequest, type PendingNodeExecutionResult, type WorkflowSchedulerState } from '@worklite/workflow-engine';
 import { AgentJsonOutputError, type GatewayCorrelation } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
@@ -669,6 +671,157 @@ export class RunsService {
     return this.get(request, workspaceSlug, runId);
   }
 
+  async rerunNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string, input: RerunWorkflowNodeRequest): Promise<RunView> {
+    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const { modelOverride, confirmSideEffects } = parseRerunRequest(input);
+    const [run] = await this.db.select().from(workflowRuns)
+      .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
+    if (!run) throw new NotFoundException('Run not found');
+    assertRerunRunStatus(run.status);
+    const [target] = await this.db.select().from(workflowNodeRuns)
+      .where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, team.id))).limit(1);
+    if (!target) throw new NotFoundException('Node run not found');
+    assertRerunNodeEligibility(target);
+    if (modelOverride && target.type !== 'worklite/agent') {
+      throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_MODEL', message: 'A model override is only supported for Agent nodes.' });
+    }
+    const [version] = await this.db.select().from(workflowVersions)
+      .where(and(eq(workflowVersions.id, run.workflowVersionId), eq(workflowVersions.workspaceId, team.id))).limit(1);
+    if (!version) throw new NotFoundException('Workflow version not found');
+    const definition = version.definition as StoredWorkflowDefinition | null;
+    if (!definition || definition.schemaVersion !== 4 || !Array.isArray(definition.edges)) {
+      throw new ConflictException({ code: 'RUN_NODE_RERUN_STATE_UNAVAILABLE', message: 'The immutable Workflow definition is unavailable for a node rerun.' });
+    }
+    const affectedNodeIds = workflowRerunAffectedNodeIds(definition, target.nodeId);
+    const affected = new Set(affectedNodeIds);
+    if (definition.nodes.some((node) => affected.has(node.id) && workflowNodeRequiresSideEffectConfirmation(node.type)) && !confirmSideEffects) {
+      throw new BadRequestException({
+        code: 'RUN_NODE_RERUN_SIDE_EFFECT_CONFIRMATION_REQUIRED',
+        message: 'This rerun will execute the WeChat Official Account draft/publish node again. Set confirmSideEffects to true to confirm the external side effects.',
+      });
+    }
+    // Resource validation stays outside the SQLite transaction and preserves the
+    // resource service's provider/model/protocol/Gateway error distinctions.
+    if (modelOverride) {
+      try {
+        await this.agentExecutions.assertPublicAgentModel(modelOverride);
+      } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_MODEL', message: error.message });
+        }
+        throw error;
+      }
+    }
+
+    const now = new Date();
+    const newNodeRunId = `nrun_${randomUUID()}`;
+    const rerun = this.db.transaction((transaction) => {
+      const [currentRun] = transaction.select().from(workflowRuns)
+        .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1).all();
+      if (!currentRun) throw new NotFoundException('Run not found');
+      assertRerunRunStatus(currentRun.status);
+      const [currentTarget] = transaction.select().from(workflowNodeRuns)
+        .where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, team.id))).limit(1).all();
+      if (!currentTarget) throw new NotFoundException('Node run not found');
+      assertRerunNodeEligibility(currentTarget);
+      if (!currentRun.executionState) {
+        throw new ConflictException({ code: 'RUN_NODE_RERUN_STATE_UNAVAILABLE', message: 'This Run has no persisted scheduler state, so its node inputs cannot be rerun safely.' });
+      }
+      const targetInput = asRecord(currentTarget.input);
+      if (!targetInput) {
+        throw new ConflictException({ code: 'RUN_NODE_RERUN_STATE_UNAVAILABLE', message: 'The source node run has no reusable input.' });
+      }
+      const history = transaction.select().from(workflowNodeRuns)
+        .where(and(eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, team.id)))
+        .orderBy(asc(workflowNodeRuns.position)).all();
+      const rebuilt = createWorkflowRerunState(
+        definition,
+        currentRun.executionState as WorkflowSchedulerState,
+        currentTarget.nodeId,
+        targetInput,
+        history.map((row) => ({ nodeId: row.nodeId, input: row.input as Record<string, unknown>, position: row.position, status: row.status })),
+      );
+      const state = rebuilt.state;
+      const position = state.nextPosition + 1;
+      state.nextPosition = position;
+      state.active = { nodeId: currentTarget.nodeId, input: targetInput, nodeRunId: newNodeRunId, position };
+      const supersededNodeRuns = history.filter((row) => row.id === currentTarget.id || (affected.has(row.nodeId) && row.status !== 'superseded'));
+      const supersededNodeRunIds = supersededNodeRuns.map((row) => row.id);
+      const evidence: WorkflowNodeRerunEvidence = {
+        sourceNodeRunId: currentTarget.id,
+        requestedBy: 'You',
+        requestedAt: now.toISOString(),
+        modelOverride: modelOverride ?? null,
+        supersededNodeRunIds,
+        sideEffectsConfirmed: confirmSideEffects,
+      };
+      // This conditional transition is the cross-process rerun mutex. A second
+      // request observes queued/running and cannot supersede the same Run twice.
+      const [updatedRun] = transaction.update(workflowRuns).set({
+        status: 'queued',
+        result: null,
+        executionState: state as StoredWorkflowExecutionState,
+        currentNodeId: currentTarget.nodeId,
+        finishedAt: null,
+        updatedAt: now,
+      }).where(and(
+        eq(workflowRuns.id, runId),
+        eq(workflowRuns.workspaceId, team.id),
+        eq(workflowRuns.status, currentRun.status),
+      )).returning().all();
+      if (!updatedRun) {
+        throw new ConflictException({ code: 'RUN_NODE_RERUN_NOT_ALLOWED', message: 'Another node rerun already changed this Run.' });
+      }
+      transaction.insert(workflowNodeRuns).values({
+        id: newNodeRunId,
+        runId,
+        workspaceId: team.id,
+        nodeId: currentTarget.nodeId,
+        position,
+        type: currentTarget.type,
+        typeVersion: currentTarget.typeVersion,
+        status: 'queued',
+        input: sanitizeWorkflowImages(targetInput),
+        retryCount: 0,
+        rerunEvidence: evidence,
+      }).run();
+      transaction.update(workflowNodeRuns).set({ status: 'superseded', supersededByNodeRunId: newNodeRunId })
+        .where(and(eq(workflowNodeRuns.runId, runId), inArray(workflowNodeRuns.id, supersededNodeRunIds))).run();
+      const artifactIds = [...new Set(supersededNodeRuns.flatMap((row) => row.artifactIds ?? []))];
+      if (artifactIds.length > 0) {
+        transaction.update(artifacts).set({ supersededAt: now, supersededByNodeRunId: newNodeRunId })
+          .where(and(eq(artifacts.workspaceId, team.id), inArray(artifacts.id, artifactIds))).run();
+      }
+      transaction.insert(auditLogs).values({
+        id: `audit_${randomUUID()}`,
+        workspaceId: team.id,
+        actorId: null,
+        action: 'workflow.node_rerun',
+        resource: runId,
+        metadata: {
+          sourceNodeRunId: currentTarget.id,
+          newNodeRunId,
+          nodeId: currentTarget.nodeId,
+          modelOverride: modelOverride ?? null,
+          confirmSideEffects,
+          supersededNodeRunIds,
+        },
+      }).run();
+      return { nodeId: currentTarget.nodeId, supersededNodeRunIds };
+    });
+    await this.publish(runId, 'node.rerun', {
+      sourceNodeRunId: nodeRunId,
+      newNodeRunId,
+      nodeId: rerun.nodeId,
+      modelOverride: modelOverride ?? null,
+      requestedBy: 'You',
+      supersededNodeRunIds: rerun.supersededNodeRunIds,
+    });
+    await this.publish(runId, 'run.status', { status: 'queued' });
+    this.schedule(runId);
+    return this.get(request, workspaceSlug, runId);
+  }
+
   async retryNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [run] = await this.db.select().from(workflowRuns).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
@@ -733,6 +886,7 @@ export class RunsService {
         const nodeRunId = active?.nodeRunId ?? `nrun_${randomUUID()}`;
         const position = active?.position ?? state.nextPosition + 1;
         let startedAt = new Date();
+        let executionConfig = node.config;
         if (!active) {
           state.nextPosition = position;
           state.active = { ...invocation, nodeRunId, position };
@@ -745,6 +899,8 @@ export class RunsService {
           const [existingNodeRun] = await this.db.select().from(workflowNodeRuns).where(eq(workflowNodeRuns.id, nodeRunId)).limit(1);
           if (!existingNodeRun) throw new Error('Workflow scheduler node run is unavailable.');
           startedAt = existingNodeRun.startedAt ?? startedAt;
+          const modelOverride = existingNodeRun.rerunEvidence?.modelOverride;
+          if (modelOverride && node.type === 'worklite/agent') executionConfig = { ...(asRecord(node.config) ?? {}), model: modelOverride };
           await this.db.transaction((transaction) => {
             const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'running', input: sanitizeWorkflowImages(invocation.input), error: null, finishedAt: null, startedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), inArray(workflowNodeRuns.status, ['queued', 'waiting_for_input']))).returning().all();
             const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
@@ -757,7 +913,7 @@ export class RunsService {
           type: node.type,
           typeVersion: node.typeVersion,
           errorPolicy: node.errorPolicy,
-          config: node.config,
+          config: executionConfig,
           inputPorts: Object.keys(invocation.input),
         });
 
@@ -774,7 +930,7 @@ export class RunsService {
             const nodeType = this.registry.resolve(node.type, node.typeVersion);
             const request: NodeExecutionRequest = {
               input: invocation.input,
-              config: node.config,
+              config: executionConfig,
               context: {
                 workflowId: run.workflowId,
                 workflowRunId: runId,
@@ -1072,7 +1228,12 @@ export class RunsService {
       });
       activityByNodeRun.set(nodeRunId, activity);
     }
-    view.nodeRuns = nodeRows.map((row) => toNodeRunView(row, row.id === retryableNodeRunId, activityByNodeRun.get(row.id) ?? [], streamedByNodeRun.get(row.id) ?? null));
+    const latestNodeRunIds = new Map<string, string>();
+    for (const row of nodeRows) latestNodeRunIds.set(row.nodeId, row.id);
+    view.nodeRuns = nodeRows.map((row) => {
+      const rerunnable = latestNodeRunIds.get(row.nodeId) === row.id && runRerunAllowed(run.status) && (row.status === 'succeeded' || row.status === 'failed') && !row.supersededByNodeRunId;
+      return toNodeRunView(row, row.id === retryableNodeRunId, rerunnable, activityByNodeRun.get(row.id) ?? [], streamedByNodeRun.get(row.id) ?? null);
+    });
     view.artifacts = artifactRows.map((artifact) => toArtifactView(artifact, workspaceSlug, workflow.name));
     const [pendingAction] = await this.db.select().from(workflowPendingActions).where(and(eq(workflowPendingActions.runId, run.id), inArray(workflowPendingActions.status, ['pending', 'expired']))).orderBy(desc(workflowPendingActions.createdAt)).limit(1);
     view.pendingAction = pendingAction ? toPendingActionView(pendingAction) : null;
@@ -1266,6 +1427,47 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+function parseRerunRequest(input: unknown): { modelOverride?: string; confirmSideEffects: boolean } {
+  const body = input === undefined ? {} : asRecord(input);
+  if (!body) throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'The rerun request must be a JSON object.' });
+  const keys = Object.keys(body);
+  if (keys.some((key) => key !== 'modelOverride' && key !== 'confirmSideEffects')) {
+    throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'Only modelOverride and confirmSideEffects are accepted.' });
+  }
+  if (body.confirmSideEffects !== undefined && typeof body.confirmSideEffects !== 'boolean') {
+    throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'confirmSideEffects must be a boolean.' });
+  }
+  if (body.modelOverride !== undefined && (typeof body.modelOverride !== 'string' || !body.modelOverride.trim())) {
+    throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_MODEL', message: 'modelOverride must be a non-empty public provider/model id.' });
+  }
+  return {
+    ...(typeof body.modelOverride === 'string' ? { modelOverride: body.modelOverride.trim() } : {}),
+    confirmSideEffects: body.confirmSideEffects === true,
+  };
+}
+
+function runRerunAllowed(status: RunView['status']): boolean {
+  return status === 'succeeded' || status === 'failed' || status === 'paused';
+}
+
+function assertRerunRunStatus(status: RunView['status']): void {
+  if (runRerunAllowed(status)) return;
+  const reason = status === 'queued' || status === 'running' || status === 'waiting_for_input'
+    ? 'wait for the Run to finish or pause it before starting another node rerun'
+    : `a ${status} Run cannot be rerun`;
+  throw new ConflictException({ code: 'RUN_NODE_RERUN_NOT_ALLOWED', message: `Node rerun is not allowed while the Run is ${status}; ${reason}.` });
+}
+
+function assertRerunNodeEligibility(row: Pick<typeof workflowNodeRuns.$inferSelect, 'status' | 'supersededByNodeRunId'>): void {
+  if ((row.status === 'succeeded' || row.status === 'failed') && !row.supersededByNodeRunId) return;
+  throw new BadRequestException({
+    code: 'RUN_NODE_RERUN_NODE_NOT_ELIGIBLE',
+    message: row.supersededByNodeRunId
+      ? 'A superseded node attempt cannot be rerun; select its latest attempt.'
+      : `Only a succeeded or failed node attempt can be rerun, not ${row.status}.`,
+  });
+}
+
 function inferArtifactFormat(output: unknown, hasGeneratedImages: boolean): 'text' | 'json' | 'image' {
   if (hasGeneratedImages) return 'image';
   if (output === null || output === undefined) return 'text';
@@ -1370,8 +1572,8 @@ function sanitizeWorkflowImages<T>(value: T): T {
   return output as T;
 }
 
-function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boolean, activity: WorkflowNodeActivityView[] = [], streamedOutput: string | null = null): WorkflowNodeRunView {
-  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, retryable, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null, streamedOutput, activity };
+function toNodeRunView(row: typeof workflowNodeRuns.$inferSelect, retryable: boolean, rerunnable: boolean, activity: WorkflowNodeActivityView[] = [], streamedOutput: string | null = null): WorkflowNodeRunView {
+  return { id: row.id, runId: row.runId, nodeId: row.nodeId, position: row.position, type: row.type, typeVersion: row.typeVersion, status: row.status, input: sanitizeWorkflowImages(row.input), output: sanitizeWorkflowImages(row.output), artifactIds: row.artifactIds ?? [], error: row.error, retryCount: row.retryCount, retryable, rerunnable, rerunEvidence: row.rerunEvidence ?? null, supersededByNodeRunId: row.supersededByNodeRunId ?? null, startedAt: row.startedAt?.toISOString() ?? null, finishedAt: row.finishedAt?.toISOString() ?? null, streamedOutput, activity };
 }
 
 function retryableNodeRunIdOf(run: typeof workflowRuns.$inferSelect): string | null {
@@ -1436,6 +1638,8 @@ function toArtifactView(row: typeof artifacts.$inferSelect, workspaceSlug: strin
     height: row.height,
     sizeBytes: row.sizeBytes,
     contentUrl: row.format === 'image' && row.objectKey ? `/api/artifacts/${encodeURIComponent(row.id)}/content` : null,
+    supersededAt: row.supersededAt?.toISOString() ?? null,
+    supersededByNodeRunId: row.supersededByNodeRunId ?? null,
     createdAt: row.createdAt?.toISOString() ?? '',
     content: row.content,
   };

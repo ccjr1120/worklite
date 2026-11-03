@@ -322,7 +322,10 @@ function RunDetailPage() {
                     params={{ artifactId: artifact.id }}
                     className="flex flex-col gap-1 rounded-md border border-border bg-surface px-3 py-2 transition-colors duration-[120ms] hover:bg-surface-subtle sm:grid sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.7fr)_minmax(0,1fr)] sm:items-center sm:gap-3"
                   >
-                    <span className="min-w-0 truncate text-sm font-medium">{artifact.name}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate text-sm font-medium">{artifact.name}</span>
+                      {artifact.supersededAt ? <span className="shrink-0 rounded-full bg-surface-subtle px-2 py-0.5 text-[11px] text-muted-foreground">{t('runs:artifactSuperseded')}</span> : null}
+                    </span>
                     <span className="text-[13px] text-muted-foreground">{artifact.format}</span>
                     <span className="text-[13px] tabular-nums text-muted-foreground">{artifact.size}</span>
                     <span className="text-[13px] tabular-nums">{formatDateTime(artifact.createdAt, locale)}</span>

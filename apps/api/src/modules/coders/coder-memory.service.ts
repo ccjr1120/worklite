@@ -42,7 +42,7 @@ export type TeamMemoryWriteResult = {
 };
 
 // Canonical text used for same-scope duplicate detection: whitespace and case are
-// ignored, so a role rewriting the same fact updates the existing entry.
+// ignored, so rewriting the same fact updates the existing entry.
 export function normalizeMemoryText(content: string): string {
   return content.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 }
@@ -141,7 +141,6 @@ export class TeamMemoryService {
       workspaceId: context.workspaceId,
       coderId: context.coderId,
       repositoryId,
-      role: null,
       content,
       sourceMessageId: context.sourceMessageId ?? null,
       sourceRunId: context.runId ?? null,
@@ -189,10 +188,9 @@ export class TeamMemoryService {
 
   private async scopedRows(context: TeamMemoryActorContext, repositoryId?: string | null): Promise<TeamMemoryRow[]> {
     const scope = [eq(coderMemories.workspaceId, context.workspaceId), eq(coderMemories.coderId, context.coderId)];
-    // Legacy role-scoped entries are retained for Chat but never surface to roles.
     const visible = repositoryId === undefined
-      ? [isNull(coderMemories.role)]
-      : [isNull(coderMemories.role), repositoryId === null ? isNull(coderMemories.repositoryId) : eq(coderMemories.repositoryId, repositoryId)];
+      ? []
+      : [repositoryId === null ? isNull(coderMemories.repositoryId) : eq(coderMemories.repositoryId, repositoryId)];
     const allowed = context.allowedRepositoryIds;
     const allowedFilter = allowed && repositoryId === undefined
       ? [allowed.length ? or(isNull(coderMemories.repositoryId), inArray(coderMemories.repositoryId, [...allowed]))! : isNull(coderMemories.repositoryId)]

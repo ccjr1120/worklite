@@ -28,7 +28,6 @@ export class ChatConversationsService {
   channels(): ChatChannelView[] {
     return [
       { id: 'web', name: 'Web', builtIn: true, presentation: ['streaming', 'markdown', 'questions', 'execution records'] },
-      { id: 'feishu', name: '飞书', builtIn: false, presentation: ['cards', 'forms', 'QR images', 'files'] },
       { id: 'wechat', name: '微信', builtIn: false, presentation: ['text messages', 'QR images'] },
     ];
   }

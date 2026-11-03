@@ -17,7 +17,6 @@ import type {
   AgentTeamView,
   CreateAgentTeamRequest,
   AnswerAgentTeamRunRequest,
-  CreateAgentTeamRunRequest,
   RecoverAgentTeamOperationRequest,
   UpdateAgentTeamRequest,
 } from '@worklite/contracts';
@@ -53,6 +52,10 @@ const REQUEST_LOG_RETENTION_HOURS = 12;
 function runListSnapshot() {
   return sql<StoredAgentTeamVersionSnapshot>`json_remove(${coderVersions.snapshot}, '$.processFiles')`
     .mapWith((value: string) => ({ ...JSON.parse(value), processFiles: [] }) as StoredAgentTeamVersionSnapshot);
+}
+
+function jsonExtractVersion() {
+  return sql<number>`json_extract(${coderVersions.snapshot}, '$.orchestrationVersion')`;
 }
 
 @Injectable()
@@ -121,18 +124,19 @@ export class CodersService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.configuration.getTeam(workspace.id, coderId);
     const rows = await this.db.select({ id: coderRuns.id, intent: coderRuns.intent,
-      projectDirectory: coderRuns.projectDirectory, mode: coderRuns.mode,
-      modeRationale: coderRuns.modeRationale, modeDecidedAt: coderRuns.modeDecidedAt,
-      // Only the orchestration version is read; the multi-megabyte snapshot stays in SQLite.
-      orchestrationVersion: sql<number | null>`json_extract(${coderVersions.snapshot}, '$.orchestrationVersion')`,
+      projectDirectory: coderRuns.projectDirectory,
+      orchestrationVersion: sql<12>`json_extract(${coderVersions.snapshot}, '$.orchestrationVersion')`,
       status: coderRuns.status, createdAt: coderRuns.createdAt, finishedAt: coderRuns.finishedAt,
     }).from(coderRuns).innerJoin(coderVersions, eq(coderVersions.id, coderRuns.coderVersionId))
-      .where(and(eq(coderRuns.coderId, coderId), eq(coderRuns.workspaceId, workspace.id)))
+      .where(and(
+        eq(coderRuns.coderId, coderId),
+        eq(coderRuns.workspaceId, workspace.id),
+        sql`${jsonExtractVersion()} = 12`,
+      ))
       .orderBy(desc(coderRuns.createdAt));
     return rows.map(({ orchestrationVersion, ...row }) => ({
       ...row,
-      modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
-      orchestrationVersion: orchestrationVersion ?? 1,
+      orchestrationVersion,
       createdAt: row.createdAt.toISOString(),
       finishedAt: row.finishedAt?.toISOString() ?? null,
     }));
@@ -158,7 +162,7 @@ export class CodersService {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const pageLimit = Math.min(Math.max(Number.isFinite(limit) ? Math.floor(limit!) : 50, 1), 200);
     const cursorValue = cursor ? parseRunListCursor(cursor) : null;
-    const conditions = [eq(coderRuns.workspaceId, workspace.id)];
+    const conditions = [eq(coderRuns.workspaceId, workspace.id), sql`${jsonExtractVersion()} = 12`];
 
     if (coderIds.length > 0) {
       conditions.push(inArray(coderRuns.coderId, coderIds));
@@ -177,14 +181,10 @@ export class CodersService {
       id: coderRuns.id,
       intent: coderRuns.intent,
       projectDirectory: coderRuns.projectDirectory,
-      mode: coderRuns.mode,
-      modeRationale: coderRuns.modeRationale,
-      modeDecidedAt: coderRuns.modeDecidedAt,
       status: coderRuns.status,
       createdAt: coderRuns.createdAt,
       finishedAt: coderRuns.finishedAt,
       coderId: coderRuns.coderId,
-      currentCoderName: coders.name,
       snapshot: runListSnapshot(),
       total: sql<number>`count(*) over()`,
     }).from(coderRuns)
@@ -198,12 +198,11 @@ export class CodersService {
     const last = pageRows.at(-1);
     const overviews = await this.runOverviews(pageRows);
     return {
-      items: pageRows.map(({ snapshot, total: _total, currentCoderName, ...row }) => ({
+      items: pageRows.map(({ snapshot, total: _total, ...row }) => ({
         ...row,
-        coderName: capturedCoderName(snapshot, currentCoderName),
+        coderName: capturedCoderName(snapshot),
         overview: overviews.get(row.id)!,
-        modeDecidedAt: row.modeDecidedAt?.toISOString() ?? null,
-        orchestrationVersion: snapshot.orchestrationVersion ?? 1,
+        orchestrationVersion: snapshot.orchestrationVersion,
         createdAt: row.createdAt.toISOString(),
         finishedAt: row.finishedAt?.toISOString() ?? null,
       })),
@@ -326,18 +325,6 @@ export class CodersService {
     };
   }
 
-  async createRun(
-    request: Request,
-    workspaceSlug: string,
-    coderId: string,
-    input: CreateAgentTeamRunRequest,
-    acceptance: Parameters<AgentTeamRuntimeService['createRun']>[2],
-  ): Promise<AgentTeamRunView> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.getTeam(coderId, workspace.id);
-    return this.runtime.createRun(workspace.id, input, acceptance);
-  }
-
   async getRun(request: Request, workspaceSlug: string, runId: string): Promise<AgentTeamRunView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     return this.runtime.getRunView(runId, workspace.id);
@@ -379,34 +366,10 @@ export class CodersService {
     return this.runtime.recover(runId, input);
   }
 
-  async pause(request: Request, workspaceSlug: string, runId: string): Promise<AgentTeamRunView> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.runtime.getRunView(runId, workspace.id);
-    return this.runtime.pause(runId);
-  }
-
-  async resume(request: Request, workspaceSlug: string, runId: string): Promise<AgentTeamRunView> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.runtime.getRunView(runId, workspace.id);
-    return this.runtime.resume(runId);
-  }
-
   async cancel(request: Request, workspaceSlug: string, runId: string): Promise<AgentTeamRunView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.runtime.getRunView(runId, workspace.id);
     return this.runtime.cancel(runId);
-  }
-
-  async retry(
-    request: Request,
-    workspaceSlug: string,
-    runId: string,
-    taskKey: string,
-    model?: string,
-  ): Promise<AgentTeamRunView> {
-    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.runtime.getRunView(runId, workspace.id);
-    return this.runtime.retry(runId, taskKey, model);
   }
 
   async delete(request: Request, workspaceSlug: string, coderId: string, confirmTeamId: string): Promise<{ coderId: string; deletedAt: string }> {
@@ -460,9 +423,6 @@ function toTeamView(row: AgentTeam): AgentTeamView {
     maxConcurrentRuns: row.maxConcurrentRuns,
     workingPractice: row.workingPractice,
     projectGitPolicy: row.projectGitPolicy,
-    // Stored roles predating orchestration v3 may still carry the removed
-    // developerInstances/developerConcurrency fields; reads drop them and the
-    // next save persists the clean shape.
     roles: row.roles.map((role) => ({
       role: role.role,
       publicModelId: role.publicModelId,
@@ -472,7 +432,7 @@ function toTeamView(row: AgentTeam): AgentTeamView {
       mcpServerIds: role.mcpServers.map((server) => server.id),
       toolNames: role.toolNames,
       ...(role.displayName ? { displayName: role.displayName } : {}),
-      ...(role.executor ? { executor: role.executor } : role.role === 'developer' ? { executor: 'claude' as const } : {}),
+      ...(role.executor ? { executor: role.executor } : {}),
     })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

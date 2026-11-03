@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
-import { coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflows, type Database } from '@worklite/db';
+import { coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflowVersions, workflows, type Database } from '@worklite/db';
 import type { AgentTeamRunProgress } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
@@ -9,14 +9,15 @@ import { AgentExecutionsService } from './agent-executions.service';
 import { deriveTaskStage } from './chat-project-tasks.service';
 
 export const DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS = 300;
-const ACTIVE_RUN_STATUSES = ['queued', 'running', 'paused'] as const;
+const ACTIVE_CODER_RUN_STATUSES = ['queued', 'running'] as const;
+const ACTIVE_WORKFLOW_RUN_STATUSES = ['queued', 'running', 'paused'] as const;
 const TITLE_LIMIT = 80;
 const PROGRESS_TEXT_LIMIT = 160;
 
 export type ActiveWorkItem =
   | { kind: 'task'; id: string; goal: string; stage: string; activityCount: number; progressText: string; updatedAt?: string }
-  | { kind: 'coder'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; updatedAt?: string }
-  | { kind: 'workflow'; id: string; workflowName: string; status: string; currentNodeId: string | null; updatedAt?: string };
+  | { kind: 'coder'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; details?: string; updatedAt?: string }
+  | { kind: 'workflow'; id: string; workflowName: string; status: string; currentNodeId: string | null; currentStep?: string; updatedAt?: string };
 
 type ConversationTarget = { executionId: string; workspaceId: string };
 
@@ -28,7 +29,7 @@ export function activeWorkSignature(items: ActiveWorkItem[]): string {
   return JSON.stringify(items.map((item) => item.kind === 'task'
     ? [item.kind, item.id, item.stage, item.activityCount, item.progressText]
     : item.kind === 'coder'
-      ? [item.kind, item.id, item.status]
+      ? [item.kind, item.id, item.status, item.progress, item.details]
       : [item.kind, item.id, item.status, item.currentNodeId]));
 }
 
@@ -41,15 +42,15 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
       return `${index + 1}. 项目任务 ${item.id}（${truncate(item.goal, TITLE_LIMIT)}）：运行中，阶段 ${item.stage}${progress}`;
     }
     if (item.kind === 'coder') {
-      return `${index + 1}. Coder 任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}`;
+      return `${index + 1}. Coder 任务 ${item.id}（${truncate(item.intent, TITLE_LIMIT)}）：${item.status}${item.details ? `，最新进展：${item.details}` : ''}`;
     }
-    return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentNodeId ? `，当前节点 ${item.currentNodeId}` : ''}`;
+    return `${index + 1}. 工作流运行 ${item.id}（${item.workflowName}）：${item.status}${item.currentStep ? `，当前步骤 ${item.currentStep}` : ''}`;
   });
-  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 ${formatInterval(intervalSeconds)}提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请基于以上信息用一两句话向用户汇报最新进展摘要；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
+  return `[活跃工作进展提醒] 当前对话仍有进行中的工作（约每 ${formatInterval(intervalSeconds)}提醒一次，工作全部结束或无新进展时自动停止）：\n${lines.join('\n')}\n请按任务逐项分别汇报，只使用各任务自己的信息；不要合并任务或推测进展；不要向用户复述本提醒本身；直接回复，不要调用工具。`;
 }
 
 // Periodic progress reports for conversations with active background work: a running project
-// task, or a queued/running/paused executor or Workflow Run dispatched from that conversation.
+// task, or a queued/running Coder Run or queued/running/paused Workflow Run dispatched from that conversation.
 // waiting_for_input work is excluded — its question already reached the user through the
 // settlement report. The recurring tick replaces the one-shot settlement reports' deferral:
 // a busy conversation simply retries on the next tick, and a conversation whose summary is
@@ -57,7 +58,7 @@ export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = D
 @Injectable()
 export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChatProgressReportsService.name);
-  private readonly lastSignatures = new Map<string, string>();
+  private readonly lastSignatures = new Map<string, Map<string, string>>();
   private timer: NodeJS.Timeout | null = null;
   readonly intervalSeconds: number;
 
@@ -107,11 +108,11 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       this.db.select({ executionId: chatSubmissions.executionId, workspaceId: chatSubmissions.workspaceId })
         .from(chatSubmissions)
         .innerJoin(coderRuns, sql`${coderRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder'`, inArray(coderRuns.status, [...ACTIVE_RUN_STATUSES]))),
+        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder'`, inArray(coderRuns.status, [...ACTIVE_CODER_RUN_STATUSES]))),
       this.db.select({ executionId: chatSubmissions.executionId, workspaceId: chatSubmissions.workspaceId })
         .from(chatSubmissions)
         .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_RUN_STATUSES]))),
+        .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_WORKFLOW_RUN_STATUSES]))),
     ]);
     const targets = new Map<string, ConversationTarget>();
     for (const row of [...taskRows, ...teamRows, ...workflowRows]) {
@@ -126,25 +127,26 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       this.lastSignatures.delete(target.executionId);
       return;
     }
-    const signature = activeWorkSignature(items);
-    if (this.lastSignatures.get(target.executionId) === signature) return;
-    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(items, this.intervalSeconds), {
-      items: items.map((item) => ({
+    const previous = this.lastSignatures.get(target.executionId) ?? new Map<string, string>();
+    const changed = items.filter((item) => previous.get(`${item.kind}:${item.id}`) !== activeWorkSignature([item]));
+    if (!changed.length) return;
+    const result = await this.executions.reportActiveWorkProgress(target.workspaceId, target.executionId, buildActiveWorkNote(changed, this.intervalSeconds), {
+      items: changed.map((item) => ({
         kind: item.kind,
         id: item.id,
         title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'coder' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
         status: item.kind === 'task' ? 'running' : item.status,
-        stage: item.kind === 'task' ? item.stage : item.kind === 'coder' ? undefined : item.currentNodeId ?? undefined,
+        stage: item.kind === 'task' ? item.stage : item.kind === 'workflow' ? item.currentStep : undefined,
         progress: item.kind === 'task'
           ? truncate(item.progressText, PROGRESS_TEXT_LIMIT) || undefined
-          : undefined,
+          : item.kind === 'coder' ? item.details : item.currentStep,
         updatedAt: item.updatedAt,
       })),
     });
     // busy leaves the marker unset so the next tick retries; reported and unavailable (the
     // conversation is gone or cancelled) both record the signature, so a cancelled conversation
     // stays silent until its visible work actually changes again.
-    if (result !== 'busy') this.lastSignatures.set(target.executionId, signature);
+    if (result !== 'busy') this.lastSignatures.set(target.executionId, new Map(items.map((item) => [`${item.kind}:${item.id}`, activeWorkSignature([item])])));
   }
 
   private async collectActiveWork(target: ConversationTarget): Promise<ActiveWorkItem[]> {
@@ -154,12 +156,13 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       this.db.select({ runId: coderRuns.id, intent: coderRuns.intent, status: coderRuns.status, updatedAt: coderRuns.updatedAt })
         .from(chatSubmissions)
         .innerJoin(coderRuns, sql`${coderRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder'`, inArray(coderRuns.status, [...ACTIVE_RUN_STATUSES]))),
-      this.db.select({ runId: workflowRuns.id, status: workflowRuns.status, currentNodeId: workflowRuns.currentNodeId, workflowName: workflows.name, updatedAt: workflowRuns.updatedAt })
+        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder'`, inArray(coderRuns.status, [...ACTIVE_CODER_RUN_STATUSES]))),
+      this.db.select({ runId: workflowRuns.id, status: workflowRuns.status, currentNodeId: workflowRuns.currentNodeId, workflowName: workflows.name, nodes: workflowVersions.nodes, updatedAt: workflowRuns.updatedAt })
         .from(chatSubmissions)
         .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
         .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
-        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_RUN_STATUSES]))),
+        .innerJoin(workflowVersions, eq(workflowVersions.id, workflowRuns.workflowVersionId))
+        .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_WORKFLOW_RUN_STATUSES]))),
     ]);
     const items: ActiveWorkItem[] = tasks.map((task) => ({
       kind: 'task',
@@ -173,10 +176,17 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     for (const row of teamRows) {
       const progress = await this.runtime.getRunProgress(row.runId)
         .catch(() => null);
-      items.push({ kind: 'coder', id: row.runId, intent: row.intent, status: row.status, progress, updatedAt: row.updatedAt.toISOString() });
+      const view = await this.runtime.getRunView(row.runId, target.workspaceId).catch(() => null);
+      const details = view?.tasks.filter((task) => task.status === 'running' || task.status === 'waiting_for_input')
+        .map((task) => task.checklist?.length ? task.checklist.map((item) => `${item.status === 'completed' ? '- [x]' : item.status === 'in_progress' ? '- [~]' : '- [ ]'} ${item.step}`).join('\n') : [task.roleName || task.assignmentTitle, task.progressText.trim() || task.assignmentTitle].filter(Boolean).join('：'))
+        .filter(Boolean).join('\n');
+      items.push({ kind: 'coder', id: row.runId, intent: row.intent, status: row.status, progress, details: details || undefined, updatedAt: row.updatedAt.toISOString() });
     }
     for (const row of workflowRows) {
-      items.push({ kind: 'workflow', id: row.runId, workflowName: row.workflowName, status: row.status, currentNodeId: row.currentNodeId, updatedAt: row.updatedAt.toISOString() });
+      const node = row.nodes?.find((candidate) => candidate.id === row.currentNodeId);
+      const config = node?.config && typeof node.config === 'object' ? node.config as Record<string, unknown> : null;
+      const currentStep = [config?.label, config?.name, config?.title].find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
+      items.push({ kind: 'workflow', id: row.runId, workflowName: row.workflowName, status: row.status, currentNodeId: row.currentNodeId, currentStep, updatedAt: row.updatedAt.toISOString() });
     }
     return items;
   }

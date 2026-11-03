@@ -242,7 +242,9 @@ export function useAgentTeamRunListQuery(coderIds?: string[]) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api.agentTeamRunList({ coderIds, cursor: pageParam }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
-    refetchInterval: 5_000,
+    refetchInterval: (query) => query.state.data?.pages.some((page) =>
+      page.items.some((run) => !['succeeded', 'failed', 'cancelled'].includes(run.status)),
+    ) ? 5_000 : 30_000,
   });
 }
 

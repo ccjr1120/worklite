@@ -18,6 +18,7 @@ import type {
   RecoverAgentTeamOperationRequest,
   AgentTeamRunActionResponse,
   AgentTeamGroupView,
+  AgentTeamGroupControlRequest,
   AgentExecutionView,
   AnswerAgentQuestionRequest,
   ChatProjectOperationDetailView,
@@ -27,6 +28,7 @@ import type {
   ChatMemoryView,
   UpdateChatMemoryRequest,
   CreateRunRequest,
+  RerunWorkflowNodeRequest,
   CreateWorkflowRequest,
   CreateHomeBoardCategoryRequest,
   UpdateHomeBoardCategoryRequest,
@@ -339,7 +341,7 @@ export const api = {
     apiPatch<AgentTeamView>(`/api/coders/${encodeURIComponent(coderId)}/roles/${encodeURIComponent(roleId)}`, input),
   coderMemories: (coderId: string) => apiGet<AgentTeamMemoryView[]>(`/api/coders/${encodeURIComponent(coderId)}/memories`),
   agentTeamGroup: (groupId: string) => apiGet<AgentTeamGroupView>(`/api/coder-groups/${encodeURIComponent(groupId)}`),
-  controlAgentTeamGroup: (groupId: string, input: { operation: 'reexecute'; runIds: string[] }) => apiPost<AgentTeamGroupView>(`/api/coder-groups/${encodeURIComponent(groupId)}/controls`, input),
+  controlAgentTeamGroup: (groupId: string, input: AgentTeamGroupControlRequest) => apiPost<AgentTeamGroupView>(`/api/coder-groups/${encodeURIComponent(groupId)}/controls`, input),
   coderGroupEventsUrl: (groupId: string) => `/api/coder-groups/${encodeURIComponent(groupId)}/events`,
   coderDocument: (documentId: string) => apiGet<AgentTeamDocumentView>(`/api/coder-documents/${encodeURIComponent(documentId)}`),
   downloadCoderDocument: async (documentId: string): Promise<Blob> => {
@@ -355,10 +357,7 @@ export const api = {
   coderRunEventsUrl: (runId: string) => `/api/coder-runs/${encodeURIComponent(runId)}/events`,
   answerAgentTeamRun: (runId: string, input: AnswerAgentTeamRunRequest) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/answer`, input),
   recoverAgentTeamOperation: (runId: string, operationKey: string, input: RecoverAgentTeamOperationRequest) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(operationKey)}/recovery`, input),
-  pauseAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/pause`),
-  resumeAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/resume`),
   cancelAgentTeamRun: (runId: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/cancel`),
-  retryAgentTeamTask: (runId: string, taskKey: string) => apiPost<AgentTeamRunActionResponse>(`/api/coder-runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskKey)}/retry`),
   latestSucceededRuns: (_workspace?: string) => apiGet<RunView[]>('/api/runs?latestSucceededPerWorkflow=1'),
   workflowRunsPage: (query: { workflowId: string; cursor?: string; limit?: number }) => {
     const search = new URLSearchParams({ paged: '1', workflowId: query.workflowId });
@@ -375,6 +374,7 @@ export const api = {
   refreshRunPendingAction: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/refresh`),
   openRunPendingActionBrowser: (_workspace: string | undefined, runId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/pending-action/open-browser`),
   retryRunNode: (_workspace: string | undefined, runId: string, nodeRunId: string) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/retry`),
+  rerunRunNode: (_workspace: string | undefined, runId: string, nodeRunId: string, input: RerunWorkflowNodeRequest) => apiPost<RunView>(`/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeRunId)}/rerun`, input),
 };
 
 export function parseCommandEvent(value: string): CommandExecutionEvent {

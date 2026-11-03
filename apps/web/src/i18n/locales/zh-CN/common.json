@@ -40,6 +40,7 @@
     "completed": "已完成",
     "failed": "失败",
     "cancelled": "已取消",
+    "superseded": "已被取代",
     "idle": "空闲",
     "draft": "草稿",
     "published": "已发布",

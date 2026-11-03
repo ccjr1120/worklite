@@ -107,7 +107,9 @@ function seedAgentTeam(mcpServerIds: string[], options: { capturedVersion?: bool
       snapshot: {
         processId: 'process',
         processVersion: '1',
-        developerExecution: { kind: 'codex_app_server' },
+        coderName: 'Delivery',
+        projectExecutorLaunches: {},
+        orchestrationVersion: 12,
         roles: [teamRole(mcpServerIds)],
         processFiles: [],
         recipeDefaults: { maxRepairRounds: 1 },

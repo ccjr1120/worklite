@@ -5,7 +5,6 @@
 export type RankableTeamMemory = {
   id: string;
   repositoryId: string | null;
-  role?: string | null;
   content: string;
   updatedAt?: Date | string | null;
 };
@@ -84,8 +83,8 @@ export function rankTeamMemories<T extends RankableTeamMemory>(
 }
 
 /**
- * A bounded index handed to every v11 role that is not the initially addressed
- * one: entry count plus one-line titles, never full content.
+ * A bounded index handed to Router-assigned roles: entry count plus one-line
+ * titles, never full content.
  */
 export function buildTeamMemoryIndex(
   memories: readonly RankableTeamMemory[],
@@ -93,7 +92,7 @@ export function buildTeamMemoryIndex(
 ): string[] {
   const lines: string[] = [];
   let total = 0;
-  const ranked = rankTeamMemories(memories.filter((memory) => !memory.role), options);
+  const ranked = rankTeamMemories(memories, options);
   for (const memory of ranked) {
     if (lines.length >= TEAM_MEMORY_INDEX_ENTRIES) break;
     const repositoryName = memory.repositoryId

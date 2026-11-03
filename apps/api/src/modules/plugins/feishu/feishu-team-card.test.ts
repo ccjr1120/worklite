@@ -5,7 +5,7 @@ import { renderCard, teamRunMeta } from './feishu-cards';
 function run(overrides: Partial<AgentTeamRunView>): AgentTeamRunView {
   return {
     status: 'running', createdAt: '2026-10-23T00:00:00.000Z', updatedAt: '2026-10-23T00:00:00.000Z', finishedAt: null,
-    progress: { phase: 'development', nextStep: 'await_assignment_completion', totalAssignments: 0, completedAssignments: 0, activeDeveloperIds: [], waitingReason: null },
+    progress: { phase: 'working', nextStep: 'await_task_results', totalTasks: 0, completedTasks: 0, activeTaskKeys: [], waitingReason: null },
     current: null,
     ...overrides,
   } as AgentTeamRunView;
@@ -22,12 +22,12 @@ describe('Feishu Coder Run card summary', () => {
     expect(teamRunMeta(run({ current }), now)).toBe('Reviewer · gpt-review · 本角色 1 小时 5 分钟 · 总耗时 1 小时 25 分钟');
   });
 
-  it('summarizes parallel Developer lanes by count and assignment progress', () => {
+  it('summarizes active role tasks and task progress', () => {
     const meta = teamRunMeta(run({
       current: { ...current, role: 'developer', model: 'gpt-codex', activeCount: 3 },
-      progress: { ...run({}).progress, totalAssignments: 4, completedAssignments: 1 },
+      progress: { ...run({}).progress, totalTasks: 4, completedTasks: 1 },
     }), now);
-    expect(meta).toBe('Developer ×3 · gpt-codex · 开发任务 1/4 · 总耗时 1 小时 25 分钟');
+    expect(meta).toBe('Developer ×3 · gpt-codex · 任务 1/4 · 总耗时 1 小时 25 分钟');
   });
 
   it('keeps only the total once the Run settles', () => {

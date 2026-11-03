@@ -116,9 +116,7 @@ export type UpdatePluginRequest = {
 
 export type ChatTarget =
   | { kind: 'conversation' }
-  // `mode` remains accepted only for older callers. Current dispatch ignores it
-  // and the Coder Dispatcher chooses the Run mode.
-  | { kind: 'coder'; coderId: string; projectDirectory: string; role?: AgentTeamRoleId; mode?: 'plan_only' | 'validate_existing' | 'implement_and_validate' }
+  | { kind: 'coder'; coderId: string; projectDirectory: string; role?: AgentTeamRoleId }
   | { kind: 'workflow'; workflowId: string };
 
 export type ChatTaskReference =
@@ -823,6 +821,27 @@ export type WorkflowDefinition = {
   edges: WorkflowEdgeDefinition[];
 };
 
+/** Return the rerun target and every node reachable through its outgoing edges. */
+export function workflowRerunAffectedNodeIds(definition: WorkflowDefinition, targetNodeId: string): string[] {
+  const affected = new Set([targetNodeId]);
+  const queue = [targetNodeId];
+  for (let index = 0; index < queue.length; index += 1) {
+    const sourceNodeId = queue[index]!;
+    for (const edge of definition.edges) {
+      if (edge.sourceNodeId !== sourceNodeId || affected.has(edge.targetNodeId)) continue;
+      affected.add(edge.targetNodeId);
+      queue.push(edge.targetNodeId);
+    }
+  }
+  return [...affected];
+}
+
+export const WORKFLOW_RERUN_SIDE_EFFECT_NODE_TYPES = ['wechat-official-account/publish'] as const;
+
+export function workflowNodeRequiresSideEffectConfirmation(nodeType: string): boolean {
+  return (WORKFLOW_RERUN_SIDE_EFFECT_NODE_TYPES as readonly string[]).includes(nodeType);
+}
+
 export type WorkflowEditOperation =
   | { type: 'addNode'; node: WorkflowNodeDefinition; index: number }
   | { type: 'removeNode'; nodeId: string }
@@ -1078,6 +1097,20 @@ export type CreateRunRequest = {
   input: unknown;
 };
 
+export type RerunWorkflowNodeRequest = {
+  modelOverride?: string;
+  confirmSideEffects?: boolean;
+};
+
+export type WorkflowNodeRerunEvidence = {
+  sourceNodeRunId: string;
+  requestedBy: string;
+  requestedAt: string;
+  modelOverride: string | null;
+  supersededNodeRunIds: string[];
+  sideEffectsConfirmed: boolean;
+};
+
 export type CreateRunResponse = {
   runId: string;
 };
@@ -1095,7 +1128,7 @@ export type WorkflowRunView = {
   finishedAt: string | null;
 };
 
-export type WorkflowNodeRunStatus = 'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled';
+export type WorkflowNodeRunStatus = 'queued' | 'running' | 'waiting_for_input' | 'succeeded' | 'failed' | 'cancelled' | 'superseded';
 
 export type WorkflowPendingActionType = 'wechat_login' | 'wechat_publish_confirmation';
 
@@ -1129,16 +1162,28 @@ export type WorkflowNodeRunView = {
   error: string | null;
   retryCount: number;
   retryable: boolean;
+  rerunnable: boolean;
+  rerunEvidence: WorkflowNodeRerunEvidence | null;
+  supersededByNodeRunId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   streamedOutput: string | null;
   activity: WorkflowNodeActivityView[];
 };
 
+export type WorkflowNodeRerunEventPayload = {
+  sourceNodeRunId: string;
+  nodeRunId: string;
+  nodeId: string;
+  modelOverride: string | null;
+  requestedBy: string;
+  supersededNodeRunIds: string[];
+};
+
 export type RunProgressEvent = {
   runId: string;
   sequence: number;
-  type: 'run.status' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created';
+  type: 'run.status' | 'node.rerun' | 'node.started' | 'node.delta' | 'node.waiting' | 'node.completed' | 'node.failed' | 'node.activity' | 'pending_action.updated' | 'artifact.created';
   payload: unknown;
   occurredAt: string;
 };
@@ -1217,7 +1262,6 @@ export type SkillReferenceCleanup = {
   chatConfigurationRevisions: number[];
   workflowDrafts: Array<{ workflowId: string; nodeIds: string[] }>;
   agentTeamRoles: Array<{ coderId: string; role: string }>;
-  agentTeamDeveloperInstances: Array<{ coderId: string; role: string; developerId: string }>;
 };
 
 export type DeleteSkillResult = {
@@ -1490,6 +1534,8 @@ export type ArtifactView = {
   sizeBytes?: number | null;
   contentUrl?: string | null;
   createdAt: string;
+  supersededAt: string | null;
+  supersededByNodeRunId: string | null;
   content: string;
 };
 
@@ -1510,6 +1556,8 @@ export type ArtifactListItemView = {
   sizeBytes?: number | null;
   contentUrl?: string | null;
   createdAt: string;
+  supersededAt: string | null;
+  supersededByNodeRunId: string | null;
   contentLength: number;
   summary: string;
 };
@@ -1657,12 +1705,9 @@ export type AgentTeamRole =
   | 'developer'
   | 'test_author'
   | 'test_runner'
-  | 'reviewer'
-  | 'worktree-manager';
+  | 'reviewer';
 
 export type AgentTeamRoleId = string;
-
-export type AgentTeamMode = 'plan_only' | 'validate_existing' | 'implement_and_validate';
 
 export type AgentTeamRoleConfiguration = {
   role: AgentTeamRoleId;
@@ -1678,54 +1723,13 @@ export type AgentTeamRoleConfiguration = {
   executor?: ProjectExecutor | null;
 };
 
-export type AgentTeamDevelopmentAssignmentInput = {
-  developerId?: string;
-  title: string;
-  scopeSummary: string;
-  ownedPaths: string[];
-  repositoryIds?: string[];
-};
-
-export type AgentTeamRoleHandoff = {
-  role: AgentTeamRoleId;
-  goal: string;
-  repositoryIds?: string[];
-};
-
-// Worktree Manager setup phase output, validated by the runtime before any
-// filesystem effect is executed from it.
-export type AgentTeamWorktreeManagerSetupOutput = {
-  baseWorktreePath: string;
-  runBranch: string;
-  lanes: Array<{
-    laneId: string;
-    worktreePath: string;
-    branch: string;
-  }>;
-};
-
-// Worktree Manager teardown phase output. 'retain' keeps every worktree and
-// branch for manual resolution and requires a diagnostic reason.
-export type AgentTeamWorktreeManagerTeardownOutput = {
-  action: 'merge-and-cleanup' | 'retain';
-  reason?: string;
-};
-
-export type AgentTeamDevelopmentAssignment = {
-  developerId: string;
-  title: string;
-  scopeSummary: string;
-  ownedPaths: string[];
-  repositoryIds?: string[];
-};
-
 export type AgentTeamRunProgress = {
-  phase: 'planning' | 'test_design' | 'development' | 'test_authoring' | 'test_execution' | 'review' | 'repair' | 'working' | 'waiting' | 'terminal';
-  nextStep: 'dispatch_assignments' | 'await_assignment_completion' | 'answer_question' | 'test_authoring' | 'test_execution' | 'review' | 'finish';
-  totalAssignments: number;
-  completedAssignments: number;
-  activeDeveloperIds: string[];
-  waitingReason: 'user_input' | 'pause_boundary' | null;
+  phase: 'routing' | 'working' | 'waiting' | 'terminal';
+  nextStep: 'route_tasks' | 'await_task_results' | 'answer_question' | 'finish';
+  totalTasks: number;
+  completedTasks: number;
+  activeTaskKeys: string[];
+  waitingReason: 'user_input' | null;
 };
 
 export type AgentTeamView = {
@@ -1748,20 +1752,20 @@ export type AgentTeamView = {
 export type AgentTeamVersionMetadata = {
   id: string;
   version: number;
-  coderName?: string;
+  coderName: string;
   createdAt: string;
-  developerExecution?: ProjectExecutorLaunchView | { kind: 'codex_app_server' };
-  developerExecutions?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  projectExecutorLaunches?: Record<string, ProjectExecutorLaunchView | { kind: 'codex_app_server' }>;
-  orchestrationVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  projectExecutorLaunches: Record<string, ProjectExecutorLaunchView>;
+  orchestrationVersion: 12;
 };
 
 export type AgentTeamTaskAttemptStatus =
   | 'running'
+  | 'stop_requested'
   | 'waiting_for_input'
   | 'waiting_for_recovery'
   | 'completed'
   | 'failed'
+  | 'stopped'
   | 'cancelled';
 
 export type AgentTeamTaskAttemptView = {
@@ -1769,14 +1773,14 @@ export type AgentTeamTaskAttemptView = {
   taskKey: string;
   attemptIndex: number;
   role: AgentTeamRoleId;
+  continuedFromAttemptId?: string | null;
   status: AgentTeamTaskAttemptStatus;
   inputFingerprint: string;
   result: AgentTeamTaskResult | null;
   error: string | null;
-  retryable: boolean;
-  developerId: string | null;
   assignmentTitle: string | null;
   progressText: string;
+  checklist?: AgentPlanStep[];
   // Derived from the captured executor version: the role's display name (null for built-in roles
   // without one) and the public model id the attempt runs on (the role's model, else the executor
   // default for WorkLite Agent roles, else the captured executor launch model).
@@ -1788,7 +1792,7 @@ export type AgentTeamTaskAttemptView = {
 };
 
 // The in-flight attempt a compact Run card leads with: the most recently started attempt that is
-// running or waiting, plus how many attempts are in flight (parallel Developer lanes).
+// running or waiting, plus how many attempts are in flight.
 export type AgentTeamRunCurrentView = {
   taskAttemptId: string;
   taskKey: string;
@@ -1858,7 +1862,6 @@ export type AgentTeamRunStatus =
   | 'queued'
   | 'running'
   | 'waiting_for_input'
-  | 'paused'
   | 'succeeded'
   | 'failed'
   | 'cancelled';
@@ -1877,13 +1880,6 @@ export type AgentTeamTaskResultDocument = {
   upstreamDocumentKeys: string[];
 };
 
-export type AgentTeamProjectGitDecision = {
-  projectPath: string;
-  strategy: 'no_git' | 'current_branch' | 'feature_branch' | 'worktree';
-  branch?: string;
-  worktreePath?: string;
-};
-
 export type AgentTeamTaskResult =
   | {
       status: 'completed';
@@ -1891,22 +1887,12 @@ export type AgentTeamTaskResult =
       unresolvedIssues: string[];
       commandIds: string[];
       changedFiles: string[];
-      completedAssignedWork: boolean;
+      completedWork: boolean;
       criterionAssessments: AgentTeamCriterionAssessment[];
-      projectGitDecisions?: AgentTeamProjectGitDecision[];
-      developmentAssignments?: AgentTeamDevelopmentAssignmentInput[];
-      repairRequests?: Array<{ developerId: string; instruction: string }>;
-      repairRequest?: {
-        taskKey: string;
-        instruction: string;
-      };
       message?: string;
-      handoff?: AgentTeamRoleHandoff;
-      // Set by the v10 Dispatcher. Other roles never author this field.
-      dispatchDecision?: {
-        mode: AgentTeamMode;
-        rationale: string;
-      };
+      routerPlan?:
+        | { action: 'dispatch'; assignments: Array<{ id: string; role: AgentTeamRoleId; goal: string; dependencyIds?: string[]; repositoryIds?: string[] }> }
+        | { action: 'finish' };
     }
   | {
       status: 'waiting_for_input';
@@ -1924,7 +1910,7 @@ export type AgentTeamRunOutcome = {
 };
 
 /** Run counts per Coder and status for queued and active Runs (GET /api/coder-runs/status-counts). */
-export const CODER_ACTIVE_RUN_STATUSES = ['running', 'waiting_for_input', 'paused'] as const satisfies readonly AgentTeamRunStatus[];
+export const CODER_ACTIVE_RUN_STATUSES = ['running', 'waiting_for_input'] as const satisfies readonly AgentTeamRunStatus[];
 
 export type AgentTeamRunStatusCount = {
   coderId: string;
@@ -1936,10 +1922,7 @@ export type AgentTeamRunSummary = {
   id: string;
   intent: string;
   projectDirectory: string;
-  mode: AgentTeamMode;
-  modeRationale: string | null;
-  modeDecidedAt: string | null;
-  orchestrationVersion: number;
+  orchestrationVersion: 12;
   status: AgentTeamRunStatus;
   createdAt: string;
   finishedAt: string | null;
@@ -1992,7 +1975,7 @@ export type AgentTeamRunOverview = {
 
 export type AgentTeamRunListItem = AgentTeamRunSummary & {
   coderId: string;
-  // Coder name captured when the Run was dispatched; falls back to the current name.
+  // Coder name captured when the Run was dispatched.
   coderName: string;
   overview: AgentTeamRunOverview;
 };
@@ -2009,7 +1992,7 @@ export type AgentTeamRunNodeStep = {
   tokens: TokenAttribution;
 };
 
-/** One node of a Run: one role task attempt. Parallel Developers and retries are separate nodes. */
+/** One node of a Run: one role task attempt. Retries are separate nodes. */
 export type AgentTeamRunNode = {
   nodeRunId: string;
   taskKey: string;
@@ -2017,7 +2000,6 @@ export type AgentTeamRunNode = {
   name: string;
   role: AgentTeamRoleId;
   roleName: string | null;
-  developerId: string | null;
   status: AgentTeamTaskAttemptStatus;
   startedAt: string | null;
   endedAt: string | null;
@@ -2072,7 +2054,7 @@ export type AgentTeamGroupMessage = {
   sender: 'user' | 'role' | 'system';
   senderRole: AgentTeamRoleId | null;
   recipientRole: AgentTeamRoleId | null;
-  kind: 'text' | 'question' | 'handoff' | 'control' | 'status' | 'file';
+  kind: 'text' | 'question' | 'assignment' | 'result' | 'control' | 'status' | 'file';
   body: string;
   runId: string | null;
   taskAttemptId: string | null;
@@ -2085,7 +2067,6 @@ export type AgentTeamGroupMessage = {
 export type AgentTeamGroupSummary = {
   id: string;
   title: string;
-  mode: AgentTeamMode;
   status: AgentTeamRunStatus | 'empty';
   runCount: number;
   repositories: AgentTeamGroupRepository[];
@@ -2098,12 +2079,27 @@ export type AgentTeamGroupView = AgentTeamGroupSummary & {
   coderId: string;
   workingPractice: string;
   messages: AgentTeamGroupMessage[];
-  runs: Array<{ id: string; targetRole: AgentTeamRoleId | null; currentRole: AgentTeamRoleId | null; status: AgentTeamRunStatus; intent: string; repositoryIds: string[]; createdAt: string; finishedAt: string | null; pendingInputs: Array<{ id: string; question: string; scopeRevision: number }> }>;
+  runs: Array<{
+    id: string;
+    targetRole: AgentTeamRoleId | null;
+    currentRole: AgentTeamRoleId | null;
+    status: AgentTeamRunStatus;
+    intent: string;
+    repositoryIds: string[];
+    createdAt: string;
+    finishedAt: string | null;
+    pendingInputs: Array<{ id: string; question: string; scopeRevision: number }>;
+    tasks: Array<{ taskAttemptId: string; role: AgentTeamRoleId; status: AgentTeamTaskAttemptStatus }>;
+  }>;
 };
 
 export type AgentTeamGroupControlRequest = {
   operation: 'reexecute';
   runIds: string[];
+} | {
+  operation: 'stop_task' | 'continue_task';
+  runId: string;
+  taskAttemptId: string;
 };
 
 export type AgentTeamMemoryView = {
@@ -2111,22 +2107,19 @@ export type AgentTeamMemoryView = {
   repositoryId: string | null;
   repositoryName: string | null;
   repositoryDirectory: string | null;
-  role: AgentTeamRoleId | null;
   content: string;
   sourceMessageId: string | null;
-  // v11 provenance; absent on memories created before the migration.
-  sourceRunId?: string | null;
-  sourceRole?: AgentTeamRoleId | null;
-  sourceTaskAttemptId?: string | null;
-  createdBy?: 'chat' | 'role';
-  upsertKey?: string | null;
+  sourceRunId: string | null;
+  sourceRole: AgentTeamRoleId | null;
+  sourceTaskAttemptId: string | null;
+  createdBy: 'chat' | 'role';
+  upsertKey: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
 export type CreateAgentTeamMemoryRequest = {
   repositoryId?: string | null;
-  role?: AgentTeamRoleId | null;
   content: string;
   sourceMessageId?: string | null;
 };
@@ -2153,14 +2146,8 @@ export type AgentTeamRunView = {
   status: AgentTeamRunStatus;
   intent: string;
   projectDirectory: string;
-  mode: AgentTeamMode;
-  modeRationale: string | null;
-  modeDecidedAt: string | null;
-  // Historical evidence only: Runs recorded before executor roles gained direct command
-  // execution keep the exact command strings the user had granted. Never written again.
-  authorizedCommands: string[];
   scopeRevision: number;
-  desiredControlState: 'none' | 'pause_requested' | 'cancel_requested';
+  desiredControlState: 'none' | 'cancel_requested';
   tasks: AgentTeamTaskAttemptView[];
   documents: AgentTeamDocumentView[];
   pendingInputs: AgentTeamPendingInputView[];
@@ -2186,6 +2173,8 @@ export type AgentTeamRunEventType =
   | 'task.waiting'
   | 'task.completed'
   | 'task.failed'
+  | 'task.stop_requested'
+  | 'task.stopped'
   | 'document.committed'
   | 'document.delivered'
   | 'document.delivery_failed'
@@ -2225,16 +2214,6 @@ export type CreateAgentTeamRequest = {
   name: string;
   description?: string;
   templateCoderId?: string;
-};
-
-export type CreateAgentTeamRunRequest = {
-  intent: string;
-  projectDirectory: string;
-  mode: AgentTeamMode;
-};
-
-export type CreateAgentTeamRunResponse = {
-  run: AgentTeamRunView;
 };
 
 export type AnswerAgentTeamRunRequest = {

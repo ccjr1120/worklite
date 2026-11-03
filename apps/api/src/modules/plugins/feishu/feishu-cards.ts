@@ -5,7 +5,9 @@ import type { AgentTeamRunView, ChatProjectTaskView } from '@worklite/contracts'
 export type FeishuAction =
   | { kind: 'answer'; runId: string; pendingInputId: string; scopeRevision: number }
   | { kind: 'agent_answer'; executionId: string; questionId: string; answer?: string; recoveryDecision?: 'adopt_command' | 'mark_failed'; newConversation?: boolean }
-  | { kind: 'control'; domain: 'coder' | 'workflow' | 'conversation'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'control'; domain: 'coder'; runId: string; action: 'cancel' }
+  | { kind: 'control'; domain: 'workflow'; runId: string; action: 'pause' | 'resume' | 'cancel' | 'retry'; taskKey?: string }
+  | { kind: 'control'; domain: 'conversation'; runId: string; action: 'cancel' | 'retry' }
   | { kind: 'project_task_answer'; taskId: string; questionId: string; answer?: string }
   | { kind: 'project_task_control'; taskId: string; action: 'cancel' }
   | { kind: 'recovery'; runId: string; operationKey: string; decision: 'adopt_command' | 'mark_failed' | 'replay' }
@@ -189,7 +191,7 @@ export function renderTaskCard(submissionId: string, task: ChatProjectTaskView):
 
 const TEAM_ROLE_NAMES: Record<string, string> = {
   planner: 'Planner', 'test-designer': 'Test Designer', developer: 'Developer', 'test-author': 'Test Author',
-  'test-runner': 'Test Runner', reviewer: 'Reviewer', 'worktree-manager': 'Worktree Manager', 'executor-manager': 'Executor Manager',
+  'test-runner': 'Test Runner', reviewer: 'Reviewer',
 };
 
 export function teamRoleName(task: { role: string; roleName: string | null }): string {
@@ -221,7 +223,7 @@ export function teamRunMeta(run: AgentTeamRunView, now = Date.now()): string {
     const roleElapsed = formatElapsed(current.startedAt, now);
     if (roleElapsed && current.activeCount === 1) parts.push(`本角色 ${roleElapsed}`);
   }
-  if (run.progress?.totalAssignments && !settled) parts.push(`开发任务 ${run.progress.completedAssignments}/${run.progress.totalAssignments}`);
+  if (run.progress?.totalTasks && !settled) parts.push(`任务 ${run.progress.completedTasks}/${run.progress.totalTasks}`);
   const total = formatElapsed(run.createdAt, runEnd);
   if (total) parts.push(`总耗时 ${total}`);
   return parts.join(' · ');

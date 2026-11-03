@@ -252,25 +252,12 @@ export class CoderRunsController {
     return this.teams.recover(request, 'personal', runId, body).then((run) => ({ run }));
   }
 
-  @Post(':runId/pause')
-  pause(@Req() request: Request, @Param('runId') runId: string) {
-    return this.teams.pause(request, 'personal', runId).then((run) => ({ run }));
-  }
-
-  @Post(':runId/resume')
-  resume(@Req() request: Request, @Param('runId') runId: string) {
-    return this.teams.resume(request, 'personal', runId).then((run) => ({ run }));
-  }
-
   @Post(':runId/cancel')
   cancel(@Req() request: Request, @Param('runId') runId: string) {
     return this.teams.cancel(request, 'personal', runId).then((run) => ({ run }));
   }
 
-  @Post(':runId/tasks/:taskKey/retry')
-  retry(@Req() request: Request, @Param('runId') runId: string, @Param('taskKey') taskKey: string, @Body() body?: { model?: string }) {
-    return this.teams.retry(request, 'personal', runId, taskKey, body?.model).then((run) => ({ run }));
-  }
+
 }
 
 @Controller('coder-documents')

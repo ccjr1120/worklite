@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Header, Headers, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { CreateRunRequest, RunProgressEvent } from '@worklite/contracts';
+import type { CreateRunRequest, RerunWorkflowNodeRequest, RunProgressEvent } from '@worklite/contracts';
 import { RunsService } from './runs.service';
 
 @Controller()
@@ -104,6 +104,11 @@ export class RunsController {
   @Post('runs/:runId/pending-action/open-browser')
   openPendingActionBrowser(@Req() request: Request, @Param('runId') runId: string) {
     return this.runs.openPendingActionBrowser(request, 'personal', runId);
+  }
+
+  @Post('runs/:runId/nodes/:nodeRunId/rerun')
+  rerunNode(@Req() request: Request, @Param('runId') runId: string, @Param('nodeRunId') nodeRunId: string, @Body() body: RerunWorkflowNodeRequest) {
+    return this.runs.rerunNode(request, 'personal', runId, nodeRunId, body);
   }
 
   @Post('runs/:runId/nodes/:nodeRunId/retry')

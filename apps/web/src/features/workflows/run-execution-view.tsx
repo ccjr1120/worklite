@@ -1,8 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import type { RunView, WorkflowNodeDefinition, WorkflowNodeRunView } from '@worklite/contracts';
 import { StatusBadge } from '@/components/status-badge';
+import { Button } from '@/components/ui/button';
 import { WorkflowStageNode, workflowNodeInputs, workflowNodePortOffset, workflowNodeRowCount, type WorkflowCanvasEdge, type WorkflowCanvasNode, type WorkflowCanvasNodeType } from '@/components/workflow-canvas-nodes';
 import { calculateWorkflowFlowLayout } from '@/components/workflow-flow-layout';
 import { useWorkflowVersionsQuery } from '@/api/queries';
@@ -11,6 +13,7 @@ import type { AppLocale } from '@/i18n/locale';
 import { cn } from '@/lib/utils';
 import { readNodeIdentity } from './node-identity';
 import { NodeRunLogEntry, toRecordStatus } from './node-run-log';
+import { NodeRerunDialog } from './node-rerun-dialog';
 
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 128;
@@ -125,6 +128,7 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
   const { t: tWorkflow } = useTranslation('workflows');
   const { t: tCommon } = useTranslation('common');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [rerunNodeRunId, setRerunNodeRunId] = useState<string | null>(null);
   const initializedRunRef = useRef<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const markerId = `run-flow-arrow-${useId().split(':').join('')}`;
@@ -185,6 +189,9 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
   }, [edges, nodeById, nodes]);
   const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) : undefined;
   const selectedNodeRuns = selectedNodeId ? invocationMap.get(selectedNodeId) ?? [] : [];
+  const rerunNodeRun = rerunNodeRunId ? nodeRuns.find((nodeRun) => nodeRun.id === rerunNodeRunId) : undefined;
+  const rerunNode = rerunNodeRun ? nodeById.get(rerunNodeRun.nodeId) : undefined;
+  const nodeLabels = useMemo(() => new Map([...nodeById].map(([id, node]) => [id, node.data.label])), [nodeById]);
 
   useEffect(() => {
     if (!run || !definition || nodeRuns.length === 0 || initializedRunRef.current === run.id) return;
@@ -352,6 +359,12 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
                       {label} <span className="font-mono text-[11px] text-muted-foreground">#{nodeRun.position}</span>
                     </button>
                     <StatusBadge status={toRecordStatus(nodeRun.status)} />
+                    {nodeRun.rerunnable ? (
+                      <Button type="button" size="compact" variant="ghost" onClick={() => setRerunNodeRunId(nodeRun.id)}>
+                        <RotateCcw aria-hidden="true" />
+                        {tRun('nodeRerun.action')}
+                      </Button>
+                    ) : null}
                     {nodeRun.startedAt ? <time className="text-[11px] tabular-nums text-muted-foreground">{formatDateTime(nodeRun.startedAt, locale)}</time> : null}
                     {duration ? <span className="text-[11px] tabular-nums text-muted-foreground">{tCommon('duration.compact', duration)}</span> : null}
                   </div>
@@ -386,6 +399,18 @@ function RunExecutionView({ run, locale, loading, failed, compact = false }: Run
           </ol>
         )}
       </section>
+
+      {rerunNodeRun && rerunNode ? (
+        <NodeRerunDialog
+          key={rerunNodeRun.id}
+          run={run}
+          nodeRun={rerunNodeRun}
+          definition={definition}
+          nodeLabel={rerunNode.data.label}
+          nodeLabels={nodeLabels}
+          onClose={() => setRerunNodeRunId(null)}
+        />
+      ) : null}
 
       {selectedNode ? (
         <section className="mt-4 max-h-[40vh] overflow-auto rounded-xl border border-border bg-surface p-3 shadow-xs" aria-labelledby={`run-node-details-${run.id}-title`}>

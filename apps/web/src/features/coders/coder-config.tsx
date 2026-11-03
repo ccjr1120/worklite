@@ -296,7 +296,6 @@ export function CoderConfig({ coderId }: { coderId: string }) {
             <article key={memory.id} className="rounded-xl border border-border bg-surface p-4 shadow-xs">
               <p className="whitespace-pre-wrap break-words text-[13px]">{memory.content}</p>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>{memory.role ? roleLabel(memory.role, (key) => t(key as never)) : t('config.memories.allRoles')}</span>
                 {memory.repositoryName ? <span>{memory.repositoryName}</span> : null}
                 <span>{formatDateTime(memory.updatedAt, locale)}</span>
               </div>

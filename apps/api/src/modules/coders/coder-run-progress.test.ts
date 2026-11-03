@@ -2,29 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { deriveRunProgress } from './coder-runtime.service';
 
 const run = { status: 'running', desiredControlState: 'none' } as Parameters<typeof deriveRunProgress>[0];
-const row = (taskKey: string) => ({
-  taskKey, active: true, status: 'running', result: null, developerId: null,
+const row = (taskKey: string, role: string, status = 'running') => ({
+  taskKey, role, active: true, status, result: null,
 }) as Parameters<typeof deriveRunProgress>[1][number];
 
 describe('Coder run progress', () => {
-  it('reports the actual group planner phase without an invented percentage', () => {
-    const progress = deriveRunProgress(run, [row('group_0_planner')]);
-    expect(progress.phase).toBe('planning');
-    expect(progress.nextStep).toBe('dispatch_assignments');
+  it('reports Router coordination without an invented percentage', () => {
+    const progress = deriveRunProgress(run, [row('group_router_0', 'router')]);
+    expect(progress.phase).toBe('routing');
+    expect(progress.nextStep).toBe('route_tasks');
     expect(progress).not.toHaveProperty('percent');
   });
 
-  it.each([
-    ['group_1_implementer', 'development'],
-    ['group_2_test_runner', 'test_execution'],
-    ['group_3_reviewer', 'review'],
-    ['group_4_custom_role', 'working'],
-  ] as const)('maps %s to %s', (taskKey, phase) => {
-    expect(deriveRunProgress(run, [row(taskKey)]).phase).toBe(phase);
+  it('reports work role tasks and completion counts without inferring a fixed role phase', () => {
+    const progress = deriveRunProgress(run, [row('group_router_0', 'router', 'completed'), row('group_1_implementer', 'implementer')]);
+    expect(progress).toMatchObject({ phase: 'working', nextStep: 'await_task_results', totalTasks: 2, completedTasks: 1, activeTaskKeys: ['group_1_implementer'] });
   });
 
   it('does not present a failed run as complete progress', () => {
-    const progress = deriveRunProgress({ ...run, status: 'failed' }, [row('group_0_planner')]);
+    const progress = deriveRunProgress({ ...run, status: 'failed' }, [row('group_router_0', 'router')]);
     expect(progress.phase).toBe('terminal');
     expect(progress).not.toHaveProperty('percent');
   });
