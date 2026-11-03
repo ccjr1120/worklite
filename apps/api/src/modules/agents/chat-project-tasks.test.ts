@@ -282,6 +282,76 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     expect(settled.steerQueue[0]!.status).toBe('delivered');
   });
 
+  it('keeps the round alive across a live Claude question: reports the wait, then the answer continues the same round', async () => {
+    const { repository } = setup();
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run('acall_ask');
+    let executeCalls = 0;
+    let received: string | undefined;
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+      execute: async (request: { onQuestion?: (question: string) => Promise<string | undefined> }) => {
+        executeCalls += 1;
+        received = await request.onQuestion!('用哪个方案？');
+        return `{"status":"succeeded","summary":"按 ${received} 完成"}`;
+      },
+    };
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments);
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_ask', { goal: '修复问题', projectDirectory: repository });
+    const waitingReports: string[] = [];
+    const completion = service.run(task.id, async () => undefined, undefined, (waiting) => { waitingReports.push(waiting.pendingQuestion!.question); });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const waiting = service.view(task.id, WORKSPACE_ID);
+    expect(waiting.status).toBe('waiting_for_input');
+    expect(waitingReports).toEqual(['用哪个方案？']);
+
+    await service.answer(WORKSPACE_ID, task.id, { questionId: waiting.pendingQuestion!.id, answer: 'A' }, () => undefined);
+    const settled = await completion;
+    expect(received).toBe('A');
+    expect(executeCalls).toBe(1);
+    expect(settled.status).toBe('succeeded');
+    expect(settled.result).toBe('按 A 完成');
+    expect(settled.reportedAt).toBeNull();
+  });
+
+  it('ends a live Claude question wait when the task is cancelled', async () => {
+    const { repository } = setup();
+    const db = createDb(':memory:');
+    dbs.push(db);
+    for (const statement of DDL) db.$client.exec(statement);
+    db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
+    db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
+    db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
+      .run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat', CAPABILITIES);
+    db.$client.prepare('INSERT INTO agent_tool_calls (id) VALUES (?)').run('acall_ask_cancel');
+    let received: string | undefined = 'unset';
+    const executors = {
+      captureLaunch: async () => ({ executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }),
+      execute: async (request: { onQuestion?: (question: string) => Promise<string | undefined>; signal: AbortSignal }) => {
+        received = await request.onQuestion!('用哪个方案？');
+        request.signal.throwIfAborted();
+        return '{"status":"succeeded","summary":"never"}';
+      },
+    };
+    const service = new ChatProjectTasksService(db, executors as unknown as ProjectExecutorService, noAttachments);
+    const task = await service.capture(WORKSPACE_ID, EXECUTION_ID, 'acall_ask_cancel', { goal: '修复问题', projectDirectory: repository });
+    const completion = service.run(task.id, async () => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(service.view(task.id, WORKSPACE_ID).status).toBe('waiting_for_input');
+
+    const cancelled = await service.cancel(task.id);
+    expect(received).toBeUndefined();
+    expect(cancelled.status).toBe('cancelled');
+    expect((await completion).status).toBe('cancelled');
+  });
+
   it('queues a steer instruction and runs another round within the same background execution when the executor has no live channel', async () => {
     const { repository } = setup();
     const db = createDb(':memory:');

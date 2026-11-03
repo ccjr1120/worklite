@@ -74,6 +74,64 @@ describe('initializeDatabase restart recovery', () => {
     ]);
   });
 
+  it('interrupts a Claude project task left waiting_for_input, since its SDK session cannot survive a restart', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+
+    const executionId = 'aex_claude_wait_restart';
+    const taskId = 'acall_claude_wait_restart';
+    db.insert(schema.agentExecutions).values({
+      id: executionId, workspaceId: 'workspace_personal', agentId: 'agt_system_helper_chat',
+      modelMessages: [], displayMessages: [], plan: [],
+    }).run();
+    db.insert(schema.agentToolCalls).values({
+      id: taskId, executionId, workspaceId: 'workspace_personal', agentId: 'agt_system_helper_chat',
+      toolCallId: 'call_claude_wait_restart', toolName: 'builtin', mcpToolName: 'project_task',
+      workingDirectory: '/', arguments: [], packageFiles: [], output: '', resultAppended: false,
+    }).run();
+    db.insert(schema.chatProjectTasks).values({
+      id: taskId, workspaceId: 'workspace_personal', executionId,
+      goal: 'investigate', projectDirectory: '/tmp', model: '',
+      snapshot: {
+        launch: { executor: 'claude', commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null },
+        projectInstructions: [], capabilities: { revision: 1 } as never,
+      },
+      status: 'waiting_for_input',
+      pendingQuestion: { id: 'question_1', projectTaskId: taskId, question: '继续哪个方向？', options: [], createdAt: new Date().toISOString() },
+      reportedAt: null,
+    }).run();
+    // A Codex task waiting_for_input is unaffected: its question already ended its process through
+    // the deny-and-rerun path, so the task is durable state, not an in-process session.
+    const codexTaskId = 'acall_codex_wait_restart';
+    db.insert(schema.agentToolCalls).values({
+      id: codexTaskId, executionId, workspaceId: 'workspace_personal', agentId: 'agt_system_helper_chat',
+      toolCallId: 'call_codex_wait_restart', toolName: 'builtin', mcpToolName: 'project_task',
+      workingDirectory: '/', arguments: [], packageFiles: [], output: '', resultAppended: false,
+    }).run();
+    db.insert(schema.chatProjectTasks).values({
+      id: codexTaskId, workspaceId: 'workspace_personal', executionId,
+      goal: 'investigate', projectDirectory: '/tmp', model: '',
+      snapshot: {
+        launch: { executor: 'codex', commandArguments: ['codex'], model: null },
+        projectInstructions: [], capabilities: { revision: 1 } as never,
+      },
+      status: 'waiting_for_input',
+      pendingQuestion: { id: 'question_2', projectTaskId: codexTaskId, question: '继续哪个方向？', options: [], createdAt: new Date().toISOString() },
+      reportedAt: null,
+    }).run();
+
+    await initializeDatabase(db);
+
+    const [claudeTask] = db.select().from(schema.chatProjectTasks).where(eq(schema.chatProjectTasks.id, taskId)).limit(1).all();
+    expect(claudeTask.status).toBe('failed');
+    expect(claudeTask.error).toContain('中断');
+    expect(claudeTask.pendingQuestion).toEqual({ id: 'question_1', projectTaskId: taskId, question: '继续哪个方向？', options: [], createdAt: expect.any(String) });
+    expect(claudeTask.reportedAt).not.toBeNull();
+
+    const [codexTask] = db.select().from(schema.chatProjectTasks).where(eq(schema.chatProjectTasks.id, codexTaskId)).limit(1).all();
+    expect(codexTask.status).toBe('waiting_for_input');
+  });
+
   it('registers the Workflow Agent model replacement platform tool', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);

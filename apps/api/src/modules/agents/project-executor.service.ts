@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
 import type { StoredProjectExecutor, StoredProjectExecutorLaunch } from '@worklite/db';
-import { CLAUDE_CODE_PLUGIN_ID, CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
+import { CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeService } from './claude-code.service';
 import { CodexAppServerService } from './codex-app-server.service';
@@ -26,7 +26,7 @@ export class ProjectExecutorService {
       const configPath = model === null ? await this.plugins.codexConfigPath() : undefined;
       return this.codex.captureLaunch(commandArguments, model, configPath);
     }
-    return this.claude.captureLaunch(await this.plugins.commandArguments(CLAUDE_CODE_PLUGIN_ID), model);
+    return this.claude.captureLaunch(model);
   }
 
   // A native Codex model designation is left to the operator's own Codex configuration; a Gateway public

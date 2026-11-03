@@ -48,7 +48,7 @@ export type WorkspaceView = {
 };
 
 export type PluginView = {
-  id: 'codex-cli-chat' | 'claude-code' | 'feishu-bot' | 'wechat-bot' | 'wechat-official-account';
+  id: 'codex-cli-chat' | 'feishu-bot' | 'wechat-bot' | 'wechat-official-account';
   name: string;
   description: string;
   command: string;

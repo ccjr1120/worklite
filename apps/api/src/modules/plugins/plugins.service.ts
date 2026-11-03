@@ -11,8 +11,9 @@ import type { WechatService } from './wechat/wechat.service';
 export const FEISHU_PLUGIN_ID = 'feishu-bot' as const;
 export const WECHAT_PLUGIN_ID = 'wechat-bot' as const;
 export const CODEX_CLI_PLUGIN_ID = 'codex-cli-chat' as const;
-export const CLAUDE_CODE_PLUGIN_ID = 'claude-code' as const;
-const EXECUTABLE_PLUGIN_IDS: readonly string[] = [CODEX_CLI_PLUGIN_ID, CLAUDE_CODE_PLUGIN_ID];
+// Claude Code runs through the bundled Agent SDK binary and has no plugin; database
+// initialization removes the retired 'claude-code' row.
+const EXECUTABLE_PLUGIN_IDS: readonly string[] = [CODEX_CLI_PLUGIN_ID];
 export const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat' as const;
 
 @Injectable()

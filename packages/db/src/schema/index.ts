@@ -520,7 +520,7 @@ export const agentToolCalls = sqliteTable('agent_tool_calls', {
 
 // Captured launch of a project executor. With no model, Codex launches the `codex` command and can use a
 // configured `--config-dir`; a declared model keeps the configured command word and per-run Gateway Provider.
-// Claude Code uses the operator's ~/.claude configuration, whose effective base URL must be the Gateway.
+// Claude Code uses WorkLite's own ~/.worklite/claude configuration, whose effective base URL must be the Gateway.
 // modelSource states where the model came from:
 // the task parameter, the Chat configuration's declared default for that executor, or the executor's own
 // local default.

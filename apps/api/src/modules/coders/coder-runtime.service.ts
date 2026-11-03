@@ -213,6 +213,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly documentDeliveries = new Map<string, Promise<void>>();
   // Serializes queued-Run starts per team so the parallel cap is never oversubscribed.
   private readonly runStarters = new Map<string, Promise<void>>();
+  // Claude AskUserQuestion waits parked inside a still-running executor session, keyed by
+  // pending input id. Answering resolves the wait so the same SDK session continues.
+  private readonly liveQuestions = new Map<string, { runId: string; resolve: (answer: string | undefined) => void }>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -237,6 +240,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    this.releaseLiveQuestions();
     for (const controller of this.abortControllers.values()) controller.abort();
     await Promise.allSettled([...this.executions.values()]);
     this.checkpointer.db.close();
@@ -742,6 +746,37 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     // invalid path rejects the whole answer instead of consuming it.
     const directories = await this.normalizeBindingDirectories(request?.directories);
 
+    // A live Claude question: the graph never interrupted, the executor session is still
+    // parked on this answer. Deliver it there instead of resuming a LangGraph interrupt.
+    const live = this.liveQuestions.get(request.pendingInputId);
+    if (live && live.runId === runId) {
+      const now = new Date();
+      const answered = await this.transaction((transaction) => {
+        const rows = transaction.update(coderPendingInputs).set({ status: 'answered', answer: request.answer, answeredAt: now, updatedAt: now })
+          .where(and(
+            eq(coderPendingInputs.id, request.pendingInputId),
+            eq(coderPendingInputs.runId, runId),
+            eq(coderPendingInputs.scopeRevision, run.scopeRevision),
+            eq(coderPendingInputs.status, 'pending'),
+          )).returning().all();
+        if (rows.length === 0) return null;
+        transaction.update(coderTaskAttempts).set({ status: 'running', result: null })
+          .where(and(eq(coderTaskAttempts.id, rows[0].taskAttemptId), eq(coderTaskAttempts.status, 'waiting_for_input'))).run();
+        const remaining = transaction.select({ id: coderPendingInputs.id }).from(coderPendingInputs)
+          .where(and(eq(coderPendingInputs.runId, runId), eq(coderPendingInputs.kind, 'question'), eq(coderPendingInputs.status, 'pending')))
+          .limit(1).all();
+        transaction.update(coderRuns).set({ status: remaining.length > 0 ? 'waiting_for_input' : 'running', updatedAt: now })
+          .where(and(eq(coderRuns.id, runId), eq(coderRuns.status, 'waiting_for_input'))).run();
+        this.appendEvent(transaction, runId, 'input.answered', { pendingInputId: request.pendingInputId, kind: 'question', answer: request.answer });
+        this.appendProgressIfChanged(transaction, runId);
+        return true;
+      });
+      if (!answered) throw new BadRequestException('The pending input is no longer active.');
+      this.liveQuestions.delete(request.pendingInputId);
+      live.resolve(request.answer);
+      return this.getRunView(runId);
+    }
+
     const version = await this.getVersion(run);
     const orchestrationVersion: number = version.snapshot.orchestrationVersion ?? 1;
     let resumeInterruptId: string | undefined;
@@ -958,9 +993,23 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   upgradeQuiescent(): boolean { return this.executions.size === 0; }
 
+  // Ends every live question wait of a Run with no answer (cancel, shutdown).
+  private releaseLiveQuestions(runId?: string): void {
+    for (const [id, live] of [...this.liveQuestions]) {
+      if (runId !== undefined && live.runId !== runId) continue;
+      this.liveQuestions.delete(id);
+      live.resolve(undefined);
+    }
+  }
+
   async pause(runId: string): Promise<AgentTeamRunView> {
     const run = await this.getRun(runId);
     if (run.status === 'paused') return this.getRunView(runId);
+    // A live Claude question keeps its executor session in this process; pausing would leave
+    // it holding a slot with no way to resume it, so it must be answered or cancelled instead.
+    if ([...this.liveQuestions.values()].some((live) => live.runId === runId)) {
+      throw new BadRequestException('This Coder run has a live Claude question; answer it or cancel the run.');
+    }
     if (run.status === 'waiting_for_input' || (run.status === 'queued' && !this.executions.has(runId))) {
       await this.setRunStatus(runId, 'paused');
     } else if (run.status === 'queued' || run.status === 'running') {
@@ -1010,6 +1059,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
     if (!accepted) return this.getRunView(runId);
 
+    this.releaseLiveQuestions(runId);
     this.abortControllers.get(runId)?.abort();
     if (!this.executions.has(runId) && !(await this.hasPendingOperationRecovery(runId))) {
       await this.failActiveAttempts(runId, 'cancelled', 'The Coder run was cancelled.');
@@ -1181,6 +1231,7 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async recoverRuns(): Promise<void> {
+    await this.failLostLiveQuestions();
     const runs = await this.db.select().from(coderRuns)
       .where(inArray(coderRuns.status, ['queued', 'running']))
       .orderBy(asc(coderRuns.createdAt));
@@ -1674,7 +1725,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
             // Coder's model-loop traffic by its own surface rather than merged into it.
             correlation: { surface: 'coder_project_task', coderId: run.coderId, teamRunId: request.runId, teamRole: taskRole, teamTaskAttemptId: attempt.id, nodeRunId: attempt.id, executor: execution.executor },
             onEvent: (activity) => {
-              commandIds.add(activity.commandExecutionId);
+              // Claude Agent SDK activities carry no CommandExecution id (no own process record);
+              // only Codex activities do.
+              if (activity.commandExecutionId) commandIds.add(activity.commandExecutionId);
               this.appendEvent(this.db, request.runId, 'task.activity', {
                 taskAttemptId: attempt.id,
                 taskKey,
@@ -1688,6 +1741,9 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
               ...taskAttribution(request),
               delta,
             }),
+            // Only Claude's AskUserQuestion reads this: the question is persisted and shown like
+            // any Coder question, but the executor session stays open and receives the answer.
+            onQuestion: (question) => this.waitForLiveAnswer(request, workspaceId, attempt.id, question, signal),
           });
         } finally {
           if (memoryToken) this.memoryTokens.revoke(memoryToken);
@@ -2221,11 +2277,69 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
     return { id: created.id, status: created.status, result: created.result };
   }
 
+  // Persists a live Claude question, moves the Run to waiting_for_input and parks until
+  // `answer()` (or cancel/shutdown, which resolve undefined) releases it.
+  private async waitForLiveAnswer(
+    request: AgentTeamTaskRequest,
+    workspaceId: string,
+    attemptId: string,
+    question: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const waiting = await this.finishWaitingAttempt(request, workspaceId, attemptId, {
+      status: 'waiting_for_input',
+      pendingInput: { id: '', question, scopeRevision: request.scopeRevision },
+    }, true);
+    if (waiting.status !== 'waiting_for_input') return undefined;
+    const pendingInputId = waiting.pendingInput.id;
+    const answer = new Promise<string | undefined>((resolve) => {
+      const onAbort = () => { this.liveQuestions.delete(pendingInputId); resolve(undefined); };
+      if (signal.aborted) { resolve(undefined); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.liveQuestions.set(pendingInputId, {
+        runId: request.runId,
+        resolve: (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      });
+    });
+    await this.setRunStatus(request.runId, 'waiting_for_input');
+    return answer;
+  }
+
+  // API restart: a Claude question waiting on a live executor session lost that session.
+  // The Run is failed with the question and activities kept; nothing is replayed.
+  private async failLostLiveQuestions(): Promise<void> {
+    const attempts = await this.db.select({ id: coderTaskAttempts.id, runId: coderTaskAttempts.runId, result: coderTaskAttempts.result })
+      .from(coderTaskAttempts)
+      .where(and(eq(coderTaskAttempts.active, true), eq(coderTaskAttempts.status, 'waiting_for_input')));
+    const runIds = new Set(attempts
+      .filter((attempt) => (attempt.result as { liveSession?: unknown } | null)?.liveSession === true)
+      .map((attempt) => attempt.runId));
+    const reason = 'API 已重启，等待回答的 Claude 会话已中断且未重放；请先检查仓库实际状态，再选择重试或重新执行。';
+    for (const runId of runIds) {
+      const run = await this.getRun(runId);
+      if (isTerminalRunStatus(run.status)) continue;
+      await this.db.update(coderPendingInputs).set({ status: 'cancelled', updatedAt: new Date() })
+        .where(and(eq(coderPendingInputs.runId, runId), eq(coderPendingInputs.status, 'pending'), eq(coderPendingInputs.kind, 'question')));
+      await this.failActiveAttempts(runId, 'failed', reason);
+      if (run.groupId) {
+        const groupId = run.groupId;
+        await this.transaction((transaction) => {
+          this.appendGroupMessage(transaction, { workspaceId: run.workspaceId, groupId, sender: 'system', kind: 'status', body: reason, runId });
+        });
+      }
+      await this.setRunStatus(runId, 'failed');
+      await this.maybeStartQueuedRuns(run.coderId);
+    }
+  }
+
   private async finishWaitingAttempt(
     request: AgentTeamTaskRequest,
     workspaceId: string,
     attemptId: string,
     result: Extract<AgentTeamTaskResult, { status: 'waiting_for_input' }>,
+    // A live Claude question keeps the attempt's executor session open: the attempt is not
+    // finished, and `liveSession` marks it so a restart can tell it was in-process state.
+    live = false,
   ): Promise<AgentTeamTaskResult> {
     const now = new Date();
     const pendingInputId = `atinput_${randomUUID()}`;
@@ -2247,8 +2361,8 @@ export class AgentTeamRuntimeService implements OnModuleInit, OnModuleDestroy {
       }
       const updated = transaction.update(coderTaskAttempts).set({
         status: 'waiting_for_input',
-        result: persistedResult,
-        finishedAt: now,
+        result: live ? { ...persistedResult, liveSession: true } : persistedResult,
+        ...(live ? {} : { finishedAt: now }),
       }).where(and(
         eq(coderTaskAttempts.id, attemptId),
         eq(coderTaskAttempts.status, 'running'),

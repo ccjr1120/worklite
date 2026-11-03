@@ -4,7 +4,9 @@ import type { GatewayCorrelation } from '@worklite/model-gateway';
 
 export type ProjectExecutorActivity = {
   phase: string;
-  commandExecutionId: string;
+  // Codex activities carry the backing CommandExecution id. Claude Agent SDK activities have no
+  // process-level command record of their own and carry `sessionId` instead.
+  commandExecutionId?: string;
   sessionId?: string;
   threadId?: string;
   turnId?: string;
@@ -57,6 +59,17 @@ export type ProjectExecutorRequest = {
   steerPort?: ProjectExecutorSteerPort;
   onTextDelta?: (delta: string) => void | Promise<void>;
   onEvent?: (activity: ProjectExecutorActivity) => void | Promise<void>;
+  /**
+   * Live-session question answering, used only by Claude's AskUserQuestion. When supplied (Chat
+   * project tasks), a question keeps the SDK session alive: the executor calls this with the
+   * asked question text and awaits the task owner's answer (through its own state machine going
+   * to waiting_for_input), then feeds that answer straight back into the same session. Resolving
+   * with `undefined` means the task was cancelled while waiting. Chat project tasks and Coder
+   * task attempts both supply it. When omitted, the executor instead ends the turn immediately with the same
+   * `{"status":"waiting_for_input","pendingInput":{"question":...}}` text result Codex produces,
+   * and a new attempt re-runs the whole task with the answer appended to its input.
+   */
+  onQuestion?: (question: string) => Promise<string | undefined>;
 };
 
 export type PreparedProjectExecution = {

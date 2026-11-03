@@ -1007,7 +1007,9 @@ export class AgentExecutionsService implements OnModuleInit {
       // The originating tool call has already settled, so progress linkage updates without a status guard.
       await this.db.update(agentToolCalls).set({ workingDirectory: view.worktreePath ?? view.projectDirectory, commandExecutionId: typeof backend?.commandExecutionId === 'string' ? backend.commandExecutionId : null }).where(eq(agentToolCalls.id, taskId));
       await this.publishSnapshotForExecution(workspaceId, executionId);
-    }, (settled) => this.scheduleProjectTaskReport(workspaceId, executionId, settled.id))
+    }, (settled) => this.scheduleProjectTaskReport(workspaceId, executionId, settled.id),
+    // A live Claude question parks the round without settling it; report the question now.
+    (waiting) => { void this.publishSnapshotForExecution(workspaceId, executionId); this.scheduleProjectTaskReport(workspaceId, executionId, waiting.id); })
       .catch((error) => this.logger.warn(`Chat project task ${taskId} background run failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 

@@ -53,11 +53,20 @@ export function deriveTaskStage(task: Task): ChatProjectTaskView['stage'] {
 
 @Injectable()
 export class ChatProjectTasksService {
-  private readonly active = new Map<string, { controller: AbortController; completion: Promise<Task> }>();
+  // `onWaiting` fires when a live Claude question parks the round, so the owning conversation can
+  // report the question while the round itself is still in flight.
+  private readonly active = new Map<string, { controller: AbortController; completion: Promise<Task>; onWaiting?: (task: Task) => void }>();
   // The live mid-turn delivery channel for whichever round of a task is currently executing, set
   // only while that round's executors.execute() call is in flight. Absent between rounds, during
   // waiting_for_input, or for an executor (Claude Code) that never populates its `deliver`.
   private readonly steerPorts = new Map<string, ProjectExecutorSteerPort>();
+  // The live Claude AskUserQuestion wait for whichever round is currently executing, set only
+  // while that round's own ClaudeCodeService call is parked on its answer; absent for Codex (whose
+  // question path always ends the turn and re-runs instead) and between rounds. Answering the task
+  // resolves this with the answer text instead of starting a new round; the in-flight
+  // executors.execute() call is what is still waiting, and resolving it is what lets the same SDK
+  // session continue.
+  private readonly liveQuestions = new Map<string, (answer: string | undefined) => void>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -155,16 +164,17 @@ export class ChatProjectTasksService {
     return loaded.filter((image): image is { fileName: string; description?: string; body: Buffer } => image !== null);
   }
 
-  async run(taskId: string, onProgress: () => Promise<void>, onSettled?: (task: Task) => void): Promise<Task> {
+  async run(taskId: string, onProgress: () => Promise<void>, onSettled?: (task: Task) => void, onWaiting?: (task: Task) => void): Promise<Task> {
     const active = this.active.get(taskId);
     if (active) {
       if (onSettled) void active.completion.then(onSettled, () => undefined);
+      if (onWaiting) active.onWaiting = onWaiting;
       return active.completion;
     }
     const controller = new AbortController();
     const completion = this.execute(taskId, controller.signal, onProgress).finally(() => this.active.delete(taskId));
     if (onSettled) void completion.then(onSettled, () => undefined);
-    this.active.set(taskId, { controller, completion });
+    this.active.set(taskId, { controller, completion, onWaiting });
     return completion;
   }
 
@@ -183,6 +193,23 @@ export class ChatProjectTasksService {
     if (!question || question.id !== input.questionId || task.status !== 'waiting_for_input') throw new ConflictException('This project task question is no longer active.');
     if (input.recoveryDecision) throw new BadRequestException('This question does not accept a recovery decision.');
     const answer = required(input.answer, 'answer');
+    // A live Claude AskUserQuestion wait (see createLiveQuestionHandler): the task's round is still
+    // in flight, parked inside the SDK's canUseTool. Resolving it continues the very same session;
+    // no new round starts, so `answers` (which only the degrade-JSON re-run path replays into a
+    // fresh executor input) is left untouched.
+    const live = this.liveQuestions.get(taskId);
+    if (live) {
+      const updated = this.db.transaction((transaction) => {
+        const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+        if (current.pendingQuestion?.id !== question.id || current.status !== 'waiting_for_input') throw new ConflictException('This project task question has already been answered.');
+        accept(transaction);
+        // The question was reported on its own; the round's final settlement must report again.
+        return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
+      });
+      this.liveQuestions.delete(taskId);
+      live(answer);
+      return updated;
+    }
     return this.db.transaction((transaction) => {
       const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       if (current.pendingQuestion?.id !== question.id || current.status !== 'waiting_for_input') throw new ConflictException('This project task question has already been answered.');
@@ -190,6 +217,25 @@ export class ChatProjectTasksService {
       // The task runs again, so its next settlement must be reported anew.
       return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, answers: [...current.answers, { question: question.question, answer }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
     });
+  }
+
+  // Claude's AskUserQuestion reaches this through ProjectExecutorRequest.onQuestion while its SDK
+  // session is still live, parked inside canUseTool. Persists the question and moves the task to
+  // waiting_for_input exactly like the degrade-JSON path, but resolves in place once answered
+  // (through `answer()` finding this in `liveQuestions`) instead of ending the round; aborting
+  // `signal` (cancel, or the executor's own teardown) resolves the wait with no answer so the
+  // question never stays parked past the task's own lifetime.
+  private createLiveQuestionHandler(task: Task, signal: AbortSignal): (question: string) => Promise<string | undefined> {
+    return (question: string) => {
+      const questionId = `question_${randomUUID()}`;
+      const waiting = this.update(task.id, { status: 'waiting_for_input', reportedAt: null, pendingQuestion: { id: questionId, projectTaskId: task.id, question, options: [], createdAt: new Date().toISOString() } });
+      this.active.get(task.id)?.onWaiting?.(waiting);
+      return new Promise<string | undefined>((resolve) => {
+        const onAbort = () => { this.liveQuestions.delete(task.id); resolve(undefined); };
+        this.liveQuestions.set(task.id, (answer) => { signal.removeEventListener('abort', onAbort); resolve(answer); });
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+    };
   }
 
   view(taskId: string, workspaceId?: string, options?: { activities?: 'recent' | 'full' }): ChatProjectTaskView {
@@ -407,6 +453,9 @@ export class ChatProjectTasksService {
         }),
         signal,
         steerPort,
+        // Only Claude's AskUserQuestion reads this; Codex's own question path (and a model that
+        // returns the waiting_for_input JSON directly) still ends the round and settles below.
+        onQuestion: this.createLiveQuestionHandler(task, signal),
         onEvent: (detail) => activity(detail),
       });
       signal.throwIfAborted();
@@ -415,7 +464,10 @@ export class ChatProjectTasksService {
       return { status: 'ran', task: this.requireTask(taskId), settlement };
     } catch (error) {
       if (signal.aborted) return { status: 'cancelled', task: this.update(taskId, { status: 'cancelled', pendingQuestion: null, reportedAt: new Date() }) };
-      return { status: 'failed', task: this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException || error instanceof NotFoundException ? error.message : '项目任务执行失败，请查看关联的命令记录。' }) };
+      return { status: 'failed', task: this.update(taskId, { status: 'failed', pendingQuestion: null, error: error instanceof CodexAppServerError || error instanceof ClaudeCodeError || error instanceof BadRequestException || error instanceof NotFoundException ? error.message
+        // Claude runs through the SDK and has no command record to point at; its own error text is the evidence.
+        : task.snapshot.launch && 'executor' in task.snapshot.launch && task.snapshot.launch.executor === 'claude' && error instanceof Error && error.message ? `Claude Code 执行失败：${error.message}`
+          : '项目任务执行失败，请查看关联的命令记录。' }) };
     } finally {
       this.steerPorts.delete(taskId);
     }
