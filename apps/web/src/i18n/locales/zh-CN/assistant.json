@@ -466,7 +466,11 @@
     "defaultModel": "默认模型",
     "tasks": "角色任务",
     "roleElapsed": "已耗时 {{duration}}",
-    "openRun": "打开任务详情"
+    "openRun": "打开任务详情",
+    "currentRole": "角色",
+    "runTotal": "累计",
+    "tokensUnit": "tok",
+    "totalLabel": "累计"
   },
   "usage": {
     "title": "本对话 Gateway 用量",

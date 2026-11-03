@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { useContext, useEffect, useState, type FormEvent } from 'react';
 import { LoaderCircle, Pause, Play, RefreshCw, RotateCcw, Square, Users } from 'lucide-react';
 import type { AgentTeamPendingInputView, AgentTeamRunView, ChatSubmissionView } from '@worklite/contracts';
-import { agentTeamGroupQueryKey, agentTeamRunQueryKey, coderRunStatusCountsQueryKey, useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
+import { agentTeamGroupQueryKey, agentTeamRunQueryKey, coderRunStatusCountsQueryKey, useAgentTeamRunQuery, useAgentTeamRunUsageQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { TaskLink } from './records';
 import { PinTrackingContext } from './pinned-executions';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -17,7 +17,8 @@ import { TruncatedText } from '@/components/ui/truncated-text';
 import { toSingleLine } from '@/lib/single-line';
 import { cn } from '@/lib/utils';
 import { CoderRunDialog } from '@/features/coders/coder-run-detail';
-import { formatElapsed, isSettledTeamRun, teamCurrentLabel } from '@/features/coders/coder-run-summary';
+import { isSettledTeamRun, teamCurrentLabel } from '@/features/coders/coder-run-summary';
+import { TokenFigure } from '@/features/coders/run-nodes';
 
 function WorkflowTask({ submission }: { submission: ChatSubmissionView }) {
   const { t } = useTranslation('assistant');
@@ -138,21 +139,45 @@ function TeamOperationRecovery({ run, operation, onRunUpdate }: { run: AgentTeam
   </form>;
 }
 
-// Mirrors the project task card: a one-line summary (goal, status, phase and current role) and
-// a footer with the role's model and elapsed time; task-level evidence stays collapsed. Pending
-// questions and recovery decisions stay visible because the Run is blocked on them.
+/**
+ * Format duration in ms to compact form: 45s / 3m12s / 1h05m / 2d03h
+ */
+function formatCompactDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    const mins = totalMinutes;
+    const secs = totalSeconds % 60;
+    return `${mins}m${String(secs).padStart(2, '0')}s`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const hours = totalHours;
+    const mins = totalMinutes % 60;
+    return `${hours}h${String(mins).padStart(2, '0')}m`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return `${days}d${String(hours).padStart(2, '0')}h`;
+}
+
+// Mirrors the project task card: displays four key metrics (current progress, current role,
+// current role's token/elapsed, Run total token/elapsed) plus task-level evidence.
+// Pending questions and recovery decisions stay visible because the Run is blocked on them.
 function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissionView; runId: string; groupId?: string }) {
   const { t } = useTranslation('assistant');
   const { t: tTeams } = useTranslation('coders');
   const pins = useContext(PinTrackingContext);
   const query = useAgentTeamRunQuery('personal', runId);
   const run = query.data;
+  const usage = useAgentTeamRunUsageQuery(runId, !submission.error && (run ? !isSettledTeamRun(run) : !submission.settled));
   const [clockNow, setClockNow] = useState(() => Date.now());
   const live = !submission.error && (run ? !isSettledTeamRun(run) : !submission.settled);
   useEffect(() => {
     if (!live) return;
     setClockNow(Date.now());
-    const timer = window.setInterval(() => setClockNow(Date.now()), 60_000);
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [live, runId]);
   function onRunUpdate(updated: AgentTeamRunView) {
@@ -163,19 +188,30 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
   const questions = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'question') ?? [];
   const recoveries = run?.pendingInputs.filter((input) => input.status === 'pending' && input.kind === 'operation_recovery') ?? [];
   const current = run && live ? run.current : null;
+
+  // Find current node in usage data
+  const currentNode = current && current.activeCount === 1 && usage.data?.nodes
+    ? usage.data.nodes.find(n => n.nodeRunId === current.taskAttemptId)
+    : null;
+
+  // Current role elapsed: prefer local clock calculation for smooth updates
+  const roleElapsedMs = current && current.activeCount === 1
+    ? clockNow - Date.parse(current.startedAt as string)
+    : currentNode?.durationMs ?? null;
+  const roleElapsedStr = roleElapsedMs !== null && roleElapsedMs >= 0 ? formatCompactDuration(roleElapsedMs) : null;
+
+  // Run total elapsed
   const runEndMs = run && !live ? Date.parse(run.finishedAt ?? run.updatedAt) : clockNow;
-  const totalElapsed = run ? formatElapsed(t, run.createdAt, runEndMs) : null;
-  const roleElapsed = current && current.activeCount === 1 ? formatElapsed(t, current.startedAt, clockNow) : null;
-  const progressLine = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? null;
-  const assignments = run && live && run.progress.totalAssignments > 0 ? tTeams('progress.assignments', { completed: run.progress.completedAssignments, total: run.progress.totalAssignments }) : null;
-  const meta = [
-    run?.coderName ?? null,
-    current ? teamCurrentLabel(t, tTeams, current) : run && live ? t('teamRun.betweenRoles') : null,
-    current ? current.model || t('teamRun.defaultModel') : null,
-    roleElapsed ? t('teamRun.roleElapsed', { duration: roleElapsed }) : null,
-    assignments,
-    totalElapsed ? t('teamRun.totalElapsed', { duration: totalElapsed }) : null,
-  ].filter((part): part is string => Boolean(part));
+  const totalElapsedMs = run ? runEndMs - Date.parse(run.createdAt as string) : null;
+  const totalElapsedStr = totalElapsedMs !== null && totalElapsedMs >= 0 ? formatCompactDuration(totalElapsedMs) : null;
+
+  // Phase + step progress line
+  const phase = run && live && run.progress.phase
+    ? tTeams(`progress.phaseValue.${run.progress.phase}` as never, { defaultValue: run.progress.phase })
+    : null;
+  const step = current?.progressText.trim() ? toSingleLine(current.progressText) : current?.assignmentTitle ?? currentNode?.latestActivity ?? null;
+  const progressLine = [phase, step].filter(Boolean).join(' · ');
+
   const statusKey = submission.error ? 'failed' : run ? toStatusKey(run.status) : 'queued';
 
   return <article
@@ -195,18 +231,67 @@ function TeamRunCard({ submission, runId, groupId }: { submission: ChatSubmissio
         <TruncatedText text={toSingleLine(submission.message)} title={submission.message} className="block text-[13px] font-semibold" />
         <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <StatusBadge key={statusKey} status={statusKey} label={t(`status.${submission.error ? 'failed' : run?.status ?? 'queued'}`)} />
-          {progressLine ? <TruncatedText text={progressLine} title={current?.progressText || progressLine} /> : null}
+          {progressLine ? <TruncatedText text={progressLine} title={progressLine} /> : null}
         </span>
       </span>
     </button>
     </CoderRunDialog>
-    <div className="flex min-h-9 flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-1.5">
-      <p className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] text-muted-foreground">
-        {meta.map((part, index) => <span key={index} className={cn('flex min-w-0 items-center gap-1.5', index > 2 && 'shrink-0')}>{index ? <span aria-hidden="true">·</span> : null}<TruncatedText text={part} /></span>)}
-        {!run && query.isPending ? <span role="status">{t('records.taskLoading')}</span> : null}
-      </p>
-      {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : null}
+
+    {/* Metrics: current role + run total (only when live or between loading and completion) */}
+    {live || (run && !isSettledTeamRun(run)) ? <div className="border-t border-border px-3 py-2">
+      {/* Current role row: only show metrics when single active role */}
+      {current && current.activeCount === 1 ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs">
+        <span className="text-muted-foreground">{t('teamRun.currentRole')}</span>
+        <div className="flex items-center gap-2 text-right tabular-nums text-muted-foreground">
+          <span>{teamCurrentLabel(t, tTeams, current)}</span>
+          <span>{roleElapsedStr ?? '—'}</span>
+          <span>·</span>
+          {currentNode?.tokens ? (
+            <>
+              <TokenFigure value={currentNode.tokens} retentionHours={usage.data?.retentionHours} />
+              <span>{t('teamRun.tokensUnit')}</span>
+            </>
+          ) : (
+            <>
+              <span>—</span>
+              <span>{t('teamRun.tokensUnit')}</span>
+            </>
+          )}
+        </div>
+      </div> : current ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs text-muted-foreground">
+        <span>{teamCurrentLabel(t, tTeams, current)}</span>
+      </div> : live ? <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs text-muted-foreground">
+        <span>{t('teamRun.betweenRoles')}</span>
+      </div> : null}
+    </div> : null}
+
+    {/* Run total (always shown, including after settled) */}
+    {run ? <div className="border-t border-border px-3 py-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 text-xs">
+        <span className="text-muted-foreground">{t('teamRun.runTotal')}</span>
+        <div className="flex items-center gap-2 text-right tabular-nums text-muted-foreground">
+          <span>{totalElapsedStr ?? '—'}</span>
+          <span>·</span>
+          {usage.data?.totalTokens ? (
+            <>
+              <TokenFigure value={usage.data.totalTokens} retentionHours={usage.data.retentionHours} />
+              <span>{t('teamRun.tokensUnit')}</span>
+            </>
+          ) : (
+            <>
+              <span>—</span>
+              <span>{t('teamRun.tokensUnit')}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </div> : null}
+
+    {/* Actions */}
+    <div className="flex min-h-9 items-center justify-end gap-2 border-t border-border px-3 py-1.5">
+      {run ? <TeamRunActions run={run} groupId={groupId} onRunUpdate={onRunUpdate} /> : !run && query.isPending ? <span role="status" className="text-[13px] text-muted-foreground">{t('records.taskLoading')}</span> : null}
     </div>
+
     {submission.error || query.isError || failure || questions.length || recoveries.length ? <div className="space-y-2 border-t border-border px-3 py-2.5">
       {submission.error ? <TruncatedText as="p" text={toSingleLine(submission.error)} title={submission.error} className="text-[13px] text-danger" role="alert" /> : null}
       {query.isError ? <p className="text-[13px] text-danger" role="alert">{t('records.taskLoadFailed')}</p> : null}

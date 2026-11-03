@@ -3354,9 +3354,9 @@ export function rolePromptAddition(
       (() => {
         const implementationRole = snapshot.roles.find((item) => item.executor)?.role;
         return role === implementationRole
-          ? `When implementation should split safely, return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to ${implementationRole}. WorkLite runs those assignments in parallel using this same captured ${implementationRole} configuration.`
+          ? `Split by default whenever the work touches multiple distinct files, modules or components, even within what reads as a single task; return up to four developmentAssignments with non-overlapping ownedPaths and optional repositoryIds, and hand off to ${implementationRole}. WorkLite runs those assignments in parallel using this same captured ${implementationRole} configuration. Keep a single assignment only when the pieces are tightly coupled and cannot be verified independently; when in doubt, split rather than bundle.`
           : implementationRole
-            ? `Use developmentAssignments only when assigning implementation work to the single configured ${implementationRole} role; each assignment must state its repository scope and non-overlapping paths.`
+            ? `When assigning implementation work to the single configured ${implementationRole} role, split the request into separate developmentAssignments by default whenever it touches multiple distinct files, modules or components, even within what reads as a single task (for example a UI or code change and a separate documentation or configuration change, or changes to unrelated files or components, or several files that each need their own edit within one larger change); each assignment must state its repository scope and non-overlapping paths. Keep a single assignment only when the pieces are tightly coupled and cannot be verified independently: the same edit depends on another change in the same file or component, or splitting would leave an assignment unable to typecheck, build or be tested on its own. When in doubt, split rather than bundle.`
             : '';
       })(),
       request?.projectDirectory?.trim()
