@@ -4,6 +4,11 @@ import { realpath } from 'node:fs/promises';
 import { validateAgentRuntime } from './agent-runtime.configuration';
 
 describe('Agent runtime configuration', () => {
+  it('allows an engine Agent to receive its directory from the task', async () => {
+    await expect(validateAgentRuntime({ kind: 'claude' })).resolves.toEqual({ kind: 'claude', projectDirectory: '' });
+    await expect(validateAgentRuntime({ kind: 'codex', approvalPolicy: 'bypass' })).rejects.toThrow();
+  });
+
   it('keeps existing Agents native when no runtime is selected', async () => {
     await expect(validateAgentRuntime(undefined)).resolves.toEqual({ kind: 'native' });
   });
@@ -13,7 +18,7 @@ describe('Agent runtime configuration', () => {
   });
 
   it('rejects unsupported backends, missing directories and invalid approval policies', async () => {
-    for (const value of [null, [], { kind: 'unknown' }, { kind: 'claude' }, { kind: 'codex', projectDirectory: '../project' }, { kind: 'codex', projectDirectory: '/definitely-missing-worklite-directory' }, { kind: 'codex', projectDirectory: '/tmp', approvalPolicy: 'bypass' }]) {
+    for (const value of [null, [], { kind: 'unknown' }, { kind: 'codex', projectDirectory: '../project' }, { kind: 'codex', projectDirectory: '/definitely-missing-worklite-directory' }, { kind: 'codex', projectDirectory: '/tmp', approvalPolicy: 'bypass' }]) {
       await expect(validateAgentRuntime(value)).rejects.toThrow();
     }
   });

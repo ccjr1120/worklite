@@ -266,7 +266,21 @@ export type AgentRuntimeConfiguration =
   | { kind: 'native' }
   | { kind: 'claude' | 'codex'; projectDirectory: string; approvalPolicy?: 'auto' | 'ask' };
 
+export type AgentCollaboration = {
+  subAgentIds: string[];
+  builtinToolNames?: string[];
+  privateTools?: Array<{ name: string; description: string; inputSchema: Record<string, unknown>; handler: { kind: 'capability'; capabilityId: string } | { kind: 'command'; command: string; workingDirectory: string } }>;
+  capabilities: Array<{ id: string; type: string; typeVersion: string; config: Record<string, unknown> }>;
+  publicModels?: string[];
+  outputFormat?: 'text' | 'json';
+  outputContract?: unknown;
+  allowEmptyOutputKeys?: string[];
+  requiredSkillIds?: string[];
+  limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxOutputTokens?: number };
+};
+
 export type AgentView = {
+  collaboration?: AgentCollaboration | null;
   runtime?: AgentRuntimeConfiguration;
   chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
   id: string;
@@ -292,9 +306,6 @@ export type AgentView = {
     connection: 'connected' | 'unreachable' | 'auth_failed' | 'unconfigured';
     allowedTools: number;
   }>;
-  version: 'draft';
-  latestVersionId?: string | null;
-  latestVersion?: number | null;
   updatedAt: string;
 };
 
@@ -333,7 +344,7 @@ export type AgentExecutionErrorCode =
 export type ChatProgressReport = {
   // stage/progress/updatedAt are presentation fields for the collapsible Web card; the reminder
   // text and its dedupe signature do not depend on them.
-  items: Array<{ kind: 'task' | 'coder' | 'workflow'; id: string; title: string; status: string; stage?: string; progress?: string; updatedAt?: string }>;
+  items: Array<{ kind: 'task' | 'coder' | 'workflow' | 'agent'; id: string; title: string; status: string; agentId?: string; runId?: string; stage?: string; progress?: string; updatedAt?: string }>;
 };
 
 export type AgentExecutionMessage = {
@@ -451,6 +462,7 @@ export type ChatProjectOperationDetailView = {
 };
 
 export type AgentToolCallView = {
+  agentInvocation?: { agentId: string; agentName: string; runId: string; task: string };
   shell?: { command: string; state: 'awaiting_confirmation' | 'authorized' | 'reserved' | 'uncertain' | 'settled'; authorizationId?: string; approvedAt?: string };
   projectTask?: ChatProjectTaskView;
   /** Present only for a Chat `ask_user` call: the stored question and the user's accepted answer, if any. */
@@ -494,6 +506,30 @@ export type AgentExecutionView = {
   updatedAt: string;
 };
 
+/** A recorded invocation, including calls delegated from Chat or another Agent. */
+export type AgentRunView = {
+  id: string;
+  executionId: string;
+  agentId: string;
+  agentName: string;
+  parentRunId: string | null;
+  task: string;
+  currentActivity?: { phase: 'model' | 'tool'; toolName?: string } | null;
+  status: AgentExecutionStatus | 'paused';
+  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null } | null;
+  output: string;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export type AgentRunListView = { items: AgentRunView[]; hasMore: boolean };
+export type AgentRunDetailView = {
+  run: AgentRunView;
+  invocations: AgentRunView[];
+  artifacts: Array<{ id: string; name: string }>;
+};
+
 export type AgentExecutionEventData =
   | { kind: 'snapshot'; execution: AgentExecutionView }
   | { kind: 'message_delta'; messageId: string; delta: string; progressReport?: ChatProgressReport }
@@ -508,6 +544,7 @@ export type AgentExecutionEvent = {
 };
 
 export type CreateAgentExecutionRequest = {
+  projectDirectory?: string;
   message: string;
 };
 
@@ -522,6 +559,8 @@ export type AnswerAgentQuestionRequest = {
 };
 
 export type CreateAgentRequest = {
+  parentAgentId?: string;
+  collaboration?: AgentCollaboration | null;
   runtime?: AgentRuntimeConfiguration;
   name: string;
   responsibility: string;
@@ -553,13 +592,13 @@ export type WorkliteFixedNavigationTarget =
   | 'mcp-servers'
   | 'model-providers'
   | 'logs'
-  | 'workflows'
+  | 'agents'
   | 'settings-appearance'
   | 'settings-usage'
   | 'settings-audit-log';
 
 // A Workflow editor target addresses one workflow by id, such as `/workflows/wf_...`.
-export type WorkliteNavigationTarget = WorkliteFixedNavigationTarget | `/workflows/${string}`;
+export type WorkliteNavigationTarget = WorkliteFixedNavigationTarget | `/agents/${string}`;
 
 export type WorkspaceSettingsView = {
   appearance: 'system' | 'light' | 'dark';
@@ -2240,3 +2279,8 @@ export type RecoverAgentTeamOperationRequest = {
 export type AgentTeamRunActionResponse = {
   run: AgentTeamRunView;
 };
+
+/** Keep the selected Agent's routing id in model context while showing the user's name mention. */
+export function agentTaskDisplayText(content: string): string {
+  return content.replace(/^请调用 Agent ([^\n]+)（id: agt_[A-Za-z0-9_-]+）完成任务：\n/, '@$1\n');
+}

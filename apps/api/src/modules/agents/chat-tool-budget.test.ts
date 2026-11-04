@@ -1,5 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentExecutions, agentToolCalls, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { CHAT_DELEGATION_RULE, agentExecutions, agentToolCalls, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
 import type { HostNotificationsService } from '../notifications/host-notifications.service';
@@ -60,8 +61,47 @@ async function advance(service: AgentExecutionsService) {
 }
 
 describe('Chat tool budget', () => {
+  it('applies delegation boundaries even to an existing Chat capability snapshot', async () => {
+    const { service } = await setup(0);
+    gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
+
+    await advance(service);
+
+    const request = gateway.generateAgentStep.mock.calls[0]![0] as { systemPrompt: string; builtinTools: Array<{ name: string; description: string }> };
+    expect(request.systemPrompt).toContain(CHAT_DELEGATION_RULE);
+    expect(request.systemPrompt).toContain('cancellation does not delete the instance');
+    expect(request.systemPrompt).toContain('Native Agent continuation reads the latest saved configuration');
+    expect(request.systemPrompt).toContain('GET /agents/:agentId/history/:runId');
+    expect(request.systemPrompt).toContain('A user-requested status check is allowed');
+    expect(request.builtinTools.find((tool) => tool.name === 'run_agent')?.description).toContain('the selected Agent decides how to fulfill the goal');
+  });
+
+  it('rejects calls beyond 12 even when the model batches calls across the boundary', async () => {
+    const { db, service } = await setup(11);
+    const internal = service as unknown as { resumeAfterToolCalls: () => Promise<void> };
+    vi.spyOn(internal, 'resumeAfterToolCalls').mockResolvedValue();
+    const steps = [{ step: 'Investigate', status: 'completed' }, { step: 'Report', status: 'in_progress' }];
+    gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [], toolCalls: [
+      { toolCallId: 'call_12', toolName: 'update_plan', input: { steps } },
+      { toolCallId: 'call_13', toolName: 'update_plan', input: { steps } },
+    ], finishReason: 'tool-calls', contextDropped: 0 });
+    await advance(service);
+    const calls = db.select().from(agentToolCalls).all();
+    expect(calls.find((call) => call.toolCallId === 'call_12')?.status).toBe('completed');
+    expect(calls.find((call) => call.toolCallId === 'call_13')).toMatchObject({ status: 'failed', output: expect.stringContaining('tool budget for this turn is exhausted') });
+  });
+
+  it('starts a fresh budget for a new user turn', async () => {
+    const { db, service } = await setup(12);
+    const execution = db.select().from(agentExecutions).get()!;
+    db.update(agentExecutions).set({ modelMessages: [...execution.modelMessages, { role: 'user', content: 'Check a different target.' }] }).where(eq(agentExecutions.id, execution.id)).run();
+    gateway.generateAgentStep.mockResolvedValueOnce({ text: 'Done.', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
+    await advance(service);
+    expect(gateway.generateAgentStep.mock.calls[0]![0]).toMatchObject({ toolsDisabled: false, maxToolRounds: 12 });
+  });
+
   it('answers without tools once the budget is spent instead of failing the turn', async () => {
-    const { service } = await setup(24);
+    const { service } = await setup(12);
     gateway.generateAgentStep.mockResolvedValueOnce({ text: 'Here is what I found so far.', responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: 'Here is what I found so far.' }] }], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
 
     const view = await advance(service);
@@ -73,7 +113,7 @@ describe('Chat tool budget', () => {
   });
 
   it('keeps tools available while the turn is under budget', async () => {
-    const { service } = await setup(3);
+    const { service } = await setup(11);
     gateway.generateAgentStep.mockResolvedValueOnce({ text: 'Done.', responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: 'Done.' }] }], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
 
     await advance(service);
@@ -83,7 +123,7 @@ describe('Chat tool budget', () => {
   });
 
   it('still fails the turn when the model ignores the budget and asks for another tool', async () => {
-    const { db, service } = await setup(24);
+    const { db, service } = await setup(12);
     gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [], toolCalls: [{ toolCallId: 'call_more', toolName: 'run_host_command', input: {} }], finishReason: 'tool-calls', contextDropped: 0 });
 
     await advance(service);

@@ -4,6 +4,7 @@ import type { GatewayCorrelation } from '@worklite/model-gateway';
 
 export type ProjectExecutorActivity = {
   phase: string;
+  usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
   // Codex activities carry the backing CommandExecution id. Claude Agent SDK activities have no
   // process-level command record of their own and carry `sessionId` instead.
   commandExecutionId?: string;

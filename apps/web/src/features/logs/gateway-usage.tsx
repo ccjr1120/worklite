@@ -110,7 +110,7 @@ function GatewayUsage({ from, to, groupBy, onGroupByChange, onViewRequests }: {
   const groups = statsQuery.data?.attribution.groups ?? [];
   const metricValue = (value: number | null, suffix = '') => value === null ? t('statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
   const tokenValue = (value: number | null) => value === null ? t('statistics.unavailable') : formatTokenCount(value, locale);
-  const tokenExact = (value: number | null) => value === null ? t('statistics.unavailable') : formatNumber(value, locale);
+  const tokenExact = tokenValue;
   const surfaceLabel = (surface: GatewaySurface | null) => surface ? t(`usage.surfaces.${surface}` as never) : t('usage.surfaces.unattributed');
 
   // A group key identifies a row within one period and grouping only, so changing
@@ -142,7 +142,7 @@ function GatewayUsage({ from, to, groupBy, onGroupByChange, onViewRequests }: {
       <Select value={groupBy} onValueChange={(value) => onGroupByChange(value as GatewayStatsGroupBy)}>
         <SelectTrigger className="w-[220px]" aria-label={t('usage.groupBy')}><SelectValue /></SelectTrigger>
         <SelectContent>
-          {GATEWAY_STATS_GROUP_BYS.map((option) => <SelectItem key={option} value={option}>{t(`usage.groupBys.${option}` as never)}</SelectItem>)}
+          {GATEWAY_STATS_GROUP_BYS.filter((option) => !['coder', 'workflow', 'team_run', 'node_run'].includes(option)).map((option) => <SelectItem key={option} value={option}>{t(`usage.groupBys.${option}` as never)}</SelectItem>)}
         </SelectContent>
       </Select>
       {groups.length === 0 ? (

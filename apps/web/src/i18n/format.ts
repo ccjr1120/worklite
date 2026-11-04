@@ -31,22 +31,9 @@ export function formatNumber(value: number, locale: AppLocale): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-/**
- * Short token count: below 1,000 as is, then k and M with at most one decimal
- * (1,234 → 1.2k, 12,000 → 12k). A value that would round to 1000k reads as 1M.
- */
+/** Token usage always uses k; three decimals preserve individual whole tokens. */
 export function formatTokenCount(value: number, locale: AppLocale): string {
-  if (Math.abs(value) < 1_000) {
-    return formatNumber(value, locale);
-  }
-
-  const short = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
-  const thousands = Math.round(value / 100) / 10;
-  if (Math.abs(thousands) < 1_000) {
-    return `${short.format(thousands)}k`;
-  }
-
-  return `${short.format(Math.round(value / 100_000) / 10)}M`;
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value / 1_000)}k`;
 }
 
 export function formatCurrency(value: number, locale: AppLocale, currency = 'USD'): string {

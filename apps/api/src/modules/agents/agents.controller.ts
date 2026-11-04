@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
+import { AgentHistoryService } from './agent-history.service';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { AgentExecutionEvent, CreateAgentRequest, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -6,7 +7,7 @@ import { AgentsService } from './agents.service';
 
 @Controller('agents')
 export class AgentsController {
-  constructor(private readonly agents: AgentsService, private readonly executions: AgentExecutionsService) {}
+  constructor(private readonly agents: AgentsService, private readonly executions: AgentExecutionsService, private readonly history: AgentHistoryService) {}
 
 
   @Get()
@@ -23,6 +24,17 @@ export class AgentsController {
   @Delete(':agentId/executions/:executionId/session')
   closeSession(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
     return this.executions.closeRuntimeSession(request, 'personal', agentId, executionId);
+  }
+
+  @Get(':agentId/history')
+  listHistory(@Req() request: Request, @Param('agentId') agentId: string, @Query('offset') offset?: string) {
+    const parsed = Number(offset ?? 0);
+    return this.history.list(request, agentId, Number.isSafeInteger(parsed) && parsed >= 0 ? Math.min(parsed, 10000) : 0);
+  }
+
+  @Get(':agentId/history/:runId')
+  getHistory(@Req() request: Request, @Param('agentId') agentId: string, @Param('runId') runId: string) {
+    return this.history.detail(request, agentId, runId);
   }
 
   @Get(':agentId')
@@ -123,10 +135,23 @@ export class AgentsController {
     return this.executions.retry(request, 'personal', agentId, executionId);
   }
 
+  @Post(':agentId/executions/:executionId/sub-agents/:runId/pause')
+  pauseSubAgent(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('runId') runId: string) {
+    return this.executions.controlSubAgent(request, 'personal', agentId, executionId, runId, 'pause');
+  }
+
+  @Post(':agentId/executions/:executionId/sub-agents/:runId/resume')
+  resumeSubAgent(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('runId') runId: string) {
+    return this.executions.controlSubAgent(request, 'personal', agentId, executionId, runId, 'resume');
+  }
+
   @Post(':agentId/executions/:executionId/cancel')
   cancelExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
     return this.executions.cancel(request, 'personal', agentId, executionId);
   }
+
+  @Delete(':agentId')
+  delete(@Req() request: Request, @Param('agentId') agentId: string) { return this.agents.delete(request, 'personal', agentId); }
 
   @Patch(':agentId')
   update(@Req() request: Request, @Param('agentId') agentId: string, @Body() body: UpdateAgentRequest) {

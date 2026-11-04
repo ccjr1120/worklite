@@ -30,7 +30,7 @@ function ContextBar({
   const { t } = useTranslation('workspace');
 
   return (
-    <header className="relative z-20 bg-background flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 md:px-5">
+    <header className="wl-context-bar relative z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border px-3 md:px-5">
       {showMenuButton ? (
         <Button variant="ghost" size="icon-compact" aria-label={t('openNavigation')} onClick={onOpenNavigation}>
           <Menu className="size-4" />

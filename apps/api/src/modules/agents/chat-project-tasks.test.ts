@@ -115,7 +115,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     'CREATE TABLE workspaces (id text PRIMARY KEY NOT NULL)',
     'CREATE TABLE agents (id text PRIMARY KEY NOT NULL)',
     `CREATE TABLE agent_executions (
-      execution_authorization text, capability_snapshot text,
+      execution_authorization text, capability_snapshot text, project_directory text,
       id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
       status text NOT NULL DEFAULT 'running', phase text NOT NULL DEFAULT 'model', error_code text,

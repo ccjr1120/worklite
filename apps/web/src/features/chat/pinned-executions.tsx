@@ -1,6 +1,8 @@
 import { createContext, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ChatProjectTaskView, ChatSubmissionView, RunView } from '@worklite/contracts';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/api/client';
+import type { AgentToolCallView, ChatProjectTaskView, ChatSubmissionView, RunView } from '@worklite/contracts';
 import { useAgentTeamRunQuery, useRunQuery, useWorkliteUpgradeQuery } from '@/api/queries';
 import { isLiveStatus, StatusDot, toStatusKey } from '@/components/status-badge';
 import { focusRingInset, surfaceInteraction } from '@/components/ui/interaction';
@@ -9,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { isSettledTeamRun, teamCurrentLabel } from '@/features/coders/coder-run-summary';
 
 type PinTracking = {
-  track: (id: string) => (element: HTMLElement | null) => void;
+  track: (id: string, placement?: 'above' | 'outside') => (element: HTMLElement | null) => void;
   expandRequest: { id: string; nonce: number } | null;
 };
 
@@ -18,6 +20,7 @@ type PinTracking = {
 export const PinTrackingContext = createContext<PinTracking | null>(null);
 
 export type PinCandidate =
+  | { id: string; kind: 'agent'; invocation: NonNullable<AgentToolCallView['agentInvocation']> }
   | { id: string; kind: 'project'; task: ChatProjectTaskView }
   | { id: string; kind: 'submission'; submission: ChatSubmissionView }
   | { id: string; kind: 'workflowRun'; run: RunView; name: string };
@@ -25,6 +28,7 @@ export type PinCandidate =
 const VISIBLE_ROWS = 3;
 
 export function usePinTracking(host: RefObject<HTMLElement | null>) {
+  const placements = useRef(new Map<string, 'above' | 'outside'>());
   const elements = useRef(new Map<string, HTMLElement>());
   const ids = useRef(new WeakMap<Element, string>());
   const callbacks = useRef(new Map<string, (element: HTMLElement | null) => void>());
@@ -37,7 +41,7 @@ export function usePinTracking(host: RefObject<HTMLElement | null>) {
       for (const entry of entries) {
         const id = ids.current.get(entry.target);
         if (!id) continue;
-        const isAbove = !entry.isIntersecting && entry.boundingClientRect.bottom <= top + 1;
+        const isAbove = !entry.isIntersecting && (placements.current.get(id) === 'outside' || entry.boundingClientRect.bottom <= top + 1);
         if (isAbove === current.has(id)) continue;
         next ??= new Set(current);
         if (isAbove) next.add(id);
@@ -48,7 +52,8 @@ export function usePinTracking(host: RefObject<HTMLElement | null>) {
   }), [host]);
   useEffect(() => () => observer?.disconnect(), [observer]);
 
-  const track = useCallback((id: string) => {
+  const track = useCallback((id: string, placement: 'above' | 'outside' = 'above') => {
+    placements.current.set(id, placement);
     let callback = callbacks.current.get(id);
     if (!callback) {
       callback = (element: HTMLElement | null) => {
@@ -81,7 +86,7 @@ export function usePinTracking(host: RefObject<HTMLElement | null>) {
     element.scrollIntoView({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
     element.focus({ preventScroll: true });
     setExpandRequest({ id, nonce: Date.now() });
-  }, []);
+  }, [setExpandRequest]);
 
   const context = useMemo<PinTracking>(() => ({ track, expandRequest }), [track, expandRequest]);
   return { context, above, reveal };
@@ -162,15 +167,28 @@ function firstLine(value: string): string {
   return value.trim().split(/\r?\n/, 1)[0] ?? '';
 }
 
-// Each kind reads its status from the same queries its card already uses, so the bar adds no request.
+// Agent launch receipts do not carry execution status; read the same saved instance as its detail page.
 function usePinnedRowState(candidate: PinCandidate): RowState {
   const { t } = useTranslation('assistant');
   const { t: tTeams } = useTranslation('coders');
+  const agent = useQuery({
+    queryKey: ['agent-run', candidate.kind === 'agent' ? candidate.invocation.agentId : '', candidate.kind === 'agent' ? candidate.invocation.runId : ''],
+    queryFn: () => {
+      if (candidate.kind !== 'agent') throw new Error('An Agent instance is required.');
+      return api.agentRun(candidate.invocation.agentId, candidate.invocation.runId);
+    },
+    enabled: candidate.kind === 'agent',
+    refetchInterval: candidate.kind === 'agent' ? 5000 : false,
+  });
   const reference = candidate.kind === 'submission' ? candidate.submission.reference : null;
   const workflow = useRunQuery('personal', reference?.kind === 'workflow' ? reference.runId : '', reference?.kind === 'workflow');
   const teamRun = useAgentTeamRunQuery('personal', reference?.kind === 'coder' ? reference.runId : '');
   const upgrade = useWorkliteUpgradeQuery(reference?.kind === 'upgrade' ? reference.jobId : '');
 
+  if (candidate.kind === 'agent') {
+    const status = agent.data?.run.status ?? null;
+    return { live: status === 'running' || status === 'waiting_for_input', status, title: `@${candidate.invocation.agentName}`, progress: firstLine(candidate.invocation.task) || null };
+  }
   if (candidate.kind === 'project') {
     const latest = candidate.task.activities.at(-1);
     const progress = typeof latest?.summary === 'string' ? latest.summary : typeof latest?.phase === 'string' ? latest.phase : null;

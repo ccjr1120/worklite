@@ -7,7 +7,7 @@ import { Lexer, type Token, type Tokens } from 'marked';
 import { and, eq, inArray, ne } from 'drizzle-orm';
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Response } from 'playwright';
 import type { NodeExecutionRequest, NodeExecutionResult, PendingNodeExecutionResult } from '@worklite/workflow-engine';
-import { wechatOfficialAccounts, wechatPublications, workflowPendingActions, type Database } from '@worklite/db';
+import { wechatOfficialAccounts, agentPublications as wechatPublications, agentPendingActions as workflowPendingActions, type Database } from '@worklite/db';
 import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
@@ -493,6 +493,7 @@ export class WechatOfficialAccountService {
   }
 
   private complete(actionId: string): void {
+    this.db.update(workflowPendingActions).set({ status: 'completed', qrCode: null, updatedAt: new Date() }).where(eq(workflowPendingActions.id, actionId)).run();
     for (const listener of this.listeners) listener(actionId);
   }
 

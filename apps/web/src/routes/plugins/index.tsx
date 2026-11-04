@@ -8,11 +8,9 @@ import { CollectionHeader, CollectionRow, CollectionTable } from '@/components/c
 import { CollectionToolbar } from '@/components/collection-toolbar';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorState } from '@/components/error-state';
-import { useLocale } from '@/components/locale-provider';
 import { PageHeading } from '@/components/page-heading';
 import { StatusBadge } from '@/components/status-badge';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { formatDateTime } from '@/i18n/format';
 
 export const Route = createFileRoute('/plugins/')({
   component: PluginListPage,
@@ -21,7 +19,6 @@ export const Route = createFileRoute('/plugins/')({
 function PluginListPage() {
   const { t: tPlugins } = useTranslation('plugins');
   const { t: tCommon } = useTranslation('common');
-  const { locale } = useLocale();
   const [search, setSearch] = useState('');
   const { data: plugins = [], isLoading, isError, refetch } = usePluginsQuery();
   const visiblePlugins = useMemo(
@@ -44,9 +41,9 @@ function PluginListPage() {
         {isLoading ? (
           <CollectionLoading
             label={tPlugins('loading')}
-            columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]}
-            headerClassName="min-w-[720px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_1fr_1fr]"
-            rowClassName="min-w-[720px] grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_1fr_1fr]"
+            columns={[tPlugins('columns.plugin'), tPlugins('columns.availability')]}
+            headerClassName="grid-cols-[minmax(0,1fr)_140px]"
+            rowClassName="grid-cols-1 md:grid-cols-[minmax(0,1fr)_140px]"
           />
         ) : isError ? (
           <ErrorState title={tPlugins('title')} description={tPlugins('loadFailed')} onAction={() => void refetch()} />
@@ -57,12 +54,12 @@ function PluginListPage() {
         ) : (
           <CollectionTable>
             <CollectionHeader
-              className="min-w-[720px] grid-cols-[minmax(0,2fr)_minmax(0,2fr)_1fr_1fr]"
-              columns={[tPlugins('columns.plugin'), tPlugins('columns.command'), tPlugins('columns.availability'), tPlugins('columns.updated')]}
+              className="grid-cols-[minmax(0,1fr)_140px]"
+              columns={[tPlugins('columns.plugin'), tPlugins('columns.availability')]}
             />
             {items.map((plugin) => (
               <Link key={plugin.id} to="/plugins/$pluginId" params={{ pluginId: plugin.id }} className="block">
-                <CollectionRow className="min-w-[720px] grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_1fr_1fr]">
+                <CollectionRow className="grid-cols-1 md:grid-cols-[minmax(0,1fr)_140px]">
                   <span className="flex min-w-0 items-center gap-3">
                     <Puzzle className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span className="min-w-0">
@@ -70,9 +67,7 @@ function PluginListPage() {
                       {plugin.description ? <span className="block truncate text-[13px] text-muted-foreground">{plugin.description}</span> : null}
                     </span>
                   </span>
-                  <code className="truncate text-[13px] text-muted-foreground">{plugin.command}</code>
                   <StatusBadge status={plugin.status} />
-                  <span className="tabular-nums text-[13px] text-muted-foreground">{formatDateTime(plugin.updatedAt, locale)}</span>
                 </CollectionRow>
               </Link>
             ))}

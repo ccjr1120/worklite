@@ -16,9 +16,10 @@ const DDL = [
   'CREATE TABLE agents (id text PRIMARY KEY NOT NULL)',
   `CREATE TABLE agent_executions (
     id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'completed'
+    agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'completed', phase text NOT NULL DEFAULT 'model', display_messages text NOT NULL DEFAULT '[]', updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
   )`,
   'CREATE TABLE agent_tool_calls (id text PRIMARY KEY NOT NULL)',
+  `CREATE TABLE audit_logs (id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL, actor_id text, action text NOT NULL, resource text NOT NULL, metadata text NOT NULL DEFAULT '{}', created_at integer DEFAULT (unixepoch() * 1000) NOT NULL)`,
   `CREATE TABLE chat_codex_tasks (
     id text PRIMARY KEY NOT NULL REFERENCES agent_tool_calls(id) ON DELETE CASCADE,
     workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -123,6 +124,60 @@ afterEach(() => {
 });
 
 describe('ChatProgressReportsService', () => {
+  it('reports background Agents in their originating Chat, deduplicates, and stops after completion', async () => {
+    const { db, tick, reportActiveWorkProgress } = setup();
+    db.$client.prepare('INSERT INTO agents(id) VALUES (?)').run('article');
+    db.$client.prepare('INSERT INTO agent_executions(id, workspace_id, agent_id, status) VALUES (?, ?, ?, ?)').run('background', WORKSPACE_ID, 'article', 'running');
+    db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('dispatch', WORKSPACE_ID, 'chat_agent.dispatched', 'background', JSON.stringify({ conversationId: EXECUTION_ID, agentName: 'wechat-article', invocationId: 'air_article' }));
+    db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('child', WORKSPACE_ID, 'agent.invocation', 'background', JSON.stringify({ agentName: '调研', parentRunId: 'air_article', status: 'running' }));
+    await tick();
+    expect(reportActiveWorkProgress).toHaveBeenCalledTimes(1);
+    expect(reportActiveWorkProgress.mock.calls[0]?.[1]).toBe(EXECUTION_ID);
+    expect(reportActiveWorkProgress.mock.calls[0]?.[2]).toContain('调研：执行中');
+    const report = (reportActiveWorkProgress.mock.calls[0] as unknown as unknown[])[3];
+    expect(report).toMatchObject({ items: [{ kind: 'agent', id: 'background', title: 'wechat-article', agentId: 'article', runId: 'air_article' }] });
+    await tick();
+    expect(reportActiveWorkProgress).toHaveBeenCalledTimes(1);
+    db.$client.prepare('UPDATE audit_logs SET metadata = ? WHERE id = ?').run(JSON.stringify({ agentName: '调研', parentRunId: 'air_article', status: 'completed' }), 'child');
+    await tick();
+    expect(reportActiveWorkProgress).toHaveBeenCalledTimes(2);
+    expect(reportActiveWorkProgress.mock.calls[1]?.[2]).toContain('调研：已完成');
+    db.$client.prepare('UPDATE agent_executions SET status = ? WHERE id = ?').run('completed', 'background');
+    await tick();
+    expect(reportActiveWorkProgress).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports recovered research once and keeps concurrent work visible', async () => {
+    const { db, tick, reportActiveWorkProgress } = setup();
+    db.$client.prepare('INSERT INTO agents(id) VALUES (?)').run('article');
+    db.$client.prepare('INSERT INTO agent_executions(id, workspace_id, agent_id, status) VALUES (?, ?, ?, ?)').run('background', WORKSPACE_ID, 'article', 'running');
+    db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('dispatch', WORKSPACE_ID, 'chat_agent.dispatched', 'background', JSON.stringify({ conversationId: EXECUTION_ID, agentName: 'wechat-article', invocationId: 'air_article' }));
+    const insert = (id: string, agentId: string, agentName: string, status: string, createdAt: string) => db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run(id, WORKSPACE_ID, 'agent.invocation', 'background', JSON.stringify({ agentId, agentName, parentRunId: 'air_article', status, createdAt }));
+    insert('research-failed', 'research', '调研', 'failed', '2026-11-04T07:45:00Z');
+    insert('research-ok', 'research', '调研', 'completed', '2026-11-04T07:49:00Z');
+    insert('drawing-running', 'drawing', '绘图', 'running', '2026-11-04T07:50:00Z');
+    insert('drawing-done', 'drawing', '绘图', 'completed', '2026-11-04T07:51:00Z');
+    await tick();
+    const note = reportActiveWorkProgress.mock.calls[0]?.[2];
+    expect(note).toContain('调研：已完成');
+    expect(note).not.toContain('调研：失败');
+    expect(note).toContain('绘图：执行中');
+    expect(db.$client.prepare("SELECT COUNT(*) count FROM audit_logs WHERE action='agent.invocation'").get()).toMatchObject({ count: 4 });
+  });
+
+  it('does not include paused Agent questions or another workspace in an Agent progress card', async () => {
+    const { db, tick, reportActiveWorkProgress } = setup();
+    db.$client.prepare('INSERT INTO agents(id) VALUES (?)').run('article');
+    db.$client.prepare('INSERT INTO agent_executions(id, workspace_id, agent_id, status) VALUES (?, ?, ?, ?)').run('background', WORKSPACE_ID, 'article', 'waiting_for_input');
+    db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('dispatch', WORKSPACE_ID, 'chat_agent.dispatched', 'background', JSON.stringify({ conversationId: EXECUTION_ID, agentName: 'wechat-article' }));
+    await tick();
+    expect(reportActiveWorkProgress).not.toHaveBeenCalled();
+    db.$client.prepare('UPDATE agent_executions SET status = ? WHERE id = ?').run('running', 'background');
+    db.$client.prepare('UPDATE audit_logs SET workspace_id = ? WHERE id = ?').run('other', 'dispatch');
+    await tick();
+    expect(reportActiveWorkProgress).not.toHaveBeenCalled();
+  });
+
   it('reports a conversation with a running project task', async () => {
     const { db, tick, reportActiveWorkProgress } = setup();
     insertTask(db, 'running', [{ phase: 'claude.tool_started' }, { phase: 'claude.agent_message', text: '正在编写服务代码' }]);

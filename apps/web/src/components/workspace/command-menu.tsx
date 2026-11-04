@@ -1,5 +1,5 @@
 import { useNavigate } from '@tanstack/react-router';
-import { Blocks, Code2, FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Server, Workflow } from 'lucide-react';
+import { Blocks, FileText, KeyRound, MessageSquareText, Plus, Puzzle, ScrollText, Server, Bot } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   CommandDialog,
@@ -10,12 +10,13 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command';
-import { useWorkflowsQuery } from '@/api/queries';
+import { useAgentsQuery } from '@/api/queries';
 
 function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation('workspace');
   const navigate = useNavigate();
-  const { data: workflows = [] } = useWorkflowsQuery();
+  const { data: directory = [] } = useAgentsQuery();
+  const agents = directory.filter((agent) => agent.kind === 'custom');
 
   function closeAndGo(run: () => void) {
     onOpenChange(false);
@@ -29,11 +30,8 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         <CommandEmpty>{t('command.empty')}</CommandEmpty>
         <CommandGroup heading={t('command.navigation')}>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/chat' }))}><MessageSquareText className="size-4" />{t('nav.chat')}</CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows' }))}>
-            <Workflow className="size-4" /> {t('nav.workflows')}
-          </CommandItem>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/coding' }))}>
-            <Code2 className="size-4" /> {t('nav.agentTeam')}
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents' }))}>
+            <Bot className="size-4" /> {t('nav.agents')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/model-providers' }))}>
             <KeyRound className="size-4" /> {t('nav.modelProviders')}
@@ -43,7 +41,7 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
           </CommandItem>
         </CommandGroup>
         <CommandGroup heading={t('nav.resourceManagement')}>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
+          <CommandItem value="plugins" keywords={[t('nav.plugins')]} onSelect={() => closeAndGo(() => void navigate({ to: '/plugins' }))}>
             <Puzzle className="size-4" /> {t('nav.plugins')}
           </CommandItem>
           <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/skills' }))}>
@@ -58,19 +56,20 @@ function CommandMenu({ open, onOpenChange }: { open: boolean; onOpenChange: (ope
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading={t('command.create')}>
-          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/workflows/$workflowId', params: { workflowId: 'new' } }))}>
-            <Plus className="size-4" /> {t('command.createWorkflow')}
+          <CommandItem onSelect={() => closeAndGo(() => void navigate({ to: '/agents/$agentId', params: { agentId: 'new' } }))}>
+            <Plus className="size-4" /> {t('command.createAgent')}
           </CommandItem>
         </CommandGroup>
-        <CommandGroup heading={t('command.recent')}>
-          {workflows
-            .slice(0, 3)
+        <CommandGroup heading={t('nav.agents')}>
+          {agents
             .map((item) => (
               <CommandItem
                 key={item.id}
-                onSelect={() => closeAndGo(() => void navigate({ to: '/workflows/$workflowId', params: { workflowId: item.id } }))}
+                value={`agent:${item.id}`}
+                keywords={[item.name, item.responsibility ?? '']}
+                onSelect={() => closeAndGo(() => void navigate({ to: '/agents/$agentId', params: { agentId: item.id } }))}
               >
-                <Workflow className="size-4" /> {item.name}
+                <Bot className="size-4" /> {item.name}
               </CommandItem>
             ))}
         </CommandGroup>

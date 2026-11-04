@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Not
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { WechatLoginView } from '@worklite/contracts';
 import { chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
@@ -11,11 +11,8 @@ import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, up
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
 import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.service';
 import { ChatAttachmentsService, detachAttachmentImages } from '../../agents/chat-attachments.service';
-import { CodersService } from '../../coders/coders.service';
-import { RunsService } from '../../runs/runs.service';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret, PluginsService } from '../plugins.service';
-import { statusText } from '../feishu/feishu-cards';
 import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
 
 type Json = Record<string, unknown>;
@@ -111,22 +108,12 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     private readonly plugins: PluginsService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
-    private readonly teams: CodersService,
-    private readonly runs: RunsService,
     private readonly upgrades: UpgradesService,
     private readonly attachments: ChatAttachmentsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     if (process.env.WORKLITE_PREFLIGHT === '1') return;
-    this.unsubscribers = [
-      this.runs.subscribe((event) => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
-      }),
-      this.teams.subscribe((event) => {
-        void this.db.update(chatSubmissions).set({ settled: false }).where(sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'coder' and json_extract(${chatSubmissions.reference}, '$.runId') = ${event.runId}`).then(() => undefined);
-      }),
-    ];
     await this.connect();
   }
 
@@ -609,33 +596,6 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           if (question.recovery) text += `\n\n请回复「采用已有命令结果」或「标记操作失败」。${question.recovery.commandExecutionId ? '也可回复其他内容说明处理方式。' : ''}`;
           else text += '\n\n请直接回复你的答案。';
         }
-      }
-    } else if (reference?.kind === 'coder') {
-      const run = await this.teams.getRun(request, 'personal', reference.runId);
-      terminal = ['succeeded', 'failed', 'cancelled'].includes(run.status);
-      const pending = run.pendingInputs.find((item) => item.status === 'pending');
-      if (terminal) {
-        text = `【coders】任务${statusText[run.status] ?? run.status}\n${run.intent}`;
-        if (run.outcome) text += `\n\n${run.outcome.summary}${run.outcome.unresolvedIssues.length ? `\n\n待解决：\n${run.outcome.unresolvedIssues.map((issue) => `- ${issue}`).join('\n')}` : ''}`;
-      } else if (pending) {
-        text = `【coders】任务等待你的输入\n${pending.question}\n\n请前往 WorkLite 处理该问题。`;
-      } else {
-        text = `【coders】任务已开始执行\n${run.intent}`;
-      }
-    } else if (reference?.kind === 'workflow') {
-      let run = await this.runs.get(request, 'personal', reference.runId);
-      terminal = ['succeeded', 'failed', 'cancelled', 'timed_out'].includes(run.status);
-      if (terminal) {
-        text = `【工作流】「${run.workflowName}」${statusText[run.status] ?? run.status}`;
-        if (run.result != null) text += `\n\n${typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2)}`;
-      } else if (run.pendingAction) {
-        const expired = run.pendingAction.status === 'expired' || Boolean(run.pendingAction.expiresAt && Date.parse(run.pendingAction.expiresAt) <= Date.now());
-        const hint = expired
-          ? '二维码已过期，请在 WorkLite 运行详情中点击「重新获取二维码」。'
-          : '如需扫码，请在 WorkLite 运行详情中点击「获取二维码」。';
-        text = `【工作流】「${run.workflowName}」需要操作\n${run.pendingAction.title}\n${run.pendingAction.description}\n\n${hint}`;
-      } else {
-        text = `【工作流】「${run.workflowName}」已开始执行${run.currentStep ? `\n当前步骤：${run.currentStep}` : ''}`;
       }
     }
     if (text === null) {

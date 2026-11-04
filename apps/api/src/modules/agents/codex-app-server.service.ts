@@ -246,6 +246,15 @@ class CodexAppServerSession {
     }
     const params = message.params ?? {};
     if (this.threadId && params.threadId && params.threadId !== this.threadId) return;
+    if (message.method === 'thread/tokenUsage/updated' && params.tokenUsage?.total) {
+      const total = params.tokenUsage.total;
+      const usage = {
+        inputTokens: typeof total.inputTokens === 'number' ? total.inputTokens : null,
+        outputTokens: typeof total.outputTokens === 'number' ? total.outputTokens : null,
+        totalTokens: typeof total.totalTokens === 'number' ? total.totalTokens : null,
+      };
+      this.eventQueue = this.eventQueue.then(() => this.request.onEvent?.({ phase: 'codex.usage', usage })).then(() => undefined).catch((error) => this.fail(error));
+    }
     if (message.method === 'turn/started') this.turnId = params.turn?.id;
     if (message.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
       this.eventQueue = this.eventQueue.then(() => this.request.onTextDelta?.(params.delta)).then(() => undefined).catch((error) => this.fail(error));

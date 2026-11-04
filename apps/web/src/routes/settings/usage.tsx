@@ -31,7 +31,7 @@ function UsageSettingsPage() {
             <div key={row.model}>
               <div className="mb-1 flex justify-between text-[13px]">
                 <span>{row.model}</span>
-                <span className="tabular-nums text-muted-foreground" title={formatNumber(row.tokens, locale)}>{t('usage.tokens', { count: formatTokenCount(row.tokens, locale) })}</span>
+                <span className="tabular-nums text-muted-foreground" title={formatTokenCount(row.tokens, locale)}>{t('usage.tokens', { count: formatTokenCount(row.tokens, locale) })}</span>
               </div>
               <div className="h-2 rounded-full bg-surface-subtle">
                 <div className="h-2 rounded-full bg-brand" style={{ width }} />
@@ -46,7 +46,7 @@ function UsageSettingsPage() {
           {usageRows.map((row) => (
             <CollectionRow key={row.model}>
               <span className="font-mono text-[13px]">{row.model}</span>
-              <span className="tabular-nums text-[13px]" title={formatNumber(row.tokens, locale)}>{formatTokenCount(row.tokens, locale)}</span>
+              <span className="tabular-nums text-[13px]" title={formatTokenCount(row.tokens, locale)}>{formatTokenCount(row.tokens, locale)}</span>
               <span className="tabular-nums text-[13px]">{formatNumber(row.runs, locale)}</span>
               <span className="tabular-nums text-[13px]">{formatCurrency(row.cost, locale)}</span>
             </CollectionRow>

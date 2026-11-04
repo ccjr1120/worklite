@@ -29,6 +29,7 @@ vi.mock('@tanstack/react-router', () => {
   return {
     Link: ({ children, to, params, ...props }: { children: React.ReactNode; to: string; params?: Record<string, string> }) => <a href={toHref(to, params)} {...props}>{children}</a>,
     Navigate: ({ to, params, replace }: { to: string; params?: Record<string, string>; replace?: boolean }) => <span data-testid="navigate" data-replace={String(Boolean(replace))}>{toHref(to, params)}</span>,
+    redirect: (value: unknown) => value,
     createFileRoute: (path: string) => (options: { component: unknown }) => ({ path, options, useParams: () => ({ coderId: 'team_1' }) }),
   };
 });
@@ -184,12 +185,10 @@ describe('CoderConfig', () => {
     expect(within(switcher).getByRole('link', { name: /Applications/ })).toHaveAttribute('href', '/coding/team_2/config');
   });
 
-  it('is served per executor at /coding/:coderId/config', () => {
+  it('redirects the retired configuration page to Agents', () => {
     expect(AgentTeamConfigRoute.path).toBe('/coding/$coderId/config');
-    mockQueries();
-    const Component = AgentTeamConfigRoute.options.component as React.ComponentType;
-    render(<Component />);
-    expect(vi.mocked(useAgentTeamQuery)).toHaveBeenLastCalledWith('team_1');
+    try { (AgentTeamConfigRoute.options.beforeLoad as () => void)(); throw new Error('Expected redirect'); }
+    catch (result) { expect(result).toEqual({ to: '/agents' }); }
   });
 
   it('renders the empty memories state', () => {

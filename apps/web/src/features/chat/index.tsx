@@ -2,9 +2,9 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { Brain, ChevronRight, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, RunView, WorkflowView } from '@worklite/contracts';
+import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, AgentView } from '@worklite/contracts';
 import { ApiError, api, parseAgentExecutionEvent } from '@/api/client';
-import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useSkillsQuery, useWorkflowsQuery } from '@/api/queries';
+import { chatConversationsQueryKey, useAgentQuery, useModelProvidersQuery, useSkillsQuery, useAgentsQuery } from '@/api/queries';
 import { Conversation, ConversationContent } from '@/components/ai-elements/conversation';
 import { useLocale } from '@/components/locale-provider';
 import { useTheme } from '@/components/theme-provider';
@@ -27,7 +27,7 @@ import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CHAT_AGENT_ID, CHAT_TURN_NOTIFICATION_DEFAULT_SOUND } from '@worklite/contracts';
-import { AssistantTurn, buildTimeline, CancelledNote, FailureNote, ProgressReportExpansionContext, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow } from './transcript';
+import { AgentInvocationMessage, AssistantTurn, buildTimeline, CancelledNote, FailureNote, ProgressReportExpansionContext, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage } from './transcript';
 
 const INCOMPLETE_SKILL_REQUEST = 'The model returned an incomplete Skill request. Its JSON ended before the request was complete.';
 const INVALID_SKILL_REQUEST = 'The model returned an invalid Skill request. Its arguments could not be parsed or did not match the required structure.';
@@ -37,7 +37,6 @@ const SKILL_EXECUTION_ERROR = 'The Skill script could not be completed.';
 const RESTARTED_AGENT_ERROR = 'The API restarted before this Chat turn completed.';
 
 type QueuedMessage = { id: string; text: string };
-type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string };
 type PendingReceipt = ChatConversationView['pendingReceipts'][number];
 const conversationDrafts = new Map<string, { draft: string; queued: QueuedMessage[]; paused: boolean; attachments: ChatAttachmentView[] }>();
 // Attachment ids are embedded in the sent message as Markdown images; the server then hands the same
@@ -90,7 +89,7 @@ function ChatWorkspace() {
   const agentQuery = useAgentQuery(workspaceSlug, CHAT_AGENT_ID);
   const providersQuery = useModelProvidersQuery(workspaceSlug);
   const skillsQuery = useSkillsQuery(workspaceSlug);
-  const workflowsQuery = useWorkflowsQuery(workspaceSlug);
+  const agentsQuery = useAgentsQuery();
   const { applyAppearancePreference } = useTheme();
   const { locale } = useLocale();
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() => typeof locationSearch.conversation === 'string' ? locationSearch.conversation : readSelectedConversation());
@@ -104,7 +103,9 @@ function ChatWorkspace() {
     if (pendingDispatch.current?.signature !== signature) pendingDispatch.current = { signature, id: `web_${crypto.randomUUID()}` };
     return api.dispatchChat({ ...input, submissionId: pendingDispatch.current.id });
   }, []);
+  const [scrollToBottomKey, setScrollToBottomKey] = useState(0);
   const sendConversation = useCallback(async (message: string, executionId: string | null, questionId?: string, submissionId?: string, authorization?: Pick<DispatchChatRequest, 'recoveryDecision' | 'newConversation'>) => {
+    setScrollToBottomKey((value) => value + 1);
     const input = { message, target: { kind: 'conversation' as const }, executionId, ...(questionId ? { questionId } : {}), ...authorization };
     const result = submissionId ? await api.dispatchChat({ ...input, submissionId }) : await dispatchRequest(input);
     if (result.reference.kind !== 'conversation') throw new Error('The conversation did not return an execution.');
@@ -115,8 +116,7 @@ function ChatWorkspace() {
   }, [dispatchRequest, workspaceSlug]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [execution, setExecution] = useState<AgentExecutionView | null>(null);
-  const [selectedWorkflow, setSelectedWorkflow] = useState<WorkflowView | null>(null);
-  const [workflowRun, setWorkflowRun] = useState<ActiveWorkflowRun | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<(AgentView & { continuation?: { executionId: string; runId: string } }) | null>(null);
   const [draft, setDraft] = useState(() => readChatDraft(selectedConversationId) ?? conversationDrafts.get(selectedConversationId ?? 'new')?.draft ?? '');
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
@@ -241,7 +241,6 @@ function ChatWorkspace() {
     setConversationView(null);
     setConversationFailed(false);
     setShowAllTimeline(false);
-    setWorkflowRun(null);
     setBusy(false);
     setCancelling(false);
     setQueueSendingId(null);
@@ -355,19 +354,27 @@ function ChatWorkspace() {
   // automatic report turn arrive live.
   const activeProjectTasks = Boolean(visibleExecution?.toolCalls.some((call) => call.projectTask && (call.projectTask.status === 'running' || call.projectTask.status === 'waiting_for_input')));
   const observingExecution = running || waitingForInput || activeProjectTasks;
-  const workflowRunning = workflowRun?.run.status === 'queued' || workflowRun?.run.status === 'running' || workflowRun?.run.status === 'paused' || workflowRun?.run.status === 'waiting_for_input';
-  const mentionMatch = !selectedWorkflow && !workflowRunning ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
+  const mentionMatch = !selectedAgent ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
-  const eligibleWorkflows = useMemo(() => (workflowsQuery.data ?? []).filter((workflow) => workflow.state === 'published' && workflow.latestVersionId), [workflowsQuery.data]);
+  const eligibleAgents = useMemo(() => (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom'), [agentsQuery.data]);
+  const { agentId: continuationAgentId, agentRunId: continuationRunId, agentExecutionId: continuationExecutionId } = locationSearch;
+  useEffect(() => {
+    const agentId = continuationAgentId;
+    const agentRunId = continuationRunId;
+    const agentExecutionId = continuationExecutionId;
+    if (typeof agentId !== 'string' || typeof agentRunId !== 'string' || typeof agentExecutionId !== 'string') return;
+    const agent = eligibleAgents.find((item) => item.id === agentId);
+    if (agent) setSelectedAgent({ ...agent, continuation: { executionId: agentExecutionId, runId: agentRunId } });
+  }, [eligibleAgents, continuationAgentId, continuationRunId, continuationExecutionId]);
   const mentionMatches = mentionMatch && !mentionDismissed
-    ? eligibleWorkflows.filter((workflow) => workflow.name.toLocaleLowerCase().includes(mentionQuery))
+    ? eligibleAgents.filter((workflow) => workflow.name.toLocaleLowerCase().includes(mentionQuery))
     : [];
   const mentionMenuOpen = Boolean(mentionMatch && !mentionDismissed);
   const slashQuery = draft.trimStart().toLowerCase();
-  const commandMatches = !selectedWorkflow && !mentionMenuOpen && !workflowRunning && slashQuery.startsWith('/') && !slashDismissed
+  const commandMatches = !selectedAgent && !mentionMenuOpen && slashQuery.startsWith('/') && !slashDismissed
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
-  const commandMenuOpen = !selectedWorkflow && !mentionMenuOpen && !workflowRunning && slashQuery.startsWith('/') && !slashDismissed;
+  const commandMenuOpen = !selectedAgent && !mentionMenuOpen && slashQuery.startsWith('/') && !slashDismissed;
 
   const executionError = visibleExecution?.errorCode === 'incomplete_tool_request' || visibleExecution?.error === INCOMPLETE_SKILL_REQUEST
     ? t('assistant:execution.incompleteSkillRequest')
@@ -450,22 +457,7 @@ function ChatWorkspace() {
     return () => { closed = true; source.close(); setMainConnectionState('connected'); };
   }, [activeId, applyCompletedResults, observingExecution]);
 
-  const workflowRunId = workflowRun?.run.id;
-  useEffect(() => {
-    if (!workflowRunId || !workflowRunning) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const next = await api.run(workspaceSlug, workflowRunId);
-        if (!cancelled) setWorkflowRun((current) => current && current.run.id === next.id ? { ...current, run: next } : current);
-      } catch {
-        // The run remains visible and can be refreshed from the Runs surface.
-      }
-    };
-    const timer = window.setInterval(() => void poll(), 1_000);
-    void poll();
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [workflowRunId, workflowRunning, workspaceSlug]);
+
 
   // A queued message belongs to the turn after the current one. Sending it while the
   // execution is failed, cancelled by the reader, or waiting on a clarification would
@@ -532,6 +524,7 @@ function ChatWorkspace() {
   }
 
   function enqueue(text: string) {
+    setScrollToBottomKey((value) => value + 1);
     setQueued((current) => [...current, { id: `web_${crypto.randomUUID()}`, text }]);
     setDraft('');
     setSlashDismissed(false);
@@ -541,50 +534,15 @@ function ChatWorkspace() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const trimmedMessage = draft.trim();
-    if (busy || cancelling || (!trimmedMessage && !selectedWorkflow && !attachments.length)) return;
+    if (busy || cancelling || (!trimmedMessage && !selectedAgent && !attachments.length)) return;
     const generation = mainRequestGenerationRef.current;
     const command = trimmedMessage.toLowerCase();
     // The images this submission carries; they leave the composer only once it is accepted.
     const sentAttachments = attachments;
-    const outgoingMessage = withAttachments(trimmedMessage, sentAttachments);
+    const outgoingMessage = withAttachments(selectedAgent ? `[@${selectedAgent.name}](/agents/${encodeURIComponent(selectedAgent.id)}?runId=${selectedAgent.continuation ? `${encodeURIComponent(selectedAgent.continuation.runId)}&executionId=${encodeURIComponent(selectedAgent.continuation.executionId)}` : `air_${crypto.randomUUID()}`}) ${trimmedMessage}` : trimmedMessage, sentAttachments);
     const clearAttachments = () => setAttachments((current) => current.filter((attachment) => !sentAttachments.includes(attachment)));
     if (command === '/log' || command === '/new' || command === '/resume' || command === '/summarize') {
       runCommand(command);
-      return;
-    }
-    if (selectedWorkflow) {
-      if (!selectedWorkflow.latestVersionId) return;
-      setBusy(true);
-      setError('');
-      try {
-        // A Workflow run takes plain text input and has no image handling, so pasted images stay
-        // in the composer instead of becoming a dangling attachment URL in the run input.
-        const created = await dispatchRequest({ message: trimmedMessage, target: { kind: 'workflow', workflowId: selectedWorkflow.id }, executionId: activeId });
-        if (created.reference.kind !== 'workflow') throw new Error(t('assistant:workflowRun.requestFailed'));
-        const run = await api.run(workspaceSlug, created.reference.runId);
-        void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
-        if (generation !== mainRequestGenerationRef.current) return;
-        pendingDispatch.current = null;
-        if (!activeId) {
-          setSelectedConversationId(created.submissionId);
-          void navigate({ to: '/chat', search: { view: 'conversation', conversation: created.submissionId } });
-        }
-        setWorkflowRun({ workflow: selectedWorkflow, run, input: trimmedMessage });
-        setSelectedWorkflow(null);
-        setDraft('');
-        // A workflow dispatch from the new-conversation composer created a conversation;
-        // retire the temporary draft so the next new conversation starts empty.
-        if (!selectedConversationId) {
-          conversationDrafts.delete('new');
-          clearNewConversationDraft();
-        }
-        setMentionDismissed(false);
-      } catch (runError) {
-        if (generation !== mainRequestGenerationRef.current) return;
-        setError(apiErrorMessage(runError, t('assistant:workflowRun.requestFailed')));
-      } finally {
-        if (generation === mainRequestGenerationRef.current) setBusy(false);
-      }
       return;
     }
     if (waitingForInput && visibleExecution?.pendingQuestion) {
@@ -592,6 +550,7 @@ function ChatWorkspace() {
       setError('');
       showPendingAnswer(outgoingMessage);
       setDraft('');
+      setSelectedAgent(null);
       clearAttachments();
       try {
         const next = await sendConversation(outgoingMessage, visibleExecution.id, visibleExecution.pendingQuestion.id);
@@ -612,6 +571,7 @@ function ChatWorkspace() {
     if (!isConfigured) return;
     if (running) {
       enqueue(outgoingMessage);
+      setSelectedAgent(null);
       clearAttachments();
       return;
     }
@@ -629,6 +589,7 @@ function ChatWorkspace() {
       setQueuePaused(false);
       void applyCompletedResults(next);
       setDraft('');
+      setSelectedAgent(null);
       clearAttachments();
       // The accepted message now belongs to the created conversation, so the new-conversation
       // slot must not keep a copy that would surface when the reader starts another chat.
@@ -645,31 +606,20 @@ function ChatWorkspace() {
   }
 
   async function cancelExecution() {
-    if (cancelling) return;
-    const cancelWorkflow = workflowRunning && workflowRun;
-    if (!cancelWorkflow && (!visibleExecution || (!['running', 'waiting_for_input'].includes(visibleExecution.status) && !activeProjectTasks) || visibleExecution.pendingQuestion?.recovery)) return;
+    if (cancelling || !visibleExecution || (!['running', 'waiting_for_input'].includes(visibleExecution.status) && !activeProjectTasks) || visibleExecution.pendingQuestion?.recovery) return;
     const generation = ++mainRequestGenerationRef.current;
-    setCancelling(true);
-    setError('');
-    setQueuePaused(true);
+    setCancelling(true); setError(''); setQueuePaused(true);
     try {
-      if (cancelWorkflow) {
-        const run = await api.cancelRun(workspaceSlug, cancelWorkflow.run.id);
-        if (generation !== mainRequestGenerationRef.current) return;
-        setWorkflowRun((current) => current ? { ...current, run } : current);
-      } else {
-        const next = await api.cancelAgentExecution(workspaceSlug, CHAT_AGENT_ID, visibleExecution!.id);
-        if (generation !== mainRequestGenerationRef.current) return;
-        setExecution((current) => {
-          if (!current || current.id !== next.id) return next;
-          const ids = new Set(next.messages.map((message) => message.id));
-          return { ...next, messages: [...next.messages, ...current.messages.filter((message) => message.role === 'assistant' && !ids.has(message.id))] };
-        });
-        void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
-      }
-    } catch (cancelError) {
+      const next = await api.cancelAgentExecution(workspaceSlug, CHAT_AGENT_ID, visibleExecution.id);
       if (generation !== mainRequestGenerationRef.current) return;
-      setError(apiErrorMessage(cancelError, t(cancelWorkflow ? 'assistant:workflowRun.cancelFailed' : 'assistant:execution.cancelFailed')));
+      setExecution((current) => {
+        if (!current || current.id !== next.id) return next;
+        const ids = new Set(next.messages.map((message) => message.id));
+        return { ...next, messages: [...next.messages, ...current.messages.filter((message) => message.role === 'assistant' && !ids.has(message.id))] };
+      });
+      void queryClient.invalidateQueries({ queryKey: chatConversationsQueryKey });
+    } catch (cancelError) {
+      if (generation === mainRequestGenerationRef.current) setError(apiErrorMessage(cancelError, t('assistant:execution.cancelFailed')));
     } finally {
       if (generation === mainRequestGenerationRef.current) { setBusy(false); setCancelling(false); }
     }
@@ -694,11 +644,11 @@ function ChatWorkspace() {
     }
   }
 
-  function selectMention(workflow: WorkflowView) {
+  function selectMention(workflow: AgentView) {
     if (!mentionMatch) return;
     const atIndex = draft.lastIndexOf('@');
     setDraft(atIndex >= 0 ? draft.slice(0, atIndex) : draft);
-    setSelectedWorkflow(workflow);
+    setSelectedAgent(workflow);
     setMentionDismissed(true);
   }
 
@@ -787,8 +737,8 @@ function ChatWorkspace() {
       setMentionDismissed(true);
       return true;
     }
-    if (selectedWorkflow) {
-      setSelectedWorkflow(null);
+    if (selectedAgent) {
+      setSelectedAgent(null);
       return true;
     }
     return false;
@@ -814,8 +764,8 @@ function ChatWorkspace() {
       if (handleEscape()) event.preventDefault();
       return;
     }
-    if (selectedWorkflow && !draft && event.key === 'Backspace') {
-      setSelectedWorkflow(null);
+    if (selectedAgent && !draft && event.key === 'Backspace') {
+      setSelectedAgent(null);
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -867,12 +817,12 @@ function ChatWorkspace() {
   const timeline = useMemo(() => buildTimeline({
     execution: visibleExecution,
     submissions,
-    workflowRun: workflowRun && !submissions.some((submission) => submission.reference?.kind === 'workflow' && submission.reference.runId === workflowRun.run.id) ? workflowRun : null,
+    workflowRun: null,
     receipts,
     question: waitingForInput ? visibleExecution?.pendingQuestion ?? null : null,
     cancelled: visibleExecution?.status === 'cancelled',
     failed: visibleExecution?.status === 'failed',
-  }), [visibleExecution, submissions, workflowRun, receipts, waitingForInput]);
+  }), [visibleExecution, submissions, receipts, waitingForInput]);
   const hiddenTimelineCount = !showAllTimeline && timeline.length > RECENT_TIMELINE_COUNT ? timeline.length - RECENT_TIMELINE_COUNT : 0;
   const visibleTimeline = hiddenTimelineCount > 0 ? timeline.slice(hiddenTimelineCount) : timeline;
   // The event stream can report the accepted answer before its request returns; once the question
@@ -880,31 +830,49 @@ function ChatWorkspace() {
   const visiblePendingAnswer = waitingForInput ? pendingAnswer : null;
   const lastEntry = timeline[timeline.length - 1];
   const showWorkingInLastTurn = running && lastEntry?.kind === 'assistant';
-  const pinCandidates: PinCandidate[] = timeline.flatMap((entry): PinCandidate[] => entry.kind === 'task'
+  const allPinCandidates: PinCandidate[] = timeline.flatMap((entry): PinCandidate[] => entry.kind === 'task'
     ? [{ id: entry.submission.id, kind: 'submission', submission: entry.submission }]
-    : entry.kind === 'workflowRun'
-      ? [{ id: entry.active.run.id, kind: 'workflowRun', run: entry.active.run, name: entry.active.workflow.name }]
+    : entry.kind === 'agentInvocation' && entry.call.agentInvocation
+      ? [{ id: entry.call.id, kind: 'agent', invocation: entry.call.agentInvocation }]
       : entry.kind === 'assistant'
         ? entry.segments.flatMap((segment): PinCandidate[] => segment.kind === 'tool' && segment.item.projectTask ? [{ id: segment.item.projectTask.id, kind: 'project', task: segment.item.projectTask }] : [])
         : []);
 
+
+  // A follow-up wakes the same instance; pin its latest message only.
+  const latestAgentPins = new Map(allPinCandidates.flatMap((candidate) => candidate.kind === 'agent' ? [[candidate.invocation.runId, candidate.id] as const] : []));
+  const pinCandidates = allPinCandidates.filter((candidate) => candidate.kind !== 'agent' || latestAgentPins.get(candidate.invocation.runId) === candidate.id);
+
+  // Older messages can be collapsed out of the DOM; keep their live Agents reachable too.
+  const collapsedAgentIds = new Set(timeline.slice(0, hiddenTimelineCount).flatMap((entry) => entry.kind === 'agentInvocation' ? [entry.call.id] : []));
+  const offscreenPins = new Set([...pinTracking.above, ...collapsedAgentIds]);
+  const pendingPinnedReveal = useRef<string | null>(null);
+  const revealTrackedPin = pinTracking.reveal;
+  const revealPin = (id: string) => {
+    if (collapsedAgentIds.has(id)) {
+      pendingPinnedReveal.current = id;
+      setShowAllTimeline(true);
+    } else pinTracking.reveal(id);
+  };
+  useEffect(() => {
+    if (!showAllTimeline || !pendingPinnedReveal.current) return;
+    revealTrackedPin(pendingPinnedReveal.current);
+    pendingPinnedReveal.current = null;
+  }, [showAllTimeline, revealTrackedPin]);
+
   // The header badge reports server execution state only. A submission the server has
   // not accepted yet is reported by the Send control, not as a running execution.
-  const headerStatus: { key: StatusKey; label: string } | null = workflowRun?.run.status === 'queued' ? { key: 'queued', label: t('assistant:status.queued') }
-    : workflowRun?.run.status === 'running' ? { key: 'running', label: t('assistant:status.running') }
-    : workflowRun?.run.status === 'paused' ? { key: 'paused', label: t('assistant:status.paused') }
-    : workflowRun?.run.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:workflowRun.waitingForConfirmation') }
-    : connectionState === 'reconnecting' ? { key: 'pending', label: t('assistant:status.reconnecting') }
+  const headerStatus: { key: StatusKey; label: string } | null = connectionState === 'reconnecting' ? { key: 'pending', label: t('assistant:status.reconnecting') }
     : visibleExecution?.status === 'failed' ? { key: 'failed', label: t('assistant:status.failed') }
       : visibleExecution?.status === 'cancelled' ? { key: 'cancelled', label: t('assistant:status.cancelled') }
         : visibleExecution?.status === 'completed' ? { key: 'completed', label: t('assistant:status.completed') }
           : visibleExecution?.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:status.waiting_for_input') }
             : visibleExecution?.status === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
-  const canCancel = Boolean(workflowRunning || ((running || waitingForInput || activeProjectTasks) && !visibleExecution?.pendingQuestion?.recovery));
-  const composerAvailable = Boolean(isConfigured || eligibleWorkflows.length > 0 || canCancel);
-  const composerLoading = agentQuery.isLoading || workflowsQuery.isLoading;
-  const stopTarget = running || workflowRunning;
-  const submitDisabled = stopTarget ? cancelling : busy || cancelling || attachmentsUploading > 0 || (!draft.trim() && !selectedWorkflow && !attachments.length && !stopTarget) || (!selectedWorkflow && !stopTarget && !isConfigured);
+  const canCancel = Boolean((running || waitingForInput || activeProjectTasks) && !visibleExecution?.pendingQuestion?.recovery);
+  const composerAvailable = Boolean(isConfigured || canCancel);
+  const composerLoading = agentQuery.isLoading || agentsQuery.isLoading;
+  const stopTarget = running;
+  const submitDisabled = stopTarget ? cancelling : busy || cancelling || attachmentsUploading > 0 || (!draft.trim() && !selectedAgent && !attachments.length && !stopTarget) || (!stopTarget && !isConfigured);
 
   const selected = currentView?.conversation;
   const selectedWithoutExecution = Boolean(selectedConversationId && !activeId);
@@ -933,9 +901,9 @@ function ChatWorkspace() {
             <div ref={transcriptHostRef} className="relative min-h-0 flex-1">
               <PinTrackingContext.Provider value={pinTracking.context}>
               <ProgressReportExpansionContext.Provider value={progressReportExpansion}>
-              {recordsOpen ? null : <PinnedExecutionBar candidates={pinCandidates} above={pinTracking.above} onReveal={pinTracking.reveal} />}
+              {recordsOpen ? null : <PinnedExecutionBar candidates={pinCandidates} above={offscreenPins} onReveal={revealPin} />}
               <div className="flex h-full min-h-0 flex-col" inert={recordsOpen} aria-hidden={recordsOpen}>
-              <Conversation className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
+              <Conversation scrollToBottomKey={scrollToBottomKey} className="min-h-0 flex-1 px-4 md:px-8" scrollToEndLabel={t('assistant:transcript.scrollToEnd')}>
                 <ConversationContent className="mx-auto w-full max-w-3xl">
                   {loadingConversation ? <TranscriptSkeleton /> : null}
                   {conversationFailed ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => { setConversationFailed(false); setLoadingExecution(true); setConversationReloadKey((key) => key + 1); }}>{t('assistant:history.retry')}</Button></div> : null}
@@ -945,8 +913,9 @@ function ChatWorkspace() {
                       case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
                       case 'summaryDivider': return <SummaryDivider key={entry.item.id} label={t('assistant:summarize.divider')} message={entry.item} />;
                       case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled />;
+                      case 'agentInvocation': return <AgentInvocationMessage key={entry.call.id} call={entry.call} />;
                       case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
-                      case 'workflowRun': return <WorkflowRunRow key={entry.active.run.id} run={entry.active.run} workflow={entry.active.workflow} input={entry.active.input} />;
+                      case 'workflowRun': return null;
                       case 'receipt': return <div key={entry.receipt.id} className="my-3 space-y-2"><UserMessage message={{ id: entry.receipt.id, role: 'user', content: entry.receipt.text, createdAt: entry.receipt.createdAt }} /><p role={entry.receipt.error ? 'alert' : 'status'} className={cn('text-[13px]', entry.receipt.error ? 'text-danger' : 'text-muted-foreground')}>{entry.receipt.error || t('assistant:status.queued')}</p></div>;
                       case 'question': return <QuestionNote key={entry.question.id} question={entry.question} onAnswer={(answer, authorization) => void answerChoice(answer, authorization)} busy={busy || cancelling} />;
                       case 'cancelled': return <CancelledNote key="cancelled" />;
@@ -967,7 +936,7 @@ function ChatWorkspace() {
             {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' || selected?.channel === 'wechat' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
                 onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
-                selectedWorkflow={selectedWorkflow} onRemoveWorkflow={() => setSelectedWorkflow(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
+                selectedAgent={selectedAgent} onRemoveAgent={() => setSelectedAgent(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 attachments={attachments} attachmentsUploading={attachmentsUploading} attachmentError={attachmentError} onPasteImages={(files) => void uploadPastedImages(files)} onRemoveAttachment={removeAttachment}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
                 onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />

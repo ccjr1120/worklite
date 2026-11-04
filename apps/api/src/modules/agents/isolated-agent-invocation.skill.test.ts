@@ -188,4 +188,22 @@ describe('IsolatedAgentInvocationService managed tool journaling', () => {
     await expect(runManagedTool(async () => { throw new Error('database is locked'); }))
       .rejects.toThrow('requires a recovery decision before it can continue');
   });
+  it('enforces shared task budget before starting any tool effect', async () => {
+    gateway.runWorkflowAgent.mockImplementation(async (request: { executeTool: (call: unknown) => Promise<unknown> }) => {
+      expect(await request.executeTool({ toolCallId: 'denied', toolName: 'read', input: { path: 'file' } })).toEqual({ type: 'error-text', value: 'Keep budget for delivery' });
+      return { text: 'Partial work' };
+    });
+    await expect(service().execute(baseRequest({ beforeToolCall: () => 'Keep budget for delivery' }))).resolves.toBe('Partial work');
+  });
+
+  it('allows direct inspection and rejects unassigned tools without launching a model', async () => {
+    gateway.runWorkflowAgent.mockClear();
+    const request = baseRequest({ role: undefined, builtinToolNames: ['read'] });
+    const inspected = await service().executeAssignedTool(request);
+    expect(JSON.parse(inspected.value)).toMatchObject({ skills: [{ id: 'sk_dino', scripts: ['scripts/check.sh'] }], tools: [{ name: 'read' }] });
+    await expect(service().executeAssignedTool(request, { toolCallId: 'no', toolName: 'bash', input: { command: 'echo no' } })).rejects.toThrow('unavailable built-in tool');
+    await expect(service().executeAssignedTool(request, { toolCallId: 'no', toolName: 'skill_script', skillId: 'unassigned', scriptPath: 'scripts/check.sh', input: {} })).rejects.toThrow('unavailable Skill script');
+    expect(gateway.runWorkflowAgent).not.toHaveBeenCalled();
+  });
+
 });

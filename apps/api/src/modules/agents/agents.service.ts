@@ -1,8 +1,11 @@
+import { validatePrivateTools } from './agent-private-tools';
+import { resolveWorkflowNodeCapability } from '@worklite/workflow-engine';
+import type { AgentCollaboration } from '@worklite/contracts';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { Request } from 'express';
-import type { AgentVersionView, AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
+import type { AgentView, CreateAgentRequest, ModelProviderView, UpdateAgentRequest } from '@worklite/contracts';
 import { CHAT_TURN_NOTIFICATION_DEFAULT_SOUND, CHAT_TURN_NOTIFICATION_SOUNDS, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 import { agentExecutions, chatConfigurations, agentMcpServers, agentVersions, agents, agentSkills, mcpServers, scheduledAgentTasks, skills, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
@@ -36,15 +39,12 @@ export class AgentsService {
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.resources.reconcileWorkspaceSkills(team.id);
-    const rows = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.workspaceId, team.id), ne(agents.id, CODEX_CLI_AGENT_ID)));
+    const rows = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.workspaceId, team.id), eq(agents.kind, 'custom')));
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
-    const latestRows = rows.length === 0 ? [] : await this.db.select({ agentId: agentVersions.agentId, id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.workspaceId, team.id), inArray(agentVersions.agentId, rows.map(({ agent }) => agent.id)))).orderBy(desc(agentVersions.version));
-    const latestByAgent = new Map<string, { id: string; version: number }>();
-    for (const row of latestRows) if (!latestByAgent.has(row.agentId)) latestByAgent.set(row.agentId, { id: row.id, version: row.version });
     return rows
-      .sort((left, right) => Number(left.agent.kind !== 'system') - Number(right.agent.kind !== 'system') || left.agent.name.localeCompare(right.agent.name))
-      .map(({ agent }) => this.toView(agent, workspaceSlug, agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null, assignments, latestByAgent.get(agent.id)));
+      .sort((left, right) => left.agent.name.localeCompare(right.agent.name))
+      .map(({ agent }) => this.toView(agent, workspaceSlug, agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null, assignments));
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
@@ -55,8 +55,7 @@ export class AgentsService {
     if (!row) throw new NotFoundException('Agent not found');
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
-    const [latest] = await this.db.select({ id: agentVersions.id, version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1);
-    const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments, latest);
+    const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments);
     if (agentId === CHAT_AGENT_ID) {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
       if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, turnNotificationsEnabled: configuration.turnNotificationsEnabled, turnNotificationSound: configuration.turnNotificationSound, skillIds: configuration.skillIds };
@@ -73,66 +72,24 @@ export class AgentsService {
     const systemPrompt = input.systemPrompt?.trim() ?? '';
     const providerId = input.providerId ?? null;
     const model = input.model?.trim() ?? '';
+    const collaboration = await this.validateCollaboration(team.id, input.collaboration ?? null, input.parentAgentId);
     const runtime = await validateAgentRuntime(input.runtime);
-    if (runtime.kind === 'native' || providerId) await this.validateDraftModel(team.id, providerId, model);
+    if (runtime.kind !== 'native' && ((collaboration?.subAgentIds.length ?? 0) > 0 || (collaboration?.capabilities.length ?? 0) > 0 || (collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate sub-Agents and capability tools.');
+    if ((!collaboration?.publicModels?.length && runtime.kind === 'native') || providerId) await this.validateModel(team.id, providerId, model);
     const validatedAssignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds);
     const skillIds = validatedAssignments.skillIds ?? [];
     const mcpServerIds = validatedAssignments.mcpServerIds ?? [];
     const id = `agt_${randomUUID()}`;
     await this.db.transaction((transaction) => {
-      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, runtime }).returning({ id: agents.id }).all();
+      const parent = input.parentAgentId ? transaction.select().from(agents).where(and(eq(agents.id, input.parentAgentId), eq(agents.workspaceId, team.id), eq(agents.kind, 'custom'))).get() : undefined;
+      if (input.parentAgentId && (!parent || parent.runtime.kind !== 'native')) throw new BadRequestException('The parent must be an available native Agent.');
+      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, runtime, collaboration }).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent could not be created');
       if (skillIds.length > 0) transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId }))).run();
       if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId }))).run();
+      if (parent) transaction.update(agents).set({ collaboration: { ...parent.collaboration, subAgentIds: [...(parent.collaboration?.subAgentIds ?? []), id], capabilities: parent.collaboration?.capabilities ?? [] }, updatedAt: new Date() }).where(eq(agents.id, parent.id)).run();
     });
     return this.get(request, workspaceSlug, id);
-  }
-
-  async versions(request: Request, workspaceSlug: string, agentId: string): Promise<AgentVersionView[]> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [agent] = await this.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
-    if (!agent) throw new NotFoundException('Agent not found');
-    const rows = await this.db.select().from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version));
-    return rows.map(toAgentVersionView);
-  }
-
-  async createVersion(request: Request, workspaceSlug: string, agentId: string): Promise<AgentVersionView> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.resources.reconcileWorkspaceSkills(team.id);
-    const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
-    if (!agent) throw new NotFoundException('Agent not found');
-    if (agent.runtime.kind === 'native' && (!agent.providerId || !agent.model)) throw new BadRequestException('Configure a model provider and model before publishing an Agent version.');
-    const assignments = await Promise.all([
-      this.db.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)),
-      this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)),
-    ]);
-    const row = this.db.transaction((transaction) => {
-      const [latest] = transaction.select({ version: agentVersions.version }).from(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).orderBy(desc(agentVersions.version)).limit(1).all();
-      const [created] = transaction.insert(agentVersions).values({
-        id: `agv_${randomUUID()}`,
-        workspaceId: team.id,
-        agentId: agent.id,
-        version: (latest?.version ?? 0) + 1,
-        name: agent.name,
-        responsibility: agent.responsibility,
-        systemPrompt: agent.systemPrompt,
-        runtime: agent.runtime,
-        providerId: agent.providerId,
-        model: agent.model,
-        skillIds: assignments[0].map(({ id }) => id),
-        mcpServerIds: assignments[1].map(({ id }) => id),
-      }).returning().all();
-      return created;
-    });
-    if (!row) throw new NotFoundException('Agent version could not be created');
-    return toAgentVersionView(row);
-  }
-
-  async version(request: Request, workspaceSlug: string, versionId: string): Promise<AgentVersionView> {
-    const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.select().from(agentVersions).where(and(eq(agentVersions.id, versionId), eq(agentVersions.workspaceId, team.id))).limit(1);
-    if (!row) throw new NotFoundException('Agent version not found');
-    return toAgentVersionView(row);
   }
 
   async update(request: Request, workspaceSlug: string, agentId: string, input: UpdateAgentRequest): Promise<AgentView> {
@@ -147,7 +104,7 @@ export class AgentsService {
         // Chat Skills are captured from its revisioned configuration. User MCP servers remain unavailable to Chat.
         const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'summarizePrompt', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
         if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
-      if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported built-in Agent configuration field.');
+      if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported Chat configuration field.');
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
       const requestedModel = input.model === undefined ? existing.model.trim() : input.model.trim();
@@ -187,14 +144,17 @@ export class AgentsService {
     if (!name) throw new BadRequestException('Agent name is required.');
     const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
     const model = input.model === undefined ? existing.model : input.model.trim();
+    const collaboration = await this.validateCollaboration(team.id, input.collaboration === undefined ? existing.collaboration : input.collaboration, agentId);
     const runtime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
-    if (runtime.kind === 'native' || nextProviderId) await this.validateDraftModel(team.id, nextProviderId, model);
+    if (runtime.kind !== 'native' && ((collaboration?.subAgentIds.length ?? 0) > 0 || (collaboration?.capabilities.length ?? 0) > 0 || (collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate sub-Agents and capability tools.');
+    if ((!collaboration?.publicModels?.length && runtime.kind === 'native') || nextProviderId) await this.validateModel(team.id, nextProviderId, model);
     const assignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds, true);
 
     await this.db.transaction((transaction) => {
       const [row] = transaction.update(agents).set({
         name,
         runtime,
+        collaboration,
         ...(input.responsibility === undefined ? {} : { responsibility: input.responsibility.trim() }),
         ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt.trim() }),
         providerId: nextProviderId ?? null,
@@ -218,7 +178,11 @@ export class AgentsService {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
-    if (existing.kind === 'system') throw new BadRequestException('Built-in Agents cannot be deleted.');
+    if (existing.kind === 'system') throw new BadRequestException('The Chat entry point cannot be deleted.');
+    const parents = await this.db.select().from(agents).where(eq(agents.workspaceId, team.id));
+    if (parents.some((parent) => parent.collaboration?.subAgentIds.includes(agentId))) throw new ConflictException('Remove this sub-Agent from its parent before deleting it.');
+    const active = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).limit(1);
+    if (active.length) throw new ConflictException('Cancel the active Agent execution before deleting it.');
     await this.db.transaction((transaction) => {
       transaction.delete(scheduledAgentTasks).where(and(eq(scheduledAgentTasks.agentId, agentId), eq(scheduledAgentTasks.workspaceId, team.id))).run();
       transaction.delete(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, team.id))).run();
@@ -227,6 +191,36 @@ export class AgentsService {
       transaction.delete(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).run();
       transaction.delete(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).run();
     });
+  }
+
+  private async validateCollaboration(workspaceId: string, value: unknown, agentId?: string): Promise<AgentCollaboration | null> {
+    if (value === null) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Agent collaboration must be an object or null.');
+    const config = value as AgentCollaboration;
+    if (!Array.isArray(config.subAgentIds) || config.subAgentIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(config.subAgentIds).size !== config.subAgentIds.length) throw new BadRequestException('subAgentIds must contain unique Agent ids.');
+    if (!Array.isArray(config.capabilities)) throw new BadRequestException('capabilities must be an array.');
+    const controls = ['worklite/agent', 'worklite/map', 'worklite/input', 'worklite/timer', 'worklite/branch', 'worklite/join', 'worklite/dashboard'];
+    const ids = new Set<string>();
+    for (const capability of config.capabilities) {
+      if (!capability || typeof capability.id !== 'string' || !capability.id.trim() || ids.has(capability.id) || controls.includes(capability.type) || !resolveWorkflowNodeCapability(capability.type, capability.typeVersion) || !capability.config || typeof capability.config !== 'object' || Array.isArray(capability.config)) throw new BadRequestException('An Agent capability is invalid or duplicated.');
+      ids.add(capability.id);
+    }
+    await validatePrivateTools(config);
+    if (config.publicModels !== undefined && (!Array.isArray(config.publicModels) || config.publicModels.some((model) => typeof model !== 'string' || !model.includes('/')))) throw new BadRequestException('publicModels must contain public provider/model ids.');
+    if (config.builtinToolNames !== undefined && (!Array.isArray(config.builtinToolNames) || config.builtinToolNames.some((name) => !['bash', 'read', 'write', 'glob', 'grep'].includes(name)))) throw new BadRequestException('An Agent built-in tool is invalid.');
+    if (config.outputFormat !== undefined && !['text', 'json'].includes(config.outputFormat)) throw new BadRequestException('outputFormat must be text or json.');
+    if (config.requiredSkillIds !== undefined && (!Array.isArray(config.requiredSkillIds) || config.requiredSkillIds.some((id) => typeof id !== 'string'))) throw new BadRequestException('requiredSkillIds must be an array of Skill ids.');
+    for (const limit of Object.values(config.limits ?? {})) if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1) throw new BadRequestException('Agent limits must be positive integers.');
+    const directory = await this.db.select().from(agents).where(and(eq(agents.workspaceId, workspaceId), eq(agents.kind, 'custom')));
+    const byId = new Map(directory.map((agent) => [agent.id, agent]));
+    const visit = (id: string, ancestors: string[]) => {
+      if (id === agentId || ancestors.includes(id)) throw new BadRequestException('Sub-Agent assignments cannot contain cycles.');
+      const child = byId.get(id);
+      if (!child) throw new BadRequestException('Sub-Agents must be Agents from this workspace.');
+      for (const descendant of child.collaboration?.subAgentIds ?? []) visit(descendant, [...ancestors, id]);
+    };
+    for (const id of config.subAgentIds) visit(id, []);
+    return config;
   }
 
   private async validateProvider(workspaceId: string, providerId: string | null | undefined): Promise<{ name: string; models: string[] } | null> {
@@ -254,7 +248,7 @@ export class AgentsService {
     }
   }
 
-  private async validateDraftModel(workspaceId: string, providerId: string | null | undefined, model: string): Promise<{ name: string; models: string[] } | null> {
+  private async validateModel(workspaceId: string, providerId: string | null | undefined, model: string): Promise<{ name: string; models: string[] } | null> {
     const provider = await this.validateProvider(workspaceId, providerId);
     if (!provider) {
       if (model) throw new BadRequestException('Select a model provider before selecting a model.');
@@ -307,12 +301,13 @@ export class AgentsService {
     return { skillsByAgent, mcpServersByAgent };
   }
 
-  private toView(row: typeof agents.$inferSelect, workspaceSlug: string, providerName: string | null, assignments: AgentAssignments, latestVersion?: { id: string; version: number }): AgentView {
+  private toView(row: typeof agents.$inferSelect, workspaceSlug: string, providerName: string | null, assignments: AgentAssignments): AgentView {
     return {
       id: row.id,
       workspaceSlug,
       kind: row.kind,
       runtime: row.runtime,
+      collaboration: row.collaboration,
       name: row.name,
       responsibility: row.responsibility,
       systemPrompt: row.systemPrompt,
@@ -323,9 +318,6 @@ export class AgentsService {
       // Chat exposes only its protected platform Skill; legacy Chat Skill/MCP assignment rows are not shown.
       skills: (assignments.skillsByAgent.get(row.id) ?? []).filter((skill) => row.id !== CHAT_AGENT_ID || skill.name === WORKLITE_PLATFORM_SKILL_NAME),
       mcpServers: row.id === CHAT_AGENT_ID ? [] : assignments.mcpServersByAgent.get(row.id) ?? [],
-      version: 'draft',
-      latestVersionId: latestVersion?.id ?? null,
-      latestVersion: latestVersion?.version ?? null,
       updatedAt: row.updatedAt.toISOString(),
     };
   }
@@ -335,21 +327,4 @@ function normalizeResourceIds(input: unknown, resourceName: string): string[] {
   if (input === undefined) return [];
   if (!Array.isArray(input) || input.some((value) => typeof value !== 'string')) throw new BadRequestException(`${resourceName} selections must be an array of identifiers.`);
   return [...new Set(input.map((value) => value.trim()).filter(Boolean))];
-}
-
-function toAgentVersionView(row: typeof agentVersions.$inferSelect): AgentVersionView {
-  return {
-    id: row.id,
-    agentId: row.agentId,
-    version: row.version,
-    runtime: row.runtime,
-    name: row.name,
-    responsibility: row.responsibility,
-    systemPrompt: row.systemPrompt,
-    providerId: row.providerId,
-    model: row.model,
-    skillIds: row.skillIds ?? [],
-    mcpServerIds: row.mcpServerIds ?? [],
-    createdAt: row.createdAt.toISOString(),
-  };
 }

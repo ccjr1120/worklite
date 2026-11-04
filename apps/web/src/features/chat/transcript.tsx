@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { memo, createContext, useContext, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { splitChatAttachmentImages, type AgentExecutionView, type AgentToolCallView, type ChatConversationView, type ChatProjectTaskView, type ChatSubmissionView, type RunView, type WorkflowView } from '@worklite/contracts';
+import { agentTaskDisplayText, splitChatAttachmentImages, type AgentExecutionView, type AgentToolCallView, type ChatConversationView, type ChatProjectTaskView, type ChatSubmissionView, type RunView, type WorkflowView } from '@worklite/contracts';
 import { MarkdownImage } from '@/components/ai/markdown-image';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
 import { isLiveStatus, StatusBadge, toStatusKey, type StatusKey } from '@/components/status-badge';
@@ -82,6 +82,7 @@ type ActiveWorkflowRun = { workflow: WorkflowView; run: RunView; input: string }
 type TimelineEntry =
   | { kind: 'user'; item: TranscriptMessage }
   | { kind: 'assistant'; segments: TurnSegment[] }
+  | { kind: 'agentInvocation'; call: AgentToolCallView }
   | { kind: 'summaryDivider'; item: TranscriptMessage }
   | { kind: 'task'; submission: ChatSubmissionView }
   | { kind: 'workflowRun'; active: ActiveWorkflowRun }
@@ -113,6 +114,7 @@ function buildTimeline(sources: {
     push(item.createdAt, { kind: 'segment', segment: { kind: 'message', item } });
   }
   for (const item of execution?.toolCalls ?? []) {
+    if (item.agentInvocation) { push(item.createdAt, { kind: 'agentInvocation', call: item }); continue; }
     if (!item.question) { push(item.createdAt, { kind: 'segment', segment: { kind: 'tool', item } }); continue; }
     // An active question is represented only by the pending question note. A settled one stays
     // as an exchange: its question line in the asking turn and the answer as a user message.
@@ -150,11 +152,14 @@ const UserMessage = memo(function UserMessage({ message, pending = false }: { me
   const { t } = useTranslation('assistant');
   // Images the reader pasted into the composer travel in the message text as attachment references;
   // show them as the pictures they are instead of printing their Markdown in the bubble.
-  const { text, images } = splitChatAttachmentImages(message.content);
+  const { text, images } = splitChatAttachmentImages(agentTaskDisplayText(message.content));
   return (
     <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter">
       <MessageContent className={cn('max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5 transition-opacity duration-[140ms] ease-[var(--ease-out)]', pending && 'opacity-60')}>
-        {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text}</p> : null}
+        {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text.split(/(\[@[^\]\n]+\]\(\/agents\/[^)\s]+\))/g).map((part, index) => {
+          const mention = /^\[(@[^\]\n]+)\]\(\/agents\/([^?/)]+)\?runId=([A-Za-z0-9_-]+)(?:&executionId=[^\s)]+)?\)$/.exec(part);
+          return mention ? <Link key={index} to="/agents/$agentId" params={{ agentId: decodeURIComponent(mention[2]!) }} search={{ runId: mention[3] }} className="font-medium text-brand-text hover:underline">{mention[1]}</Link> : part;
+        })}</p> : null}
         {images.map((image) => <MarkdownImage key={image.id} src={image.url} alt={image.alt} />)}
       </MessageContent>
     </Message>
@@ -207,7 +212,7 @@ function ProgressReportCard({ report, streaming }: {
   return <div className="my-2 space-y-2" aria-busy={streaming || undefined}>
     {report.items.map((item) => <article key={`${item.kind}:${item.id}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
-        <p className="min-w-0 break-words text-sm font-medium">{item.title}</p>
+        <p className="min-w-0 break-words text-sm font-medium">{item.kind === 'agent' && item.agentId && item.runId ? <Link to="/agents/$agentId" params={{ agentId: item.agentId }} search={{ runId: item.runId }} className="text-brand-text hover:underline">@{item.title}</Link> : item.title}</p>
         <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
       </div>
       {item.progress ? parseChecklistProgress(item.progress) ? <div className="mt-1"><ExecutionChecklist steps={parseChecklistProgress(item.progress)!} /></div> : <p className="mt-1 whitespace-pre-line break-words text-[13px] text-muted-foreground">{item.progress}</p> : item.kind === 'task' && item.stage ? <p className="mt-1 text-[13px] text-muted-foreground">{t(`codex.stage.${item.stage}`, { defaultValue: item.stage })}</p> : null}
@@ -543,7 +548,6 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
   };
   const goalSummary = toSingleLine(task.goal);
   const executorName = task.executor ? t(`codex.executorName.${task.executor}`) : t('codex.launchNotCaptured');
-  const modelSummary = t('codex.modelLaunch', { model: task.model || t('codex.defaultModel'), mode: executorName });
   const latestActivity = task.activities.at(-1) ?? null;
   const createdAtMs = Date.parse(task.createdAt);
   const finishedAtMs = live ? clockNow : Date.parse(task.updatedAt);
@@ -845,7 +849,22 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
   );
 }
 
+function AgentInvocationMessage({ call }: { call: AgentToolCallView }) {
+  const pins = useContext(PinTrackingContext);
+  const invocation = call.agentInvocation;
+  if (!invocation) return null;
+  return (
+    <Message ref={pins?.track(call.id, 'outside')} tabIndex={-1} from="assistant" className="wl-enter outline-none">
+      <MessageContent className="min-w-0 space-y-2 rounded-lg bg-surface-subtle px-4 py-3">
+        <Link to="/agents/$agentId" params={{ agentId: invocation.agentId }} search={{ runId: invocation.runId }} className="font-medium text-brand-text hover:underline">@{invocation.agentName}</Link>
+        {invocation.task ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{invocation.task}</p> : null}
+      </MessageContent>
+    </Message>
+  );
+}
+
 function ToolCallPanel({ call }: { call: AgentToolCallView }) {
+  if (call.agentInvocation) return <AgentInvocationMessage call={call} />;
   if (call.projectTask) return <CodexToolCallPanel task={call.projectTask} />;
   return <StandardToolCallPanel call={call} />;
 }
@@ -912,5 +931,5 @@ function StandardToolCallPanel({ call }: { call: AgentToolCallView }) {
   );
 }
 
-export { AssistantTurn, buildTimeline, CancelledNote, CodexToolCallPanel, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
+export { AgentInvocationMessage, ToolCallPanel, AssistantTurn, buildTimeline, CancelledNote, CodexToolCallPanel, FailureNote, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage, WorkflowRunRow };
 export type { ActiveWorkflowRun, TimelineEntry };

@@ -1,3 +1,4 @@
+import zhAgents from './locales/zh-CN/agents.json';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { applyDocumentLocale } from './locale';
@@ -22,6 +23,7 @@ const NAMESPACES = [
   'assistant',
   'coders',
   'workflows',
+  'agents',
   'runs',
   'skills',
   'mcpServers',
@@ -39,6 +41,7 @@ const resources = {
     assistant: zhAssistant,
     coders: zhCoders,
     workflows: zhWorkflows,
+    agents: zhAgents,
     runs: zhRuns,
     skills: zhSkills,
     mcpServers: zhMcpServers,

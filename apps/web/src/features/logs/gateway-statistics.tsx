@@ -62,7 +62,7 @@ function GatewayStatistics({ from, to, filters = {}, onFiltersChange, onViewRequ
   const summary = stats?.summary;
   const metricValue = (value: number | null, suffix = '') => value === null ? t('statistics.unavailable') : `${formatNumber(value, locale)}${suffix}`;
   const tokenValue = (value: number | null) => value === null ? t('statistics.unavailable') : formatTokenCount(value, locale);
-  const tokenExact = (value: number | null) => value === null ? t('statistics.unavailable') : formatNumber(value, locale);
+  const tokenExact = tokenValue;
   const providers = [...new Set((stats?.breakdown ?? []).map((row) => row.provider))].sort();
   const filteredBreakdown = (stats?.breakdown ?? []).filter((row) => (!filters.provider || row.provider === filters.provider) && (!filters.model || row.model === filters.model));
   const sumKnown = (values: Array<number | null>) => values.some((value) => value !== null) ? values.reduce<number>((total, value) => total + (value ?? 0), 0) : null;

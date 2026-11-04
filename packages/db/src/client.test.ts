@@ -101,179 +101,6 @@ describe('initializeDatabase restart recovery', () => {
     expect(remainingNames.has('coder_conversation_events')).toBe(false);
   });
 
-  it('retires active pre-Router Runs instead of resuming their old graph', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-    const now = new Date();
-    await db.insert(schema.coders).values({
-      id: 'coder_pre_router', workspaceId: 'workspace_personal', name: 'Pre Router', description: 'migration fixture',
-      processId: 'bmad-tea', processVersion: '1', roles: [], createdAt: now, updatedAt: now,
-    });
-    await db.insert(schema.coderVersions).values({
-      id: 'version_pre_router', workspaceId: 'workspace_personal', coderId: 'coder_pre_router', version: 1,
-      snapshot: { processId: 'bmad-tea', processVersion: '1', manifestHash: '', developerExecution: { kind: 'codex_app_server' }, orchestrationVersion: 11, roles: [] } as never,
-      createdAt: now,
-    });
-    await db.insert(schema.coderRuns).values({
-      id: 'run_pre_router', workspaceId: 'workspace_personal', coderId: 'coder_pre_router', coderVersionId: 'version_pre_router',
-      intent: 'old task', projectDirectory: '/repo', langGraphThreadId: 'thread_pre_router', status: 'running',
-      createdAt: now, updatedAt: now,
-    });
-    await db.insert(schema.coderRuns).values({
-      id: 'run_pre_router_terminal', workspaceId: 'workspace_personal', coderId: 'coder_pre_router', coderVersionId: 'version_pre_router',
-      intent: 'old completed task', projectDirectory: '/repo', langGraphThreadId: 'thread_pre_router_terminal', status: 'succeeded',
-      createdAt: now, updatedAt: now, finishedAt: now,
-    });
-    await db.insert(schema.coderTaskAttempts).values({
-      id: 'attempt_pre_router', workspaceId: 'workspace_personal', runId: 'run_pre_router', taskKey: 'developer', attemptIndex: 0,
-      role: 'developer', status: 'running', inputRevision: {}, inputFingerprint: 'pre-router', createdAt: now, startedAt: now,
-    });
-    await db.insert(schema.coderPendingInputs).values({
-      id: 'pending_pre_router', workspaceId: 'workspace_personal', runId: 'run_pre_router', taskAttemptId: 'attempt_pre_router',
-      kind: 'question', question: 'old question', scopeRevision: 1, status: 'pending', createdAt: now, updatedAt: now,
-    });
-
-    const migration = readFileSync(resolve(process.cwd(), 'packages/db/drizzle/0072_retire_legacy_coder_runs.sql'), 'utf8');
-    db.$client.exec(migration);
-
-    const [run] = await db.select().from(schema.coderRuns).where(eq(schema.coderRuns.id, 'run_pre_router')).limit(1);
-    const [terminalRun] = await db.select().from(schema.coderRuns).where(eq(schema.coderRuns.id, 'run_pre_router_terminal')).limit(1);
-    const [attempt] = await db.select().from(schema.coderTaskAttempts).where(eq(schema.coderTaskAttempts.id, 'attempt_pre_router')).limit(1);
-    const [pending] = await db.select().from(schema.coderPendingInputs).where(eq(schema.coderPendingInputs.id, 'pending_pre_router')).limit(1);
-    const events = await db.select().from(schema.coderRunEvents).where(eq(schema.coderRunEvents.runId, 'run_pre_router'));
-    expect(run).toMatchObject({ status: 'failed', desiredControlState: 'none' });
-    expect(run.finishedAt).toBeInstanceOf(Date);
-    expect(attempt).toMatchObject({ status: 'failed', active: false, error: 'This Run uses a retired orchestration version. Start a new Router Run.' });
-    expect(pending.status).toBe('cancelled');
-    expect(events).toContainEqual(expect.objectContaining({ type: 'run.status', payload: expect.objectContaining({ status: 'failed' }) }));
-    expect(terminalRun).toMatchObject({ status: 'succeeded', finishedAt: now });
-    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
-  });
-
-  it('retires paused Runs and pause requests with their active attempts and pending inputs', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-    const now = new Date();
-    await db.insert(schema.coders).values({
-      id: 'coder_pause_migration', workspaceId: 'workspace_personal', name: 'Pause migration', description: 'migration fixture',
-      processId: 'bmad-tea', processVersion: '1', roles: [], createdAt: now, updatedAt: now,
-    });
-    await db.insert(schema.coderVersions).values({
-      id: 'version_pause_migration', workspaceId: 'workspace_personal', coderId: 'coder_pause_migration', version: 1,
-      snapshot: { processId: 'bmad-tea', processVersion: '1', manifestHash: '', orchestrationVersion: 12, roles: [] } as never,
-      createdAt: now,
-    });
-    await db.insert(schema.coderRuns).values([
-      {
-        id: 'run_paused_legacy', workspaceId: 'workspace_personal', coderId: 'coder_pause_migration', coderVersionId: 'version_pause_migration',
-        intent: 'paused task', projectDirectory: '/repo', langGraphThreadId: 'thread_paused_legacy', status: 'paused' as never,
-        createdAt: now, updatedAt: now,
-      },
-      {
-        id: 'run_pause_requested', workspaceId: 'workspace_personal', coderId: 'coder_pause_migration', coderVersionId: 'version_pause_migration',
-        intent: 'pause requested task', projectDirectory: '/repo', langGraphThreadId: 'thread_pause_requested', status: 'running',
-        desiredControlState: 'pause_requested' as never, createdAt: now, updatedAt: now,
-      },
-    ]);
-    await db.insert(schema.coderTaskAttempts).values([
-      { id: 'attempt_paused_legacy', workspaceId: 'workspace_personal', runId: 'run_paused_legacy', taskKey: 'developer', attemptIndex: 0, role: 'developer', status: 'running', active: true, inputRevision: {}, inputFingerprint: 'paused', createdAt: now, startedAt: now },
-      { id: 'attempt_pause_requested', workspaceId: 'workspace_personal', runId: 'run_pause_requested', taskKey: 'developer', attemptIndex: 0, role: 'developer', status: 'running', active: true, inputRevision: {}, inputFingerprint: 'pause-requested', createdAt: now, startedAt: now },
-    ]);
-    await db.insert(schema.coderPendingInputs).values([
-      { id: 'pending_paused_legacy', workspaceId: 'workspace_personal', runId: 'run_paused_legacy', taskAttemptId: 'attempt_paused_legacy', kind: 'question', question: 'old pause question', scopeRevision: 1, status: 'pending', createdAt: now, updatedAt: now },
-      { id: 'pending_pause_requested', workspaceId: 'workspace_personal', runId: 'run_pause_requested', taskAttemptId: 'attempt_pause_requested', kind: 'question', question: 'pause request question', scopeRevision: 1, status: 'pending', createdAt: now, updatedAt: now },
-    ]);
-
-    const migration = readFileSync(resolve(process.cwd(), 'packages/db/drizzle/0073_remove_coder_run_pause.sql'), 'utf8');
-    db.$client.exec(migration);
-
-    for (const [runId, attemptId, pendingId] of [
-      ['run_paused_legacy', 'attempt_paused_legacy', 'pending_paused_legacy'],
-      ['run_pause_requested', 'attempt_pause_requested', 'pending_pause_requested'],
-    ]) {
-      const [run] = await db.select().from(schema.coderRuns).where(eq(schema.coderRuns.id, runId!)).limit(1);
-      const [attempt] = await db.select().from(schema.coderTaskAttempts).where(eq(schema.coderTaskAttempts.id, attemptId!)).limit(1);
-      const [pending] = await db.select().from(schema.coderPendingInputs).where(eq(schema.coderPendingInputs.id, pendingId!)).limit(1);
-      expect(run).toMatchObject({ status: 'failed', desiredControlState: 'none' });
-      expect(run!.finishedAt).toBeInstanceOf(Date);
-      expect(attempt).toMatchObject({ status: 'failed', active: false });
-      expect(pending!.status).toBe('cancelled');
-    }
-    const events = await db.select().from(schema.coderRunEvents);
-    expect(events.filter(({ type }) => type === 'run.status')).toHaveLength(2);
-    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
-  });
-
-  it('removes old developer-lane fields from current Coder settings but preserves version snapshots', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-    const now = new Date();
-    await db.insert(schema.coders).values({
-      id: 'coder_old_lanes', workspaceId: 'workspace_personal', name: 'Old lanes', description: 'migration fixture',
-      processId: 'bmad-tea', processVersion: '1', roles: [
-        { role: 'planner', developerConcurrency: 4 },
-        { role: 'developer', developerInstances: [{ developerId: 'developer-2', label: 'Developer 2' }] },
-        { role: 'dispatcher', instructions: 'Old dispatcher role' },
-        { role: 'executor-manager', instructions: 'Old executor manager role' },
-        { role: 'worktree-manager', instructions: 'Old worktree role' },
-      ] as never, createdAt: now, updatedAt: now,
-    });
-    await db.insert(schema.coderVersions).values({
-      id: 'version_old_lanes', workspaceId: 'workspace_personal', coderId: 'coder_old_lanes', version: 1,
-      snapshot: {
-        processId: 'bmad-tea', processVersion: '1', orchestrationVersion: 11,
-        developerExecution: { kind: 'codex_app_server' },
-        roles: [{ role: 'developer', developerInstances: [{ developerId: 'developer-2' }] }],
-      } as never,
-      createdAt: now,
-    });
-
-    const migration = readFileSync(resolve(process.cwd(), 'packages/db/drizzle/0074_remove_legacy_coder_lanes.sql'), 'utf8');
-    db.$client.exec(migration);
-
-    const [coder] = await db.select().from(schema.coders).where(eq(schema.coders.id, 'coder_old_lanes')).limit(1);
-    const [version] = await db.select().from(schema.coderVersions).where(eq(schema.coderVersions.id, 'version_old_lanes')).limit(1);
-    expect(coder.roles).toEqual([{ role: 'planner' }, { role: 'developer' }]);
-    expect((version.snapshot.roles[0] as Record<string, unknown>).developerInstances).toEqual([{ developerId: 'developer-2' }]);
-  });
-
-  it('rewrites Router handoffs as assignments and results while keeping historical direct handoffs', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-    const now = new Date();
-    await db.insert(schema.coders).values({
-      id: 'coder_message_kinds', workspaceId: 'workspace_personal', name: 'Message kinds', description: 'migration fixture',
-      processId: 'bmad-tea', processVersion: '1', roles: [], createdAt: now, updatedAt: now,
-    });
-    await db.insert(schema.coderVersions).values([
-      { id: 'version_message_kinds_v12', workspaceId: 'workspace_personal', coderId: 'coder_message_kinds', version: 12, snapshot: { orchestrationVersion: 12, roles: [] } as never, createdAt: now },
-      { id: 'version_message_kinds_v11', workspaceId: 'workspace_personal', coderId: 'coder_message_kinds', version: 11, snapshot: { orchestrationVersion: 11, roles: [] } as never, createdAt: now },
-    ]);
-    await db.insert(schema.coderGroups).values({ id: 'group_message_kinds', workspaceId: 'workspace_personal', coderId: 'coder_message_kinds', createdAt: now, updatedAt: now });
-    await db.insert(schema.coderRuns).values([
-      { id: 'run_message_kinds_v12', workspaceId: 'workspace_personal', coderId: 'coder_message_kinds', coderVersionId: 'version_message_kinds_v12', groupId: 'group_message_kinds', intent: 'current', projectDirectory: '/repo', langGraphThreadId: 'thread_message_kinds_v12', createdAt: now, updatedAt: now },
-      { id: 'run_message_kinds_v11', workspaceId: 'workspace_personal', coderId: 'coder_message_kinds', coderVersionId: 'version_message_kinds_v11', groupId: 'group_message_kinds', intent: 'historical', projectDirectory: '/repo', langGraphThreadId: 'thread_message_kinds_v11', createdAt: now, updatedAt: now },
-    ]);
-    await db.insert(schema.coderGroupMessages).values([
-      { id: 'message_router_assignment', workspaceId: 'workspace_personal', groupId: 'group_message_kinds', sequence: 1, sender: 'role', senderRole: 'router', recipientRole: 'planner', kind: 'handoff' as never, body: 'Assigned', runId: 'run_message_kinds_v12', createdAt: now },
-      { id: 'message_router_result', workspaceId: 'workspace_personal', groupId: 'group_message_kinds', sequence: 2, sender: 'role', senderRole: 'planner', recipientRole: 'router', kind: 'handoff' as never, body: 'Finished', runId: 'run_message_kinds_v12', createdAt: now },
-      { id: 'message_v12_direct', workspaceId: 'workspace_personal', groupId: 'group_message_kinds', sequence: 3, sender: 'role', senderRole: 'developer', recipientRole: 'planner', kind: 'handoff' as never, body: 'Historical direct handoff', runId: 'run_message_kinds_v12', createdAt: now },
-      { id: 'message_v11_direct', workspaceId: 'workspace_personal', groupId: 'group_message_kinds', sequence: 4, sender: 'role', senderRole: 'developer', recipientRole: 'planner', kind: 'handoff' as never, body: 'Old direct handoff', runId: 'run_message_kinds_v11', createdAt: now },
-    ]);
-
-    const migration = readFileSync(resolve(process.cwd(), 'packages/db/drizzle/0075_router_group_message_kinds.sql'), 'utf8');
-    db.$client.exec(migration);
-
-    const messages = await db.select().from(schema.coderGroupMessages).orderBy(schema.coderGroupMessages.sequence);
-    expect(messages.map(({ id, kind }) => [id, kind])).toEqual([
-      ['message_router_assignment', 'assignment'],
-      ['message_router_result', 'result'],
-      ['message_v12_direct', 'handoff'],
-      ['message_v11_direct', 'handoff'],
-    ]);
-    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
-  });
-
   it('drops execution-mode columns from existing Run and group tables', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
@@ -294,13 +121,9 @@ describe('initializeDatabase restart recovery', () => {
     expect(groupColumns.has('mode')).toBe(false);
   });
 
-  it('exposes only Run cancellation; task continuation uses the Router group operation', () => {
-    const tools = JSON.parse(platformFile('scripts/tools.json').content) as Record<string, { inputSchema: { properties: Record<string, unknown>; required: string[] } }>;
-    const control = tools['scripts/control-coder-run.mjs'];
-    expect(control.inputSchema.properties).toEqual({ runId: expect.any(Object), action: { type: 'string', enum: ['cancel'] } });
-    const script = platformFile('scripts/control-coder-run.mjs').content;
-    expect(script).not.toMatch(/resume|retry|pause/);
-    expect(platformFile('scripts/control-coder-group.mjs').content).toContain('continue_task');
+  it('exposes no Workflow or Coding Team control tools', () => {
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    expect(Object.keys(tools).some((path) => /coder|workflow/.test(path))).toBe(false);
   });
 
   it('closes a non-recoverable running tool call and persists its failure result', async () => {
@@ -415,60 +238,31 @@ describe('initializeDatabase restart recovery', () => {
     expect(codexTask.status).toBe('waiting_for_input');
   });
 
-  it('registers the Workflow Agent model replacement platform tool', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const script = platformFile('scripts/replace-workflow-agent-models.mjs');
-    const manifest = platformFile('scripts/tools.json');
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-
-    expect(script.content).toContain('/draft/model-replacement');
-    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required: string[] } }>;
-    expect(tools['scripts/replace-workflow-agent-models.mjs'].name).toBe('replace_workflow_agent_models');
-    expect(tools['scripts/replace-workflow-agent-models.mjs'].inputSchema.required).toEqual(['workflowId', 'fromModel', 'toModel']);
-    expect(chat.systemPrompt).toContain('replace_workflow_agent_models');
+  it('registers Agent configuration tools and public model fallback configuration', () => {
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    expect(tools['scripts/create-agent.mjs'].name).toBe('create_agent');
+    expect(tools['scripts/update-agent.mjs'].name).toBe('update_agent');
+    expect(tools['scripts/create-agent.mjs'].inputSchema.required).not.toContain('collaboration');
+    expect(tools['scripts/delete-agent.mjs'].name).toBe('delete_agent');
+    for (const path of ['scripts/create-agent.mjs', 'scripts/update-agent.mjs']) {
+      expect(tools[path].inputSchema.properties).toHaveProperty('providerId');
+      expect(tools[path].inputSchema.properties).toHaveProperty('model');
+      expect(platformFile(path).content).toContain("'providerId', 'model'");
+    }
+    expect(platformFile('scripts/update-agent.mjs').content).toContain("method: 'PATCH'");
   });
 
-  it('registers the in-place Workflow patch platform tool', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const content = new Map(platformSkillPackageFiles().map((file) => [file.path, file.content]));
-    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; description: string; inputSchema: { required: string[]; properties: Record<string, { type?: string; items?: { anyOf?: unknown[] } }> } }>;
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    const patch = tools['scripts/patch-workflow.mjs'];
-
-    expect(content.get('scripts/patch-workflow.mjs')).toContain('/draft/operations');
-    expect(content.get('scripts/patch-workflow.mjs')).toContain("exactKeys(raw, ['workflowId', 'baseRevisionId', 'sourceInstruction', 'patch'])");
-    expect(content.get('scripts/patch-workflow.mjs')).toContain('patch: raw.patch');
-    expect(patch.name).toBe('patch_workflow');
-    expect(patch.inputSchema.required).toEqual(['workflowId', 'sourceInstruction', 'patch']);
-    expect(patch.inputSchema.properties.patch.type).toBe('array');
-    expect(patch.inputSchema.properties.patch.items?.anyOf).toHaveLength(6);
-    expect(patch.description).toContain('configPatch');
-    expect(patch.description).toContain('requiredSkillIds');
-    // edit_workflow keeps its whole-graph replacement semantics.
-    expect(tools['scripts/edit-workflow.mjs'].inputSchema.required).toEqual(['workflowId', 'sourceInstruction', 'plan']);
-    expect(chat.systemPrompt).toContain('patch_workflow');
-    expect(chat.systemPrompt).toContain('requiredSkillIds');
+  it('does not package graph editing, publishing or Workflow execution tools', () => {
+    const files = platformSkillPackageFiles();
+    expect(files.some((file) => file.path.includes('workflow'))).toBe(false);
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    expect(Object.keys(tools).some((path) => path.includes('workflow'))).toBe(false);
+    expect(files.some((file) => file.path === 'scripts/dispatch-task.mjs')).toBe(false);
   });
 
-  it('registers the guarded Workflow deletion platform tool', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const script = platformFile('scripts/delete-workflow.mjs');
-    const manifest = platformFile('scripts/tools.json');
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-
-    expect(script.content).toContain("raw.confirm !== true");
-    expect(script.content).toContain("method: 'DELETE'");
-    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required: string[]; properties: Record<string, { default?: boolean }> } }>;
-    expect(tools['scripts/delete-workflow.mjs'].name).toBe('delete_workflow');
-    expect(tools['scripts/delete-workflow.mjs'].inputSchema.required).toEqual(['workflowId', 'confirm']);
-    expect(tools['scripts/delete-workflow.mjs'].inputSchema.properties.force.default).toBe(false);
-    expect(chat.systemPrompt).toContain('delete_workflow');
+  it('registers Agent deletion through the native Agent API', () => {
+    expect(platformFile('scripts/delete-agent.mjs').content).toContain("method: 'DELETE'");
+    expect(platformFile('scripts/delete-agent.mjs').content).toContain("'/agents/'");
   });
 
   it('registers categorized Chat memory platform tools', async () => {
@@ -531,82 +325,45 @@ describe('initializeDatabase restart recovery', () => {
     // The model must not invent mappings: only user-stated ones are recorded.
     expect(content.get('scripts/tools.json')).toContain('never guess a mapping');
     expect(content.get('SKILL.md')).toContain('set_local_project_alias');
-    expect(content.get('SKILL.md')).toContain('dino-datahub');
+    expect(content.get('SKILL.md')).toContain('explicitly supplied by the user');
     expect(chat.systemPrompt).toContain('set_local_project_alias');
     expect(chat.systemPrompt).toContain('never guessed or bulk-generated');
   });
 
-  it('maps sidebar page labels to Web routes in one Skill section', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const skill = platformFile('SKILL.md');
-    expect(skill.content.match(/## Pages and routes \(UI navigation\)/g)).toHaveLength(1);
-    expect(skill.content).toContain('| 工作区 | Coding | `/coding` |');
-    expect(skill.content).toContain('`/coding/:coderId/config`');
-    expect(skill.content).toContain('`/coding/runs/:runId`');
-    expect(skill.content).toContain('do not call search_local_projects to look for a same-named repository');
-    // Route listings live only in the navigation section.
-    expect(skill.content).not.toContain('Chat Channels at /chat?view=channels');
-    expect(skill.content).not.toContain('`/coding/:coderId` lists an executor’s Runs');
+  it('documents the unified Agents page as the task configuration destination', () => {
+    const skill = platformFile('SKILL.md').content;
+    expect(skill).toContain('/agents');
+    expect(skill).not.toContain('/coding');
+    expect(skill).not.toContain('/workflows');
+    expect(skill).toContain('do not call search_local_projects to look for a same-named repository');
   });
 
-  it('registers dispatch_task without an Agent Team mode', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const script = platformFile('scripts/dispatch-task.mjs');
-    const manifest = platformFile('scripts/tools.json');
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-
-    const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: unknown }>;
-    const dispatch = Object.values(tools).find((tool) => tool.name === 'dispatch_task')!;
-    expect(JSON.stringify(dispatch.inputSchema)).not.toContain('plan_only');
-    expect(JSON.stringify(dispatch.inputSchema)).not.toMatch(/"mode"/);
-    expect(script.content).not.toContain('mode');
-    expect(script.content).toContain("'role'");
-    const skill = platformFile('SKILL.md');
-    expect(chat.systemPrompt).toContain('New Chat dispatches always enter the server-owned Router');
-    expect(chat.systemPrompt).not.toContain('Executors do not accept a mode');
-    expect(chat.systemPrompt).not.toContain('supported mode');
-    expect(skill.content).not.toContain('supported mode');
+  it('removes dispatch_task and keeps native Agent management tools', () => {
+    const content = new Map(platformSkillPackageFiles().map((file) => [file.path, file.content]));
+    const tools = JSON.parse(content.get('scripts/tools.json')!);
+    expect(content.has('scripts/dispatch-task.mjs')).toBe(false);
+    expect(tools['scripts/dispatch-task.mjs']).toBeUndefined();
+    expect(tools['scripts/create-agent.mjs'].name).toBe('create_agent');
   });
 
-  it('routes Chat project work through Coding Team instead of project_task', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
+  it('routes code and automation tasks through dynamically coordinated Agents', async () => {
+    db = createDb(':memory:'); await initializeDatabase(db);
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    const skill = platformFile('SKILL.md');
-    expect(chat.systemPrompt).toContain('dispatch coding, cross-file changes, repository-wide investigation and validation/build/test work to Coders');
-    expect(chat.systemPrompt).toContain('New Chat dispatches always enter the server-owned Router');
-    expect(chat.systemPrompt).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
-    expect(skill.content).not.toMatch(/\b(?:answer|steer|cancel)_project_task\b|redeployAfterSuccess|Agent Team/);
-    expect(skill.content).toContain('dispatch_task');
-    expect(skill.content).toContain('Coder');
-    expect(skill.content).toContain('Router');
+    expect(chat.systemPrompt).toContain('run_agent');
+    expect(chat.systemPrompt).toContain('projectDirectory');
+    expect(chat.systemPrompt).toContain('promptly delegate the original user request');
+    expect(platformFile('SKILL.md').content).toContain('promptly delegate the original user request');
+    expect(chat.systemPrompt).not.toMatch(/\bdispatch_task\b|\binspect_coders\b/);
   });
 
-  it('registers the direct Workflow inspection platform tool', async () => {
-    db = createDb(':memory:');
-    await initializeDatabase(db);
-
-    const files = platformSkillPackageFiles();
-    const content = new Map(files.map((file) => [file.path, file.content]));
-    const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[]; minimum?: number; maximum?: number }> } }>;
+  it('routes automation through dynamically coordinated Agents', async () => {
+    db = createDb(':memory:'); await initializeDatabase(db);
     const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-
-    expect(content.get('scripts/inspect-workflow.mjs')).toContain('/versions');
-    expect(content.get('scripts/inspect-workflow.mjs')).toContain('/schedule');
-    expect(content.get('scripts/inspect-workflow.mjs')).toContain("versionsMode === 'none'");
-    expect(content.get('scripts/inspect-workflow.mjs')).toContain('omittedVersionDefinitions');
-    expect(tools['scripts/inspect-workflow.mjs'].name).toBe('inspect_workflow');
-    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.required ?? []).toEqual([]);
-    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.properties.versions.enum).toEqual(['latest', 'all', 'none']);
-    expect(tools['scripts/inspect-workflow.mjs'].inputSchema.properties.runLimit.maximum).toBe(20);
-    expect(content.get('SKILL.md')).toContain('inspect_workflow');
-    expect(content.get('SKILL.md')).not.toContain('never a reason to delegate');
-    expect(chat.systemPrompt).toContain('inspect_workflow');
+    expect(chat.systemPrompt).toContain('inspect_agents');
+    expect(chat.systemPrompt).toContain('run_agent');
+    expect(chat.systemPrompt).not.toMatch(/\b(?:inspect|patch|edit|create|publish)_workflow\b/);
+    expect(platformFile('SKILL.md').content).toContain('run_agent');
+    expect(platformFile('scripts/query-platform.mjs').content).toContain("READ_PREFIXES = ['/agents'");
   });
 
   it('registers query_platform as a bounded, redacting GET-only read tool', async () => {
@@ -651,17 +408,17 @@ describe('initializeDatabase restart recovery', () => {
     expect(terminal.inputSchema.properties.cwd).toMatchObject({ type: 'string', maxLength: 4_096 });
     expect(terminal.inputSchema.properties.timeoutMs).toMatchObject({ type: 'integer', minimum: 100, maximum: 900_000 });
     expect(terminal.description).toContain('no command allow-list');
-    expect(terminal.description).toContain('dispatch_task to a Coder');
+    expect(terminal.description).toContain('run_agent to an Agent');
     expect(tools['scripts/run-host-command.mjs']).toBeUndefined();
     expect(skill).toContain('Use run_host_command directly');
     expect(skill).toContain('no command allow-list');
-    expect(skill).toContain('executor');
+    expect(skill).toContain('Codex');
     expect(skill).toContain('ordinary file management');
     expect(skill).not.toContain('batch file changes and directory removal belong to a project executor');
     expect(skill).not.toMatch(/whitelist|restricted Chat|no new Shell execution|no direct read|no bash/i);
     expect(chat.systemPrompt).toContain('run_host_command');
-    expect(chat.systemPrompt).toContain('Do not dispatch a Coder for those operations');
-    expect(chat.systemPrompt).toContain('dispatch coding, cross-file changes, repository-wide investigation and validation/build/test work to Coders');
+    expect(chat.systemPrompt).toContain('Do not dispatch an Agent for those operations');
+    expect(chat.systemPrompt).toContain('build/test validation belong to an appropriate Agent');
     expect(chat.systemPrompt).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
   });
 

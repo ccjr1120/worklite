@@ -5,14 +5,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, coderRuns, agentToolCalls, chatSubmissions, commandExecutions, externalChats, workflowRuns, type Database } from '@worklite/db';
+import { agentExecutions, agentToolCalls, chatSubmissions, commandExecutions, externalChats, type Database } from '@worklite/db';
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
-import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { CommandsService } from '../commands/commands.service';
-import { RunsService } from '../runs/runs.service';
 import type { WechatService } from '../plugins/wechat/wechat.service';
 import type { Request } from 'express';
 import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
@@ -161,8 +159,8 @@ export class UpgradesService implements OnModuleInit {
   private async interruptActiveWork(id: string) {
     const job = this.load(id);
     const activeAgents = await this.db.select({ id: agentExecutions.id, agentId: agentExecutions.agentId }).from(agentExecutions).where(inArray(agentExecutions.status, ['running', 'waiting_for_input']));
-    const activeTeams = await this.db.select({ id: coderRuns.id }).from(coderRuns).where(inArray(coderRuns.status, ['queued', 'running', 'waiting_for_input']));
-    const activeWorkflows = await this.db.select({ id: workflowRuns.id }).from(workflowRuns).where(inArray(workflowRuns.status, ['queued', 'running', 'waiting_for_input', 'paused']));
+    const activeTeams: Array<{ id: string }> = [];
+    const activeWorkflows: Array<{ id: string }> = [];
     const activeCommands = await this.db.select({ id: commandExecutions.id }).from(commandExecutions).where(inArray(commandExecutions.status, ['queued', 'running', 'cancelling']));
     const interruptedWork = {
       agentExecutions: [...new Set([...(job.interruptedWork?.agentExecutions ?? []), ...activeAgents.map(({ id: executionId }) => executionId)])],
@@ -176,8 +174,7 @@ export class UpgradesService implements OnModuleInit {
     this.save(job);
 
     const executions = this.modules.get(AgentExecutionsService, { strict: false });
-    const teamRuntime = this.modules.get(AgentTeamRuntimeService, { strict: false });
-    const runs = this.modules.get(RunsService, { strict: false });
+
     const commands = this.modules.get(CommandsService, { strict: false });
     const cancellationLabels = [
       ...activeAgents.map(({ id: executionId }) => `agent:${executionId}`),
@@ -187,8 +184,6 @@ export class UpgradesService implements OnModuleInit {
     ];
     const cancellations = [
       ...activeAgents.map(({ id: executionId, agentId }) => executions.cancel({} as Request, 'personal', agentId, executionId)),
-      ...activeTeams.map(({ id: runId }) => teamRuntime.cancel(runId)),
-      ...activeWorkflows.map(({ id: runId }) => runs.cancel({} as Request, 'personal', runId, true)),
       ...activeCommands.map(async ({ id: commandId }) => {
         await commands.cancel(commandId);
         await commands.waitForCompletion(commandId);

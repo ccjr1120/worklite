@@ -9,9 +9,10 @@ export async function validateAgentRuntime(value: unknown): Promise<AgentRuntime
   const runtime = value as Record<string, unknown>;
   if (runtime.kind === 'native') return { kind: 'native' };
   if (runtime.kind !== 'claude' && runtime.kind !== 'codex') throw new BadRequestException('Agent runtime must be native, claude or codex.');
+  if (runtime.approvalPolicy !== undefined && runtime.approvalPolicy !== 'auto' && runtime.approvalPolicy !== 'ask') throw new BadRequestException('Agent approvalPolicy must be auto or ask.');
+  if (runtime.projectDirectory === undefined || runtime.projectDirectory === '') return { kind: runtime.kind, projectDirectory: '', ...(runtime.approvalPolicy ? { approvalPolicy: runtime.approvalPolicy as 'auto' | 'ask' } : {}) };
   if (typeof runtime.projectDirectory !== 'string' || !isAbsolute(runtime.projectDirectory)) throw new BadRequestException('An engine-backed Agent requires an absolute existing projectDirectory.');
   const directory = await realpath(runtime.projectDirectory).catch(() => null);
   if (!directory || !(await stat(directory).catch(() => null))?.isDirectory()) throw new BadRequestException('Agent projectDirectory must be an existing directory.');
-  if (runtime.approvalPolicy !== undefined && runtime.approvalPolicy !== 'auto' && runtime.approvalPolicy !== 'ask') throw new BadRequestException('Agent approvalPolicy must be auto or ask.');
   return { kind: runtime.kind, projectDirectory: directory, ...(runtime.approvalPolicy ? { approvalPolicy: runtime.approvalPolicy as 'auto' | 'ask' } : {}) };
 }

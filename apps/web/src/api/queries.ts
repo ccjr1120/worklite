@@ -392,3 +392,5 @@ export function useAuditLogsQuery(workspace?: string) {
 export function useWorkspaceSettingsQuery() {
   return useQuery({ queryKey: ['settings'] as const, queryFn: api.settings });
 }
+
+export function useAgentsQuery() { return useQuery({ queryKey: ['agents'], queryFn: api.agents }); }

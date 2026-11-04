@@ -1,5 +1,5 @@
 import { ArrowDown } from 'lucide-react';
-import { createContext, useContext, type ComponentProps } from 'react';
+import { createContext, useContext, useEffect, type ComponentProps } from 'react';
 import { useStickToBottom, type StickToBottomInstance } from 'use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -9,13 +9,16 @@ import { cn } from '@/lib/utils';
 // ConversationContent attaches it without reading a ref value during render.
 const ContentRefContext = createContext<StickToBottomInstance['contentRef'] | null>(null);
 
-type ConversationProps = ComponentProps<'div'> & { scrollToEndLabel: string };
+type ConversationProps = ComponentProps<'div'> & { scrollToEndLabel: string; scrollToBottomKey?: number };
 
 // The transcript sticks to the end while the reader is already there, and releases as
 // soon as they scroll away. `use-stick-to-bottom` owns the resize observation, so
 // streamed tokens extend the content without the container fighting the reader.
-function Conversation({ className, children, scrollToEndLabel, ...props }: ConversationProps) {
+function Conversation({ className, children, scrollToEndLabel, scrollToBottomKey, ...props }: ConversationProps) {
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({ initial: 'instant', resize: 'smooth' });
+  useEffect(() => {
+    if (scrollToBottomKey !== undefined) void scrollToBottom('instant');
+  }, [scrollToBottomKey, scrollToBottom]);
   return (
     <ContentRefContext.Provider value={contentRef}>
       <div className="relative flex min-h-0 flex-1 flex-col">

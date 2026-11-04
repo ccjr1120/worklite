@@ -121,6 +121,7 @@ export type WorkflowAgentToolResult = {
 };
 
 export type WorkflowAgentRound = {
+  usage?: ModelUsage;
   round: number;
   model: string;
   finishReason: string | null;
@@ -132,6 +133,8 @@ export type RunWorkflowAgentRequest = {
   candidates: readonly ModelCandidate[];
   systemPrompt: string;
   initialUserContent: string;
+  initialMessages?: readonly GatewayAgentMessage[];
+  onMessages?: (messages: GatewayAgentMessage[]) => void | Promise<void>;
   jsonOutput?: boolean;
   correlation?: GatewayCorrelation;
   skillScripts: Array<{ skillId: string; skillName: string; path: string }>;
@@ -366,6 +369,16 @@ export class AiSdkModelGateway implements ModelGateway {
     let reminderIndex: number | undefined;
     let toolExecutionError: unknown;
 
+    const initialMessages = request.initialMessages?.length ? [...request.initialMessages] : [{ role: 'user' as const, content: request.initialUserContent }];
+    let preparedMessages = initialMessages;
+    let modelResponse: GatewayAgentMessage | undefined;
+    let modelToolCalls: WorkflowAgentToolCall[] = [];
+    const checkpointResults = new Map<string, WorkflowAgentToolResult>();
+    const checkpointTools = async () => {
+      if (!request.onMessages || !modelResponse) return;
+      const results = modelToolCalls.map((call) => ({ type: 'tool-result' as const, toolCallId: call.toolCallId, toolName: call.toolName, output: checkpointResults.get(call.toolCallId) ?? { type: 'error-text' as const, value: 'Interrupted before a tool result was recorded. Outcome unknown; inspect prior effects before retrying.' } }));
+      await request.onMessages([...preparedMessages, modelResponse, ...(results.length ? [{ role: 'tool' as const, content: results }] : [])]);
+    };
     let lastToolTask = Promise.resolve();
     const runToolExclusively = <T>(operation: () => Promise<T>): Promise<T> => {
       const task = lastToolTask.then(operation, operation);
@@ -387,8 +400,16 @@ export class AiSdkModelGateway implements ModelGateway {
         return { type: 'error-text', value: 'The tool-call budget is exhausted; finish with existing evidence.' };
       }
       toolCallsUsed += 1;
+      if (request.onMessages && !modelToolCalls.some((item) => item.toolCallId === toolCallId)) {
+        modelToolCalls.push({ ...call, toolCallId });
+        modelResponse = { role: 'assistant', content: modelToolCalls.map((item) => ({ type: 'tool-call', toolCallId: item.toolCallId, toolName: item.toolName, input: item.input })) };
+        await checkpointTools();
+      }
       try {
-        return await request.executeTool({ ...call, toolCallId });
+        const result = await request.executeTool({ ...call, toolCallId });
+        checkpointResults.set(toolCallId, result);
+        await checkpointTools();
+        return result;
       } catch (error) {
         throw recordToolExecutionError(error);
       }
@@ -448,7 +469,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const agentSettings = {
       model,
       instructions: request.systemPrompt,
-      messages: [{ role: 'user', content: request.initialUserContent }] satisfies ModelMessage[],
+      messages: initialMessages as ModelMessage[],
       output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
       tools: Object.keys(tools).length > 0 ? tools : undefined,
       providerOptions: Object.keys(openaiProviderOptions).length > 0 ? { openai: openaiProviderOptions } : undefined,
@@ -456,7 +477,10 @@ export class AiSdkModelGateway implements ModelGateway {
       abortSignal: request.abortSignal,
       maxRetries: 0,
       stopWhen: isStepCount(maxToolRounds + 1),
-      prepareStep: ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
+      prepareStep: async ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
+        modelResponse = undefined;
+        modelToolCalls = [];
+        checkpointResults.clear();
         currentRound = stepNumber;
         const reminded = withBudgetReminder(messages as readonly GatewayAgentMessage[], stepNumber, maxToolRounds, reminderRound, reminderIndex);
         reminderIndex = reminded.reminderIndex;
@@ -471,19 +495,30 @@ export class AiSdkModelGateway implements ModelGateway {
             content: 'Tool budget is exhausted. Return the final response now using the evidence already gathered; state any evidence gaps. Do not call tools.',
           }];
         }
+        preparedMessages = [...nextMessages];
+        await request.onMessages?.(preparedMessages);
         return {
           messages: nextMessages,
-          ...(toolsClosed ? { activeTools: [] } : {}),
+          ...(toolsClosed ? { activeTools: [], toolChoice: 'none' as const } : {}),
         };
+      },
+      onStepEnd: async (event: { response: { messages: ModelMessage[] } }) => {
+        await request.onMessages?.([...preparedMessages, ...event.response.messages as GatewayAgentMessage[]]);
       },
       onToolExecutionEnd: async (event: ToolExecutionEndEvent<ToolSet>) => {
         if (event.toolOutput.type === 'tool-error') recordToolExecutionError(event.toolOutput.error);
       },
       onLanguageModelCallEnd: async (event: LanguageModelCallEndEvent<ToolSet>) => {
+        if (request.onMessages) {
+          modelToolCalls = event.content.filter((part) => part.type === 'tool-call').map((part) => ({ toolCallId: part.toolCallId, toolName: part.toolName, input: part.input }));
+          modelResponse = { role: 'assistant', content: event.content as Extract<GatewayAgentMessage, { role: 'assistant' }>['content'] };
+          await checkpointTools();
+        }
         await request.onModelRound?.({
           round: currentRound,
           model: candidate.model,
           finishReason: event.finishReason ?? null,
+          usage: normalizeUsage(event.usage),
           toolCalls: event.content.filter((part) => part.type === 'tool-call').length,
           contextDropped,
         });
@@ -492,7 +527,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const agent = new ToolLoopAgent(agentSettings as never) as ToolLoopAgent<never, ToolSet>;
     const result = await agent.stream({
       abortSignal: request.abortSignal,
-      messages: [{ role: 'user', content: request.initialUserContent }],
+      messages: initialMessages as ModelMessage[],
     });
     let streamError: unknown;
     for await (const part of result.fullStream) {

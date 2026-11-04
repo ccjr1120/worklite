@@ -4,6 +4,7 @@ import type { AgentTeamOperationRecoveryDecision, AgentTeamRoleId } from '@workl
 import {
   createModelGateway,
   type GatewayToolDefinition,
+  type GatewayAgentMessage,
   type GatewayCorrelation,
   type GatewayToolResultOutput,
   type WorkflowAgentRound,
@@ -91,6 +92,8 @@ type IsolatedAgentInvocationRequest = {
   publicModelId: string | readonly string[];
   systemPrompt: string;
   context: unknown;
+  initialMessages?: readonly GatewayAgentMessage[];
+  onMessages?: (messages: GatewayAgentMessage[]) => void | Promise<void>;
   skills: readonly AgentInvocationSkill[];
   mcpRuntimes: readonly AgentMcpRuntime[];
   builtinToolNames?: readonly string[];
@@ -100,6 +103,7 @@ type IsolatedAgentInvocationRequest = {
   readProcessReference?: (path: string) => Promise<string>;
   readTeamDocument?: (documentId: string, revision: number) => Promise<{ title: string; content: string }>;
   managedTools?: readonly GatewayToolDefinition[];
+  beforeToolCall?: (call: WorkflowAgentToolCall) => string | undefined;
   executeManagedTool?: (call: WorkflowAgentToolCall) => Promise<string>;
   signal: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
@@ -237,6 +241,8 @@ export class IsolatedAgentInvocationService {
       candidates,
       systemPrompt: effectiveSystemPrompt,
       initialUserContent: contextText?.trim() ? contextText : 'No input was provided.',
+      initialMessages: request.initialMessages,
+      onMessages: request.onMessages,
       jsonOutput: request.jsonOutput,
       correlation: request.correlation,
       skillScripts: availableSkillScripts,
@@ -261,6 +267,20 @@ export class IsolatedAgentInvocationService {
     return output;
   }
 
+  // Let the task owner take over a specialist's assigned tools without launching another model.
+  async executeAssignedTool(request: IsolatedAgentInvocationRequest, call?: WorkflowAgentToolCall): Promise<WorkflowAgentToolResult> {
+    request.signal.throwIfAborted();
+    const builtinDefinitions = this.builtinTools.toolDefinitions(request.builtinToolNames ?? []).filter((tool) => tool.name !== 'process_reference');
+    const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
+    request.signal.throwIfAborted();
+    if (!call) return { type: 'text', value: JSON.stringify({
+      skills: request.skills.map((skill) => ({ id: skill.id, name: skill.name, instructions: skill.instructions, scripts: skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => file.path) })),
+      tools: [...builtinDefinitions, ...mcpTools],
+    }) };
+    if (call.toolName !== 'skill_script' && !isBuiltinTool(call.toolName) && !mcpTools.some((tool) => tool.name === call.toolName)) throw new BadRequestException('The specialist requested an unavailable assigned tool.');
+    return (await this.runToolEffect(request, request.skills, mcpTools, new Set(builtinDefinitions.map((tool) => tool.name)), call)).output;
+  }
+
   private async executeTool(
     request: IsolatedAgentInvocationRequest,
     assignedSkills: readonly AgentInvocationSkill[],
@@ -269,6 +289,8 @@ export class IsolatedAgentInvocationService {
     call: WorkflowAgentToolCall,
   ): Promise<WorkflowAgentToolResult> {
     request.signal.throwIfAborted();
+    const budgetRejection = request.beforeToolCall?.(call);
+    if (budgetRejection) return { type: 'error-text', value: budgetRejection };
     this.validateProcessReference(request, call);
     if (call.toolName === 'read_coder_document' || call.toolName === 'skill_reference') {
       // Both tools only read immutable captured content, so they bypass the command

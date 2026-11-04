@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray } from 'drizzle-orm';
-import { artifacts, wechatDraftRevisions, wechatPublications, type Database } from '@worklite/db';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
+import { artifacts, agentDraftRevisions as wechatDraftRevisions, agentPublications as wechatPublications, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import { WorkspaceService } from '../teams/teams.service';
@@ -52,7 +52,7 @@ export class WechatDraftRevisionService implements OnModuleInit {
     const references = findInlineImageReferences(articleBodyMarkdown(publication.article));
     const imageRows = await this.db.select({ id: artifacts.id, imageKey: artifacts.imageKey, placement: artifacts.placement, content: artifacts.content })
       .from(artifacts)
-      .where(and(eq(artifacts.runId, publication.runId), eq(artifacts.workspaceId, publication.workspaceId), eq(artifacts.format, 'image')))
+      .where(and(or(eq(artifacts.runId, publication.runId), sql`case when json_valid(${artifacts.content}) then json_extract(${artifacts.content}, '$.executionId') end = ${publication.runId}`, sql`exists (select 1 from agent_capability_results r where r.execution_id = ${publication.runId} and instr(r.value, ${artifacts.id}) > 0)`), eq(artifacts.workspaceId, publication.workspaceId), eq(artifacts.format, 'image')))
       .orderBy(asc(artifacts.createdAt));
     return {
       runId: publication.runId,
@@ -77,6 +77,32 @@ export class WechatDraftRevisionService implements OnModuleInit {
     };
   }
 
+  async publicationCover(runId: string, draftId: string) {
+    const publication = await this.findPublication(runId, draftId);
+    const [cover] = await this.db.select().from(artifacts).where(and(eq(artifacts.workspaceId, publication.workspaceId), eq(artifacts.format, 'image'), eq(artifacts.placement, 'asset'),
+      or(eq(artifacts.runId, runId), sql`exists (select 1 from agent_capability_results r where r.execution_id = ${runId} and instr(r.value, ${artifacts.id}) > 0)`))).orderBy(asc(artifacts.createdAt)).limit(1);
+    if (!cover?.objectKey) throw new BadRequestException('The original cover is unavailable. Provide coverImage before republishing.');
+    return { type: 'workflow_image', mediaType: 'image/png', data: [{ b64Json: (await this.storage.read(cover.objectKey)).toString('base64') }] };
+  }
+
+  async publicationImages(runId: string, draftId: string, replacements: unknown) {
+    const publication = await this.findPublication(runId, draftId);
+    const replacementIds = replacements === undefined ? {} : parseReplacements(replacements);
+    const rendered = await this.loadReplacementImages(publication, replacementIds);
+    const inspected = await this.inspect(runId, draftId);
+    const images = [];
+    for (const image of inspected.images) {
+      let bytes = rendered.get(image.key);
+      if (!bytes && image.artifactId) {
+        const [artifact] = await this.db.select().from(artifacts).where(and(eq(artifacts.id, image.artifactId), eq(artifacts.workspaceId, publication.workspaceId))).limit(1);
+        if (artifact?.objectKey) bytes = await this.storage.read(artifact.objectKey);
+      }
+      if (!bytes) throw new BadRequestException(`The original image ${image.key} is unavailable. Provide its image data explicitly before republishing.`);
+      images.push({ type: 'workflow_image', mediaType: 'image/png', key: image.key, data: [{ b64Json: bytes.toString('base64') }] });
+    }
+    return images;
+  }
+
   async renderImage(runId: string, draftId: string, body: { key?: unknown; html?: unknown; width?: unknown; height?: unknown }) {
     const publication = await this.findPublication(runId, draftId);
     const key = typeof body.key === 'string' ? body.key.trim() : '';
@@ -97,11 +123,11 @@ export class WechatDraftRevisionService implements OnModuleInit {
       await this.db.insert(artifacts).values({
         id,
         workspaceId: publication.workspaceId,
-        runId: publication.runId,
+        runId: null,
         name: `Revised image ${key}`,
         format: 'image',
         size: `${rendered.png.byteLength} B`,
-        content: JSON.stringify({ source: RENDER_SOURCE, key, issues: rendered.issues }),
+        content: JSON.stringify({ source: RENDER_SOURCE, executionId: publication.runId, key, issues: rendered.issues }),
         objectKey,
         mimeType: 'image/png',
         width: rendered.width,
@@ -134,6 +160,7 @@ export class WechatDraftRevisionService implements OnModuleInit {
       if (existing.publicationId !== publication.id) throw new ConflictException('requestKey was already used for a different draft.');
       return toRevisionView(existing);
     }
+    if (publication.status === 'published') throw new BadRequestException(`Draft ${draftId} has already been published and cannot be revised as a draft. Use a new publication instead.`);
     if (!(REVISABLE_STATUSES as readonly string[]).includes(publication.status)) {
       throw new BadRequestException(`Draft ${draftId} is ${publication.status} and cannot be revised.`);
     }
@@ -255,7 +282,7 @@ export class WechatDraftRevisionService implements OnModuleInit {
     const rows = await this.db.select().from(artifacts).where(and(inArray(artifacts.id, ids), eq(artifacts.workspaceId, publication.workspaceId)));
     for (const [key, artifactId] of Object.entries(replacements)) {
       const row = rows.find((candidate) => candidate.id === artifactId);
-      if (!row || row.runId !== publication.runId) throw new BadRequestException(`Image Artifact ${artifactId} does not belong to Run ${publication.runId}.`);
+      if (!row || (row.runId !== publication.runId && (() => { try { return JSON.parse(row.content).executionId !== publication.runId; } catch { return true; } })())) throw new BadRequestException(`Image Artifact ${artifactId} does not belong to Run ${publication.runId}.`);
       if (row.format !== 'image' || row.mimeType !== 'image/png' || !row.objectKey) throw new BadRequestException(`Artifact ${artifactId} is not a PNG image.`);
       const render = parseRenderRecord(row.content);
       if (!render) throw new BadRequestException(`Artifact ${artifactId} was not produced by render_article_image, so its layout was never checked.`);
@@ -277,7 +304,6 @@ export class WechatDraftRevisionService implements OnModuleInit {
     if (rows.length === 0) throw new NotFoundException(`Run ${runId} saved no WeChat draft ${draftId}.`);
     if (rows.length > 1) throw new ConflictException(`Run ${runId} has more than one publication for draft ${draftId}; revise it in the WeChat backend instead.`);
     const publication = rows[0]!;
-    if (publication.status === 'published') throw new BadRequestException(`Draft ${draftId} has already been published and cannot be revised as a draft.`);
     return publication;
   }
 }

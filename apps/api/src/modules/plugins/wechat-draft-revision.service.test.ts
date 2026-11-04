@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { artifacts, createDb, initializeDatabase, wechatDraftRevisions, wechatPublications, type Database } from '@worklite/db';
+import { artifacts, createDb, initializeDatabase, agentDraftRevisions as wechatDraftRevisions, agentPublications as wechatPublications, type Database } from '@worklite/db';
 import { eq } from 'drizzle-orm';
 import type { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import type { WorkspaceService } from '../teams/teams.service';

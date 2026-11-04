@@ -50,8 +50,6 @@ import {
   skillIdAliases,
   workflowDrafts,
   workflowEditRevisions,
-  workflowRuns,
-  workflowSchedules,
   workflowVersions,
   wechatOfficialAccounts,
   workflows,
@@ -81,7 +79,6 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { CODER_ROLES } from '../coders/coder-configuration';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -429,24 +426,6 @@ function samePlatformSkillFiles(current: PackageFile[], desired: PackageFile[]):
   if (current.length !== desired.length) return false;
   const byPath = new Map(current.map((file) => [file.path, file.content]));
   return desired.every((file) => byPath.get(file.path) === file.content);
-}
-
-function providerHeaders(value: string | null): Record<string, string> | undefined {
-  if (!value) return undefined;
-  const parsed = JSON.parse(decryptSecret(value)) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some((headerValue) => typeof headerValue !== 'string')) {
-    throw new Error('Invalid stored headers');
-  }
-  return parsed as Record<string, string>;
-}
-
-function providerConfig(row: typeof modelProviders.$inferSelect, apiKey: string): ModelProviderConfig {
-  const common = { id: row.id, apiKey, baseURL: row.baseURL ?? undefined, headers: providerHeaders(row.headers) };
-  if (row.protocol === 'anthropic/messages') return { ...common, adapter: 'anthropic', operation: 'messages' };
-  if (row.protocol === 'codex/responses') return { ...common, adapter: 'codex', operation: 'responses' };
-  if (row.protocol === 'openai/responses') return { ...common, adapter: 'openai', operation: 'responses' };
-  if (row.protocol === 'openai/chat') return { ...common, adapter: 'openai', operation: 'chat/completions' };
-  throw new BadRequestException('Unsupported model provider protocol.');
 }
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
@@ -1304,21 +1283,15 @@ export class WorkspaceResourcesService {
   async platformSnapshot(request: Request, workspaceSlug: string) {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const skillSync = await this.syncLocalSkills(workspace.id);
-    const [providerRows, skillRows, mcpRows, workflowRows, agentTeamRows, scheduleRows, settingsRows, officialAccountRows] = await Promise.all([
+    const [providerRows, skillRows, mcpRows, settingsRows, officialAccountRows] = await Promise.all([
       this.providers(request, workspaceSlug),
       this.db.select().from(skills).where(eq(skills.workspaceId, workspace.id)).orderBy(skills.name),
       this.db.select().from(mcpServers).where(eq(mcpServers.workspaceId, workspace.id)).orderBy(mcpServers.name),
-      this.db.select().from(workflows).where(eq(workflows.workspaceId, workspace.id)).orderBy(workflows.name),
-      this.db.select().from(coders).where(eq(coders.workspaceId, workspace.id)).orderBy(coders.name),
-      this.db.select().from(workflowSchedules).where(eq(workflowSchedules.workspaceId, workspace.id)),
       this.db.select().from(workspaceSettings).where(eq(workspaceSettings.workspaceId, workspace.id)).limit(1),
       this.db.select({ id: wechatOfficialAccounts.id, displayName: wechatOfficialAccounts.displayName, status: wechatOfficialAccounts.status }).from(wechatOfficialAccounts).where(eq(wechatOfficialAccounts.workspaceId, workspace.id)),
     ]);
     const coreDirectory = skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME);
     const visibleSkillRows = skillRows.filter((row) => row.root !== 'platform' || row.directory !== coreDirectory);
-    const providerNames = new Map(providerRows.map((provider) => [provider.id, provider.name]));
-    const skillNames = new Map(visibleSkillRows.map((skill) => [skill.id, skill.name]));
-    const mcpNames = new Map(mcpRows.map((server) => [server.id, server.name]));
 
     const snapshot = {
       workspace: { id: workspace.id, slug: workspace.slug, name: workspace.name },
@@ -1486,127 +1459,7 @@ export class WorkspaceResourcesService {
             imageEdits: false,
           },
         },
-        coders: {
-          available: true,
-          coderCreation: true,
-          createRoute: 'POST /coders',
-          listRoute: 'GET /coders',
-          selection: 'Chat selects a Coder by stable coderId and purpose, never by display name; read current names and ids with inspect_coders',
-          currentCoders: agentTeamRows.filter((team) => !team.deletedAt).map((team) => ({ id: team.id, name: team.name })),
-          rename: { tool: 'update_coder', route: 'PATCH /coders/:coderId', field: 'name', rules: 'trimmed 1-64 characters, no control characters, unique among non-deleted Coders ignoring case', conflict: 'HTTP 409 CODER_NAME_CONFLICT', concurrency: 'optional expectedRevision precondition (the revision from GET /coders/:coderId); a stale value returns HTTP 409 CODER_REVISION_CONFLICT', affects: 'new Runs only; every Run keeps the executor name captured at dispatch (coderNameSnapshot), falling back to the bound executor version name, then the current name' },
-          webRoute: '/coding',
-          recordsRoute: 'GET /coders/:coderId/runs',
-          runListRoute: 'GET /coder-runs',
-          runListOverview: 'each list item carries overview: totalTokens (TokenAttribution), durationMs, and currentNode (name, role and latest action) while the Run is in progress',
-          runNodesRoute: 'GET /coder-runs/nodes?runIds=a,b (read-only, at most 50 Runs): per Run, one node per role task attempt with status, duration, TokenAttribution tokens, latest activity and its steps (step/activity/tool_call)',
-          tokenAttribution: 'tokens with source exact (Gateway statistics), estimated (step share by request start time, from 12-hour request logs) or unavailable (tokens null, never 0, with a reason)',
-          webGroupCreation: false,
-          chatAgentDispatchOnly: true,
-          dispatchRoute: 'POST /chat/dispatch',
-          dispatchRequires: ['coderId', 'goal in message', 'absolute existing projectDirectory'],
-          initialRole: 'Router for every new Run; a user-named role remains a request in Router context',
-          busyDispatch: 'persist as queued when maxConcurrentRuns is reached; start queued Runs FIFO when an active slot opens',
-          maxConcurrentRuns: { configurable: true, minimum: 1, default: 3 },
-          submissionBinding: 'stable submission id atomically binds groupId and runId; repeated delivery is idempotent',
-          groupRoutes: {
-            persistence: 'groups bind Chat submissions and preserve transcript and repository context for captured Runs',
-            transcript: 'GET /coder-groups/:groupId is the current read-only transcript; controls are Chat-owned',
-            operations: 'Chat dispatch and protected Chat platform tools own user-requested actions',
-          },
-          memory: { routes: 'GET/POST/PATCH/DELETE /coders/:coderId/memories through protected Chat platform tools', scope: ['coder', 'canonical repository'], injection: 'Router receives the full captured projection and assigned roles receive a bounded index', roleTools: ['coder_memory_search', 'coder_memory_read', 'coder_memory_write', 'coder_memory_update'], writeOwner: 'Chat has full management; roles may search, read and write memories within the Run repository scope through managed tools or the per-task memory MCP endpoint' },
-          workingPractice: 'captured by each new Run and injected into Router context',
-          projectGitPolicy: { perCoder: true, editableThrough: 'update_coder with coderId', capturedBy: 'new Coder version', injection: 'every engine-backed role in the captured Run', enforcement: 'guidance for execution engines; WorkLite does not create, merge, or clean Git branches or worktrees' },
-          deletion: { tool: 'delete_coder', deleteRoute: 'DELETE /coders/:coderId', deleteRequires: 'path coderId and body confirmTeamId matching', softDelete: true, deletedCodersExcludedFrom: ['Coder list', 'inspect_coder', 'update_coder', 'role CRUD', 'dispatch targets'], deletedCodersPreserve: ['Router Run data', 'current version snapshots', 'Coder memories', 'group transcripts', 'role directory'], beforeDelete: 'ask_user for confirmation; prevent if active Runs exist' },
-          runWebRoute: '/coding/runs/:runId',
-          roles: [...CODER_ROLES],
-          dynamicRoleDirectory: { customIds: 'server-assigned stable opaque ids', roleCrud: ['POST /coders/:coderId/roles', 'PATCH /coders/:coderId/roles/:roleId', 'DELETE /coders/:coderId/roles/:roleId'] },
-          roleExecution: {
-            engines: ['claude', 'codex'],
-            roleField: 'developer defaults to claude; new Runs capture execution engine launches for configured roles with an executor engine',
-            capturedLaunch: true,
-            nativeTools: true,
-            operationJournal: false,
-            processReferences: 'materialized read-only files listed in the task prompt',
-            sharedEngines: 'same execution engines as historical Chat project tasks', commandAuthorization: 'direct execution; no WorkLite proposal confirmation or command grants',
-            evidence: 'task.activity engine events and the engine process Command; the executor owns final results',
-          },
-          routerCoordination: {
-            assignments: 'Router assignments declare a stable task id, configured role, goal, repository scope and dependencies; every result returns to Router',
-            progress: 'Router progress reports task totals, active task keys and persisted task attempts',
-            pendingInputs: 'Chat task cards list every waiting question; each answer uses its own pendingInputId and scopeRevision',
-          },
-          dispatchPolicy: 'dispatch accepts no execution mode; Router decides each step from the user goal and persisted task results.',
-          coderRoutes: {
-            create: 'POST /coders (name, optional description and templateCoderId)',
-            detail: 'GET /coders/:coderId',
-            update: 'PATCH /coders/:coderId (name, description, workingPractice, projectGitPolicy, maxConcurrentRuns)',
-            delete: 'DELETE /coders/:coderId',
-            createRole: 'POST /coders/:coderId/roles (server assigns stable role id)',
-            updateRole: 'PATCH /coders/:coderId/roles/:roleId',
-            deleteRole: 'DELETE /coders/:coderId/roles/:roleId',
-            records: 'GET /coders/:coderId/runs (read-only Run summaries)',
-            transcript: 'GET /coder-groups/:groupId (current read-only transcript)',
-            memories: 'GET/POST/PATCH/DELETE /coders/:coderId/memories',
-          },
-          documentRoutes: {
-            detail: 'GET /coder-documents/:documentId',
-            download: 'GET /coder-documents/:documentId/download',
-          },
-          runRoutes: {
-            detail: 'GET /coder-runs/:runId',
-            events: 'GET /coder-runs/:runId/events',
-            answer: 'POST /coder-runs/:runId/answer',
-            recoverOperation: 'POST /coder-runs/:runId/operations/:operationKey/recovery',
-            cancel: 'POST /coder-runs/:runId/cancel',
-          },
-          groupControlRoute: 'POST /coder-groups/:groupId/controls supports reexecute, stop_task and continue_task; only exact task attempts can be stopped or continued',
-          events: { persisted: true, replay: 'Last-Event-ID', live: 'server-sent events', taskActivity: 'role attempt activity and command, file and tool activity' },
-          directRunCreationApi: false,
-          commandAuthorization: 'none; every work role executes commands directly. Non-executor roles run them through the WorkLite bash tool when their configured tool surface includes it, which Test Runner and Reviewer do by default, with recorded Command evidence, and engine-backed roles keep native direct execution.',
-          recoveryDecisions: ['adopt_command', 'mark_failed', 'replay'],
-          uncertainOperationRecovery: {
-            cancellationPreservesRecoveryInput: true,
-            adoptionOrReplaySupersedesPendingCancellation: true,
-            markFailedSettlesWithoutReplay: true,
-          },
-          capturedVersions: 'developer backend and executable arguments; role model, instruction, Skill, MCP, and process configuration',
-        },
-        workflow: {
-          primaryService: true,
-          agentNodesAreSelfContained: true,
-          creation: 'blank draft opened directly in the editor',
-          supportedNodeTypes: listWorkflowNodeCapabilities().map((capability) => ({
-            type: capability.id,
-            version: capability.version,
-            name: capability.name,
-            purpose: capability.purpose,
-            inputs: capability.inputs,
-            outputs: capability.outputs,
-            inputSchema: capability.inputSchema,
-            outputSchema: capability.outputSchema,
-            configSchema: capability.configSchema,
-          })),
-          unsupportedFeatures: ['standalone Agent resources', 'Agent version references', 'template selection', 'dynamic joins', 'parallel execution', 'webhook triggers', 'API triggers', 'notification nodes'],
-          controlFlow: { edgeModes: ['always', 'predicate', 'fallback'], predicatePaths: 'dot_delimited_output_path', boundedLoops: true, traversalLimitField: 'maxTraversals', cycleRule: 'every_cycle_crosses_a_bounded_edge', initialSourceRule: 'no_unbounded_incoming_edges_and_no_connected_required_inputs', agentContext: { maximumInitialEdges: 1, initialEdgeUnbounded: true, maximumBoundedFeedbackEdges: 1, workflowInputEdgeMustBeUnconditionalAndUnbounded: true }, explicitInitialInputEdges: { available: true, source: 'worklite/input.output', target: 'worklite/agent.context', mustBeUnconditionalAndUnbounded: true, mayCombineWithOneBoundedFeedbackEdge: true }, choiceBranch: { nodeType: 'worklite/branch', version: '1', inputPort: 'value', outputPort: 'output', selection: 'first_matching_outgoing_edge_in_definition_order', fallback: 'first_fallback_edge_when_no_non_fallback_edge_matches', passThrough: 'original_json_value' }, execution: 'deterministic_sequential_token_scheduler' },
-          approvedArticle: { nodeType: 'worklite/approved-article', version: '1', requiresApproval: true, rejectsDuplicate: true, preservesWriterMarkdown: true },
-          workflowAgentReview: { passthroughKeys: true, maxToolCalls: true, maxToolRounds: true, maxToolResultChars: true, maxOutputTokens: true },
-          requiredAgentSkills: { available: true, configField: 'requiredSkillIds', mustBeSubsetOf: 'skillIds', evidence: 'skill.script activity with exit code 0 during the node attempt', failure: 'node fails before output parsing; errorPolicy stop halts downstream nodes', emptyResultsPass: 'when the script exits 0' },
-          duplicateConnectionRule: 'two edges between the same ports are duplicates only when condition and maxTraversals are also identical',
-          artifactHistoryQuery: { nodeType: 'worklite/artifact-query', version: '1', scope: 'workspace_json_artifact_history_including_detached', requestPassthrough: true, emptyCandidatesAllowed: true, readOnly: true },
-          graphMutationAvailable: true,
-          graphMutationNote: 'Use edit-workflow.mjs with a logical Workflow Plan. Edges may declare structured conditions and positive maxTraversals bounds. The server generates node IDs and positions, validates capabilities, ports, resources, conditions, and bounded-cycle constraints, then records an assistant revision. To change an existing draft without regenerating ids, use patch-workflow.mjs (see draftPatch).',
-          draftPatch: { available: true, tool: 'patch_workflow', route: 'POST /workflows/:workflowId/draft/operations with patch', scope: 'mutable draft only; published WorkflowVersions and Runs unchanged', preserves: 'ids, positions and configuration of untouched nodes and edges', operations: ['updateNode (config or shallow configPatch, errorPolicy)', 'addNode', 'removeNode', 'addEdge', 'removeEdge', 'updateSettings'], concurrency: 'baseRevisionId; a stale revision returns 409', undoable: true },
-          draftAgentModelReplacement: { available: true, tool: 'replace_workflow_agent_models', route: 'POST /workflows/:workflowId/draft/model-replacement', scope: 'mutable draft only; published WorkflowVersions and Runs unchanged', targetValidation: 'public model exists in the Gateway Provider catalog on an Agent-compatible protocol' },
-          deletion: { available: true, tool: 'delete_workflow', route: 'DELETE /workflows/:workflowId', confirmation: 'Chat requires confirm:true after an explicit user deletion request; Web uses the Editor permanent-delete dialog', force: 'optional force=true query; defaults false and bypasses only active-schedule and Home board-assignment guards', guards: { activeRuns: ['queued', 'running', 'paused', 'waiting_for_input'], activeRunPolicy: 'always reject, including force=true', activeSchedule: 'enabled or running projection; reject unless force=true', homeBoardAssignment: 'reject unless force=true' }, transaction: 'guards and all deletions in one workspace-scoped transaction', retainedArtifacts: 'preserved with detached Workflow and Run references' },
-          scheduling: { available: true, owner: 'timer_node', nodeType: 'worklite/timer', minimumIntervalSeconds: 300, maximumPerWorkflow: 1, activatesOnPublish: true, preventsOverlap: true },
-          runLifecycle: { pause: { available: true, endpoint: 'POST /runs/:runId/pause', eligibleStatuses: ['queued', 'running'] }, resume: { available: true, endpoint: 'POST /runs/:runId/resume', eligibleStatuses: ['paused', 'cancelled'], eligibilitySource: 'run_resumable', cancelledRequiresSchedulerState: true }, checkpoint: 'none_for_active_invocation', resumeBehavior: 'rerun_active_invocation_from_start', completedPredecessorsRerun: false, waitingForInputPause: false },
-          runHistory: { location: 'workflow_list_dialog', nodeExecutionLogs: true, failureReasons: true, artifactEligibilitySource: 'immutable_workflow_version' },
-          failedNodeRetry: { available: true, scope: 'active_failed_node_run', endpoint: 'POST /runs/:runId/nodes/:nodeRunId/retry', eligibilitySource: 'node_run_retryable', rerunsPredecessors: false, earlierSuccessfulNodes: false },
-          humanGatedExecution: { durable: true, runStatus: 'waiting_for_input', resumesSameNode: true, qrPayloadOnly: true, supportedActions: ['wechat_login', 'wechat_publish_confirmation'] },
-          wechatOfficialAccounts: officialAccountRows,
-          chatInvocation: { available: true, syntax: '@Workflow', publishedOnly: true, inputSource: 'remaining_message_text', execution: 'latest_published_version_run', presentsArtifacts: true },
-        },
-        homeDashboard: { globalWorkflowDataSource: false, boardEligibility: 'dashboard_node_and_successful_run', workflowOutputPersistence: false, boardCategories: { defaultGroup: 'uncategorized', databaseBacked: true, maximumPerBoard: 1 } },
+        agents: { continuation: { tool: 'run_agent with the original executionId', resumableNativeStates: ['completed', 'failed', 'cancelled'], retained: ['model history', 'tool evidence', 'result references'], modelChange: 'inspect configuration, update_agent and verify saved model configuration, then continue the same executionId; native continuation reads latest configuration, engine-backed sessions may retain captured runtime', blocked: ['running or still settling', 'waiting_for_input until the pending question is answered'], uncertainEffects: 'inspect effects before retrying; do not blindly replay tools' }, progress: { listRoute: 'GET /agents/:agentId/history', detailRoute: 'GET /agents/:agentId/history/:runId', fields: ['run.currentActivity', 'invocations', 'run.output'], behavior: 'on-demand status checks are allowed; no repeated polling; partial output is not final', ui: 'run detail refreshes every two seconds and expands active sub-Agent records' }, execution: 'lead Agent dynamically selects sub-Agents and capabilities', tools: ['inspect_agents', 'run_agent', 'run_sub_agent', 'run_sub_agents', 'use_capability'], configurationRoutes: ['GET /agents', 'POST /agents', 'GET /agents/:agentId', 'PATCH /agents/:agentId', 'DELETE /agents/:agentId'], supportedCapabilities: listWorkflowNodeCapabilities().filter((item) => !['worklite/agent', 'worklite/map', 'worklite/input', 'worklite/timer', 'worklite/join', 'worklite/branch', 'worklite/dashboard'].includes(item.id)), wechatOfficialAccounts: officialAccountRows },
         requiresExplicitConfirmation: true,
         mcpToolNamesAvailable: false,
         mcpToolDataNote: 'Only the allowed-tool count is persisted. Do not invent or infer MCP tool names.',
@@ -1639,24 +1492,11 @@ export class WorkspaceResourcesService {
         allowedToolCount: server.allowedTools,
         version: server.version,
       })),
-      coders: agentTeamRows.map((team) => ({
-        id: team.id,
-        name: team.name,
-        description: team.description,
-        processId: team.processId,
-        processVersion: team.processVersion,
-        maxConcurrentRuns: team.maxConcurrentRuns,
-        projectGitPolicy: team.projectGitPolicy,
-      })),
-      workflows: workflowRows.map((workflow) => {
-        const schedule = scheduleRows.find((candidate) => candidate.workflowId === workflow.id);
-        return {
-          id: workflow.id,
-          name: workflow.name,
-          state: workflow.state,
-          schedule: schedule ? { enabled: schedule.enabled, intervalSeconds: schedule.intervalSeconds, workflowVersionId: schedule.workflowVersionId, nextRunAt: schedule.nextRunAt.toISOString(), lastStatus: schedule.lastStatus } : null,
-        };
-      }),
+      agents: (() => {
+        const rows = this.db.select().from(agents).where(and(eq(agents.workspaceId, workspace.id), eq(agents.kind, 'custom'))).all();
+        const privateIds = new Set(rows.flatMap((agent) => agent.collaboration?.subAgentIds ?? []));
+        return rows.filter((agent) => !privateIds.has(agent.id)).map((agent) => ({ id: agent.id, name: agent.name, responsibility: agent.responsibility }));
+      })(),
       settings: settingsRows[0] ? { appearance: settingsRows[0].appearance } : null,
     };
     snapshot.capabilities.projectExecutors.executors.codex.launch = 'When no model is selected, launch the codex command directly and use the operator Codex default, optionally selecting a config directory with --config-dir. When a Chat default or task model is selected, keep the configured command word and inject a per-run model_providers.worklite Responses Provider.';
@@ -1693,10 +1533,10 @@ export class WorkspaceResourcesService {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((key) => key !== 'target')) throw new BadRequestException('A navigation target is required.');
     if (!isWorkliteNavigationTarget(input.target)) throw new BadRequestException('Unsupported WorkLite navigation target.');
     const target = input.target;
-    if (target.startsWith('/workflows/')) {
-      const workflowId = target.slice('/workflows/'.length);
-      const [workflow] = await this.db.select({ id: workflows.id }).from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.workspaceId, workspace.id))).limit(1);
-      if (!workflow) throw new NotFoundException('Workflow not found');
+    if (target.startsWith('/agents/')) {
+      const agentId = target.slice('/agents/'.length);
+      const [agent] = await this.db.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspace.id))).limit(1);
+      if (!agent) throw new NotFoundException('Agent not found');
     }
     const route = resolveWorkliteNavigationRoute(target);
     if (!route) throw new BadRequestException('Unsupported WorkLite navigation target.');
@@ -1872,9 +1712,9 @@ export class WorkspaceResourcesService {
 
   async usage(request: Request, workspaceSlug: string): Promise<UsageRow[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [row] = await this.db.select({ runs: sql<number>`count(*)` }).from(workflowRuns).where(eq(workflowRuns.workspaceId, team.id));
+    const [row] = await this.db.select({ runs: sql<number>`count(*)` }).from(agentExecutions).where(eq(agentExecutions.workspaceId, team.id));
     const runs = Number(row?.runs ?? 0);
-    return runs ? [{ model: 'workflow', tokens: 0, runs, cost: 0 }] : [];
+    return runs ? [{ model: 'agent', tokens: 0, runs, cost: 0 }] : [];
   }
 
   async audit(request: Request, workspaceSlug: string): Promise<AuditEventView[]> {

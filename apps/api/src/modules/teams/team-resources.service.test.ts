@@ -126,6 +126,16 @@ function badRequestReferences(error: unknown): McpServerReferenceReport {
 }
 
 describe('WorkspaceResourcesService.platformSnapshot', () => {
+  it('exposes only top-level Agents and keeps their internals private', async () => {
+    const { resources } = await setup();
+    vi.spyOn(resources, 'providers').mockResolvedValue([]);
+    for (const id of ['lead', 'child', 'nested']) {
+      db!.insert(agents).values({ id, workspaceId: WORKSPACE_ID, name: id, responsibility: id, systemPrompt: '', kind: 'custom', model: '', collaboration: { subAgentIds: id === 'lead' ? ['child'] : id === 'child' ? ['nested'] : [], capabilities: [] } }).run();
+    }
+    const snapshot = await resources.platformSnapshot(request, 'personal');
+    expect(snapshot.agents).toEqual([{ id: 'lead', name: 'lead', responsibility: 'lead' }]);
+  });
+
   it('advertises the general Chat terminal without a command allow-list', async () => {
     const { resources } = await setup();
     vi.spyOn(resources, 'providers').mockResolvedValue([]);

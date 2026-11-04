@@ -1,9 +1,9 @@
-import type { InputHTMLAttributes } from 'react';
+import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 import { controlInteraction, focusRing } from '@/components/ui/interaction';
 import { useFieldDescription } from '@/components/ui/field';
 
-function Input({ className, type, 'aria-describedby': describedBy, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+function Input({ className, type, 'aria-describedby': describedBy, ...props }: ComponentProps<'input'>) {
   const fieldDescription = useFieldDescription(describedBy);
   return (
     <input

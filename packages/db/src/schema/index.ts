@@ -126,7 +126,21 @@ export type StoredAgentRuntimeConfiguration =
   | { kind: 'native' }
   | { kind: 'claude' | 'codex'; projectDirectory: string; approvalPolicy?: 'auto' | 'ask' };
 
+export type StoredAgentCollaboration = {
+  subAgentIds: string[];
+  builtinToolNames?: string[];
+  privateTools?: Array<{ name: string; description: string; inputSchema: Record<string, unknown>; handler: { kind: 'capability'; capabilityId: string } | { kind: 'command'; command: string; workingDirectory: string } }>;
+  capabilities: Array<{ id: string; type: string; typeVersion: string; config: Record<string, unknown> }>;
+  publicModels?: string[];
+  outputFormat?: 'text' | 'json';
+  outputContract?: unknown;
+  allowEmptyOutputKeys?: string[];
+  requiredSkillIds?: string[];
+  limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxOutputTokens?: number };
+};
+
 export const agents = sqliteTable('agents', {
+  collaboration: text('collaboration', { mode: 'json' }).$type<StoredAgentCollaboration | null>(),
   runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
   systemPrompt: text('system_prompt').notNull().default(''), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
@@ -419,7 +433,7 @@ export type StoredAgentDisplayMessage = {
   content: string;
   createdAt: string;
   progressReport?: {
-    items: Array<{ kind: 'task' | 'coder' | 'workflow'; id: string; title: string; status: string }>;
+    items: Array<{ kind: 'task' | 'coder' | 'workflow' | 'agent'; id: string; title: string; status: string; agentId?: string; runId?: string }>;
   };
   // A summary divider marks where a /summarize compressed the model context; its content
   // retains the generated summary so a later summarize can build on it.
@@ -445,7 +459,7 @@ export type StoredAgentPendingQuestion = {
 
 export type StoredWorkliteScriptResult =
   | { type: 'resource'; resourceType: 'provider' | 'skill' | 'mcp-server' | 'workflow'; id: string; route: string }
-  | { type: 'navigation'; target: 'home' | 'chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'workflows' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log' | `/workflows/${string}`; route: string }
+  | { type: 'navigation'; target: 'home' | 'chat' | 'skills' | 'mcp-servers' | 'model-providers' | 'logs' | 'agents' | 'settings-appearance' | 'settings-usage' | 'settings-audit-log' | `/agents/${string}`; route: string }
   | { type: 'dispatch'; submissionId: string; route: string }
   | { type: 'settings'; appearance: 'system' | 'light' | 'dark' }
   | { type: 'snapshot' };
@@ -499,6 +513,7 @@ export type StoredChatExecutionAuthorization = {
 };
 
 export const agentExecutions = sqliteTable('agent_executions', {
+  projectDirectory: text('project_directory'),
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),
   capabilitySnapshot: text('capability_snapshot', { mode: 'json' }).$type<StoredChatCapabilities | null>(),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'provider_request' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'missing_tool_results' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
@@ -637,6 +652,7 @@ export const chatAttachments = sqliteTable('chat_attachments', {
 }, (table) => [index('chat_attachments_expires_idx').on(table.expiresAt)]);
 
 export const scheduledAgentTasks = sqliteTable('scheduled_agent_tasks', {
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), label: text('label').notNull(), prompt: text('prompt').notNull(), intervalSeconds: integer('interval_seconds').notNull(), nextRunAt: timestamp('next_run_at'), activeExecutionId: text('active_execution_id'), lastRunAt: timestamp('last_run_at'), lastStatus: text('last_status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>(), unread: integer('unread', { mode: 'boolean' }).notNull().default(false), running: integer('running', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('scheduled_agent_tasks_workspace_next_run_idx').on(table.workspaceId, table.nextRunAt)]);
 
@@ -1075,7 +1091,7 @@ export const agentRuntimeInteractions = sqliteTable('agent_runtime_interactions'
 
 export type StoredAgentRuntimeEvent =
   | { kind: 'text_delta'; delta: string }
-  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string }
+  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string; usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null } }
   | { kind: 'question'; interactionId: string }
   | { kind: 'settled'; status: string };
 
@@ -1086,3 +1102,63 @@ export const agentRuntimeEvents = sqliteTable('agent_runtime_events', {
   data: text('data', { mode: 'json' }).$type<StoredAgentRuntimeEvent>().notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [unique().on(table.runId, table.sequence)]);
+
+export const agentPendingActions = sqliteTable('agent_pending_actions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
+  nodeRunId: text('tool_call_id').notNull(),
+  type: text('type').$type<'wechat_login' | 'wechat_publish_confirmation'>().notNull(),
+  status: text('status').$type<'pending' | 'completed' | 'expired' | 'cancelled'>().notNull().default('pending'),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  qrCode: text('qr_code'),
+  externalOperationId: text('external_operation_id'),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_pending_actions_execution_status_idx').on(table.runId, table.status)]);
+
+
+export const agentPublications = sqliteTable('agent_publications', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  accountId: text('account_id').notNull().references(() => wechatOfficialAccounts.id, { onDelete: 'restrict' }),
+  runId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
+  nodeRunId: text('tool_call_id').notNull(),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  mode: text('mode').$type<'draft' | 'publish'>().notNull(),
+  status: text('status').$type<'preparing' | 'draft_saved' | 'confirmation_pending' | 'published' | 'failed'>().notNull().default('preparing'),
+  title: text('title').notNull(),
+  article: text('article').notNull(),
+  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  draftId: text('draft_id'),
+  publishedUrl: text('published_url'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+});
+
+
+export const agentCapabilityResults = sqliteTable('agent_capability_results', {
+  id: text('id').primaryKey(),
+  executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
+  value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
+});
+
+export const agentDraftRevisions = sqliteTable('agent_draft_revisions', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  publicationId: text('publication_id').notNull().references(() => agentPublications.id, { onDelete: 'cascade' }),
+  runId: text('run_id').notNull(),
+  draftId: text('draft_id').notNull(),
+  requestKey: text('request_key').notNull().unique(),
+  title: text('title'),
+  previousTitle: text('previous_title').notNull(),
+  imageReplacements: text('image_replacements', { mode: 'json' }).$type<Record<string, string>>().notNull().default({}),
+  status: text('status').$type<'applying' | 'saved' | 'failed' | 'uncertain'>().notNull().default('applying'),
+  lastError: text('last_error'),
+  detail: text('detail', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_draft_revisions_publication_status_idx').on(table.publicationId, table.status)]);

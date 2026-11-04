@@ -1,7 +1,8 @@
+import { Link } from '@tanstack/react-router';
 import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Sparkles, Square, X } from 'lucide-react';
 import { type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ChatAttachmentView, WorkflowView } from '@worklite/contracts';
+import type { ChatAttachmentView, AgentView } from '@worklite/contracts';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@/components/ui/command';
@@ -27,8 +28,8 @@ type ComposerProps = {
   onCompositionStart: (event: ReactCompositionEvent<HTMLTextAreaElement>) => void;
   onCompositionEnd: (event: ReactCompositionEvent<HTMLTextAreaElement>) => void;
   onFocus: () => void;
-  selectedWorkflow: WorkflowView | null;
-  onRemoveWorkflow: () => void;
+  selectedAgent: (AgentView & { continuation?: { executionId: string; runId: string } }) | null;
+  onRemoveAgent: () => void;
   attachments: ChatAttachmentView[];
   attachmentsUploading: number;
   attachmentError: string;
@@ -37,9 +38,9 @@ type ComposerProps = {
   commandMatches: Array<{ value: SlashCommand; icon: typeof Download; descriptionKey: 'commands.logDescription' | 'commands.newDescription' | 'commands.resumeDescription' | 'commands.summarizeDescription' }>;
   commandMenuOpen: boolean;
   onRunCommand: (command: SlashCommand) => void;
-  mentionMatches: WorkflowView[];
+  mentionMatches: AgentView[];
   mentionMenuOpen: boolean;
-  onSelectMention: (workflow: WorkflowView) => void;
+  onSelectMention: (workflow: AgentView) => void;
   activeValue: string;
   onActiveValueChange: (value: string) => void;
   onDismissMenus: () => void;
@@ -57,7 +58,7 @@ type ComposerProps = {
 // filtering follows the composer text and keyboard focus never leaves the textarea.
 function Composer({
   draft, onDraftChange, onSubmit, onKeyDown, onCompositionStart, onCompositionEnd, onFocus,
-  selectedWorkflow, onRemoveWorkflow,
+  selectedAgent, onRemoveAgent,
   attachments, attachmentsUploading, attachmentError, onPasteImages, onRemoveAttachment,
   commandMatches, commandMenuOpen, onRunCommand,
   mentionMatches, mentionMenuOpen, onSelectMention,
@@ -110,13 +111,13 @@ function Composer({
                 ))}
               </ul>
             ) : null}
-            {selectedWorkflow ? (
+            {selectedAgent ? (
               <span className="wl-enter mb-1.5 inline-flex h-7 max-w-[min(16rem,70%)] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-brand/30 bg-brand-subtle pl-2.5 pr-1.5 text-[13px] font-medium text-foreground">
                 <Play className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
-                <span className="truncate" title={selectedWorkflow.name}>{selectedWorkflow.name}</span>
+                <Link to="/agents/$agentId" params={{ agentId: selectedAgent.id }} search={selectedAgent.continuation ? { runId: selectedAgent.continuation.runId } : undefined} className="truncate hover:underline" title={selectedAgent.name}>@{selectedAgent.name}{selectedAgent.continuation ? ` · ${t('mentions.continueInstance')}` : ''}</Link>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button type="button" className={cn('wl-press rounded-full p-0.5 text-muted-foreground hover:bg-surface hover:text-foreground', focusRingInset)} aria-label={t('mentions.remove')} onClick={onRemoveWorkflow}>
+                    <button type="button" className={cn('wl-press rounded-full p-0.5 text-muted-foreground hover:bg-surface hover:text-foreground', focusRingInset)} aria-label={t('mentions.remove')} onClick={onRemoveAgent}>
                       <X className="size-3.5" aria-hidden="true" />
                     </button>
                   </TooltipTrigger>

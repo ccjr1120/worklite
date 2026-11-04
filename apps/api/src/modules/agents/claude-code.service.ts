@@ -371,6 +371,11 @@ class ClaudeCodeSession {
       return;
     }
     if (message.type === 'result') {
+      if (typeof message.usage?.input_tokens === 'number' && typeof message.usage?.output_tokens === 'number') {
+        const inputTokens = message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0);
+        const outputTokens = message.usage.output_tokens;
+        this.queueActivity('claude.usage', { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } });
+      }
       if (this.questionOutput) this.finish(this.questionOutput);
       else if (message.subtype === 'success' && !message.is_error) this.finish(message.result.trim() ? message.result : this.text);
       else {

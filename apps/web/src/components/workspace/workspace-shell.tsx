@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useRouterState } from '@tanstack/react-router';
+import { Outlet } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from '@/components/workspace/sidebar';
 import { ContextBar } from '@/components/workspace/context-bar';
@@ -15,7 +15,6 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 
 function WorkspaceShell() {
   const { t } = useTranslation('workspace');
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const isWide = useMediaQuery('(min-width: 1024px)');
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [collapsedPreference, setCollapsedPreference] = useState<boolean | null>(
@@ -35,7 +34,7 @@ function WorkspaceShell() {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setCommandOpen(true);
+        setCommandOpen((open) => !open);
       }
     }
     window.addEventListener('keydown', onKeyDown);
@@ -43,7 +42,8 @@ function WorkspaceShell() {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="wl-workspace flex flex-col bg-background">
+      <a href="#workspace-main" className="wl-skip-link">{t('skipToContent')}</a>
       <OfflineBanner />
       <div className="flex min-h-0 flex-1">
         {isMobile ? (
@@ -58,7 +58,7 @@ function WorkspaceShell() {
         ) : (
           <Sidebar collapsed={collapsed} onToggleCollapsed={toggleSidebar} />
         )}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="wl-workspace-panel flex min-h-0 min-w-0 flex-1 flex-col">
           <ContextBar
             breadcrumbs={<div id={workspaceSlots.crumbs} className="min-w-0" />}
             status={<div id={workspaceSlots.status} className="flex items-center" />}
@@ -67,13 +67,11 @@ function WorkspaceShell() {
             onOpenCommand={() => setCommandOpen(true)}
             onOpenNavigation={() => setMobileNavOpen(true)}
             showMenuButton={isMobile}
-            showSearch={pathname !== '/chat'}
+            showSearch
           />
-          <div className="relative min-h-0 min-w-0 flex-1">
-            <main className="wl-page h-full overflow-auto">
-              <Outlet />
-            </main>
-          </div>
+          <main id="workspace-main" tabIndex={-1} className="wl-page relative min-h-0 min-w-0 flex-1 overflow-auto outline-none">
+            <Outlet />
+          </main>
         </div>
       </div>
       <CommandMenu open={commandOpen} onOpenChange={setCommandOpen} />

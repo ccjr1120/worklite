@@ -150,7 +150,7 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
         },
         onTextDelta: async (delta) => { event({ kind: 'text_delta', delta }); await request.onTextDelta?.(delta); },
         onEvent: async (activity) => {
-          event({ kind: 'activity', phase: activity.phase, ...(activity.itemId ? { itemId: activity.itemId } : {}), ...(activity.itemType ? { itemType: activity.itemType } : {}) });
+          event({ kind: 'activity', phase: activity.phase, ...(activity.usage ? { usage: activity.usage } : {}), ...(activity.itemId ? { itemId: activity.itemId } : {}), ...(activity.itemType ? { itemType: activity.itemType } : {}) });
           await request.onEvent?.(activity);
         },
         onQuestion: (question) => this.ask(request, runId, question, event),

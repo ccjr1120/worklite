@@ -1,3 +1,4 @@
+import type zhAgents from './locales/zh-CN/agents.json';
 import 'i18next';
 import type zhAssistant from './locales/zh-CN/assistant.json';
 import type zhArtifacts from './locales/zh-CN/artifacts.json';
@@ -23,6 +24,7 @@ declare module 'i18next' {
       home: typeof zhHome;
       assistant: typeof zhAssistant;
       workflows: typeof zhWorkflows;
+      agents: typeof zhAgents;
       runs: typeof zhRuns;
       skills: typeof zhSkills;
       mcpServers: typeof zhMcpServers;

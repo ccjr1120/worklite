@@ -1,19 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createDb, initializeDatabase, coders, platformSkillPackageFiles } from '@worklite/db';
+import { createDb, initializeDatabase, coders, agents, platformSkillPackageFiles } from '@worklite/db';
 import { eq } from 'drizzle-orm';
 
 describe('Coder lifecycle platform integration', () => {
-  it('exposes a creation tool and its script to Chat', () => {
+  it('replaces the retired creation tool with Agent management', () => {
     const files = new Map(platformSkillPackageFiles().map((file) => [file.path, file.content]));
     const tools = JSON.parse(files.get('scripts/tools.json')!) as Record<string, { name: string }>;
-    expect(tools['scripts/create-coder.mjs']?.name).toBe('create_coder');
-    expect(files.get('scripts/create-coder.mjs')).toContain("call('/coders', { method: 'POST', body })");
-    expect(files.get('SKILL.md')).toContain('create_coder');
+    expect(tools['scripts/create-coder.mjs']).toBeUndefined();
+    expect(tools['scripts/create-agent.mjs']?.name).toBe('create_agent');
+    expect(files.has('scripts/create-coder.mjs')).toBe(false);
+    expect(files.get('SKILL.md')).toContain('create_agent');
   });
 
-  it('migrates existing Planner instructions without changing other roles or future edits', async () => {
+  it('keeps edited role instructions when converting team configurations to Agents', async () => {
     const db = createDb(':memory:');
     try {
       await initializeDatabase(db);
@@ -29,8 +30,10 @@ describe('Coder lifecycle platform integration', () => {
       expect(migrated!.roles[1]!.instructions).toBe('Keep implementer unchanged.');
       db.update(coders).set({ roles: [{ ...migrated!.roles[0]!, instructions: 'User-edited policy.' }, migrated!.roles[1]!] }).where(eq(coders.id, 'migration-test')).run();
       await initializeDatabase(db);
-      const [afterRestart] = await db.select().from(coders).where(eq(coders.id, 'migration-test'));
-      expect(afterRestart!.roles[0]!.instructions).toBe('User-edited policy.');
+      expect(await db.select().from(coders).where(eq(coders.id, 'migration-test'))).toEqual([]);
+      const converted = await db.select().from(agents);
+      expect(converted.find((agent) => agent.name === 'planner')?.systemPrompt).toContain('User-edited policy.');
+      expect(converted.find((agent) => agent.name === 'implementer')?.systemPrompt).toContain('Keep implementer unchanged.');
     } finally {
       db.$client.close();
     }

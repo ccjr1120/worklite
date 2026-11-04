@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { TruncatedText } from '@/components/ui/truncated-text';
 import { focusRing } from '@/components/ui/interaction';
-import { formatDuration, formatNumber, formatTokenCount } from '@/i18n/format';
+import { formatDuration, formatTokenCount } from '@/i18n/format';
 import { teamRoleLabel } from './coder-run-summary';
 
 /**
@@ -20,7 +20,7 @@ export function TokenFigure({ value, retentionHours = 12, className = '' }: { va
   const { t } = useTranslation('coders');
   const { locale } = useLocale();
   const text = value.tokens === null ? '—' : `${value.source === 'estimated' ? '≈' : ''}${formatTokenCount(value.tokens, locale)}`;
-  const exact = value.tokens === null ? null : formatNumber(value.tokens, locale);
+  const exact = value.tokens === null ? null : formatTokenCount(value.tokens, locale);
   const source = t(`tokens.source.${value.source}` as never);
   const sourceHint = value.reason ? `${source}：${t(`tokens.reason.${value.reason}` as never, { hours: retentionHours })}` : source;
   const hint = [exact, sourceHint].filter(Boolean).join(' · ');

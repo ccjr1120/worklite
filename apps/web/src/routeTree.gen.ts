@@ -16,6 +16,8 @@ import { Route as HomeRouteImport } from './routes/home'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as ModelProvidersRouteImport } from './routes/model-providers'
 import { Route as SettingsRouteRouteImport } from './routes/settings/route'
+import { Route as AgentsIndexRouteImport } from './routes/agents/index'
+import { Route as AgentsAgentIdRouteImport } from './routes/agents/$agentId'
 import { Route as ArtifactsIndexRouteImport } from './routes/artifacts/index'
 import { Route as ArtifactsArtifactIdRouteImport } from './routes/artifacts/$artifactId'
 import { Route as CodingIndexRouteImport } from './routes/coding/index'
@@ -71,6 +73,16 @@ const ModelProvidersRoute = ModelProvidersRouteImport.update({
 const SettingsRouteRoute = SettingsRouteRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/agents/',
+  path: '/agents/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentsAgentIdRoute = AgentsAgentIdRouteImport.update({
+  id: '/agents/$agentId',
+  path: '/agents/$agentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ArtifactsIndexRoute = ArtifactsIndexRouteImport.update({
@@ -188,6 +200,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/coding/$coderId': typeof CodingCoderIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -198,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents/': typeof AgentsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
   '/coding/': typeof CodingIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
@@ -216,6 +230,7 @@ export interface FileRoutesByTo {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
   '/plugins/$pluginId': typeof PluginsPluginIdRoute
@@ -225,6 +240,7 @@ export interface FileRoutesByTo {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents': typeof AgentsIndexRoute
   '/artifacts': typeof ArtifactsIndexRoute
   '/coding': typeof CodingIndexRoute
   '/mcp-servers': typeof McpServersIndexRoute
@@ -246,6 +262,7 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/logs': typeof LogsRoute
   '/model-providers': typeof ModelProvidersRoute
+  '/agents/$agentId': typeof AgentsAgentIdRoute
   '/artifacts/$artifactId': typeof ArtifactsArtifactIdRoute
   '/coding/$coderId': typeof CodingCoderIdRouteWithChildren
   '/mcp-servers/$serverId': typeof McpServersServerIdRoute
@@ -256,6 +273,7 @@ export interface FileRoutesById {
   '/settings/usage': typeof SettingsUsageRoute
   '/skills/$skillId': typeof SkillsSkillIdRoute
   '/workflows/$workflowId': typeof WorkflowsWorkflowIdRouteWithChildren
+  '/agents/': typeof AgentsIndexRoute
   '/artifacts/': typeof ArtifactsIndexRoute
   '/coding/': typeof CodingIndexRoute
   '/mcp-servers/': typeof McpServersIndexRoute
@@ -278,6 +296,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
+    | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/coding/$coderId'
     | '/mcp-servers/$serverId'
@@ -288,6 +307,7 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agents/'
     | '/artifacts/'
     | '/coding/'
     | '/mcp-servers/'
@@ -306,6 +326,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
+    | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/mcp-servers/$serverId'
     | '/plugins/$pluginId'
@@ -315,6 +336,7 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agents'
     | '/artifacts'
     | '/coding'
     | '/mcp-servers'
@@ -335,6 +357,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/logs'
     | '/model-providers'
+    | '/agents/$agentId'
     | '/artifacts/$artifactId'
     | '/coding/$coderId'
     | '/mcp-servers/$serverId'
@@ -345,6 +368,7 @@ export interface FileRouteTypes {
     | '/settings/usage'
     | '/skills/$skillId'
     | '/workflows/$workflowId'
+    | '/agents/'
     | '/artifacts/'
     | '/coding/'
     | '/mcp-servers/'
@@ -366,12 +390,14 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   LogsRoute: typeof LogsRoute
   ModelProvidersRoute: typeof ModelProvidersRoute
+  AgentsAgentIdRoute: typeof AgentsAgentIdRoute
   CodingCoderIdRoute: typeof CodingCoderIdRouteWithChildren
   McpServersServerIdRoute: typeof McpServersServerIdRoute
   PluginsPluginIdRoute: typeof PluginsPluginIdRoute
   RunsRunIdRoute: typeof RunsRunIdRoute
   SkillsSkillIdRoute: typeof SkillsSkillIdRoute
   WorkflowsWorkflowIdRoute: typeof WorkflowsWorkflowIdRouteWithChildren
+  AgentsIndexRoute: typeof AgentsIndexRoute
   CodingIndexRoute: typeof CodingIndexRoute
   McpServersIndexRoute: typeof McpServersIndexRoute
   PluginsIndexRoute: typeof PluginsIndexRoute
@@ -429,6 +455,20 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/': {
+      id: '/agents/'
+      path: '/agents'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agents/$agentId': {
+      id: '/agents/$agentId'
+      path: '/agents/$agentId'
+      fullPath: '/agents/$agentId'
+      preLoaderRoute: typeof AgentsAgentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/artifacts/': {
@@ -646,12 +686,14 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   LogsRoute: LogsRoute,
   ModelProvidersRoute: ModelProvidersRoute,
+  AgentsAgentIdRoute: AgentsAgentIdRoute,
   CodingCoderIdRoute: CodingCoderIdRouteWithChildren,
   McpServersServerIdRoute: McpServersServerIdRoute,
   PluginsPluginIdRoute: PluginsPluginIdRoute,
   RunsRunIdRoute: RunsRunIdRoute,
   SkillsSkillIdRoute: SkillsSkillIdRoute,
   WorkflowsWorkflowIdRoute: WorkflowsWorkflowIdRouteWithChildren,
+  AgentsIndexRoute: AgentsIndexRoute,
   CodingIndexRoute: CodingIndexRoute,
   McpServersIndexRoute: McpServersIndexRoute,
   PluginsIndexRoute: PluginsIndexRoute,

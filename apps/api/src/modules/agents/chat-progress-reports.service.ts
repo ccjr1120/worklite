@@ -1,7 +1,7 @@
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
-import { coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflowVersions, workflows, type Database } from '@worklite/db';
+import { agentExecutions, auditLogs, coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflowVersions, workflows, type Database } from '@worklite/db';
 import type { AgentTeamRunProgress } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
@@ -15,6 +15,7 @@ const TITLE_LIMIT = 80;
 const PROGRESS_TEXT_LIMIT = 160;
 
 export type ActiveWorkItem =
+  | { kind: 'agent'; id: string; agentId: string; runId: string; agentName: string; status: string; details: string; updatedAt?: string }
   | { kind: 'task'; id: string; goal: string; stage: string; activityCount: number; progressText: string; updatedAt?: string }
   | { kind: 'coder'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; details?: string; updatedAt?: string }
   | { kind: 'workflow'; id: string; workflowName: string; status: string; currentNodeId: string | null; currentStep?: string; updatedAt?: string };
@@ -26,7 +27,7 @@ const truncate = (value: string, limit: number) => value.length > limit ? `${val
 // The visible-change signature: a tick whose summary matches the last reported one is skipped,
 // so a quiet interval never produces a duplicate report while genuinely new progress does.
 export function activeWorkSignature(items: ActiveWorkItem[]): string {
-  return JSON.stringify(items.map((item) => item.kind === 'task'
+  return JSON.stringify(items.map((item) => item.kind === 'agent' ? [item.kind, item.id, item.status, item.details] : item.kind === 'task'
     ? [item.kind, item.id, item.stage, item.activityCount, item.progressText]
     : item.kind === 'coder'
       ? [item.kind, item.id, item.status, item.progress, item.details]
@@ -37,6 +38,7 @@ const formatInterval = (seconds: number) => seconds % 60 === 0 ? `${seconds / 60
 
 export function buildActiveWorkNote(items: ActiveWorkItem[], intervalSeconds = DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS): string {
   const lines = items.map((item, index) => {
+    if (item.kind === 'agent') return `${index + 1}. Agent ${item.agentName}：${item.status}，最新进展：${item.details}`;
     if (item.kind === 'task') {
       const progress = item.progressText ? `，最新进展：${truncate(item.progressText, PROGRESS_TEXT_LIMIT)}` : '';
       return `${index + 1}. 项目任务 ${item.id}（${truncate(item.goal, TITLE_LIMIT)}）：运行中，阶段 ${item.stage}${progress}`;
@@ -64,7 +66,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly runtime: AgentTeamRuntimeService,
+    @Optional() @Inject(AgentTeamRuntimeService) private readonly runtime: AgentTeamRuntimeService | undefined,
     private readonly executions: AgentExecutionsService,
     private readonly config: ConfigService,
   ) {
@@ -102,7 +104,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
   }
 
   private async conversationsWithActiveWork(): Promise<ConversationTarget[]> {
-    const [taskRows, teamRows, workflowRows] = await Promise.all([
+    const [taskRows, teamRows, workflowRows, agentRows] = await Promise.all([
       this.db.select({ executionId: chatProjectTasks.executionId, workspaceId: chatProjectTasks.workspaceId })
         .from(chatProjectTasks).where(eq(chatProjectTasks.status, 'running')),
       this.db.select({ executionId: chatSubmissions.executionId, workspaceId: chatSubmissions.workspaceId })
@@ -113,9 +115,10 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
         .from(chatSubmissions)
         .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
         .where(and(isNotNull(chatSubmissions.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_WORKFLOW_RUN_STATUSES]))),
+      this.backgroundAgents(),
     ]);
     const targets = new Map<string, ConversationTarget>();
-    for (const row of [...taskRows, ...teamRows, ...workflowRows]) {
+    for (const row of [...taskRows, ...teamRows, ...workflowRows, ...agentRows]) {
       if (row.executionId && !targets.has(row.executionId)) targets.set(row.executionId, { executionId: row.executionId, workspaceId: row.workspaceId });
     }
     return [...targets.values()];
@@ -134,13 +137,14 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       items: changed.map((item) => ({
         kind: item.kind,
         id: item.id,
-        title: item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'coder' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
+        title: item.kind === 'agent' ? item.agentName : item.kind === 'task' ? truncate(item.goal, TITLE_LIMIT) : item.kind === 'coder' ? truncate(item.intent, TITLE_LIMIT) : item.workflowName,
         status: item.kind === 'task' ? 'running' : item.status,
         stage: item.kind === 'task' ? item.stage : item.kind === 'workflow' ? item.currentStep : undefined,
         progress: item.kind === 'task'
           ? truncate(item.progressText, PROGRESS_TEXT_LIMIT) || undefined
-          : item.kind === 'coder' ? item.details : item.currentStep,
+          : item.kind === 'agent' || item.kind === 'coder' ? item.details : item.currentStep,
         updatedAt: item.updatedAt,
+        ...(item.kind === 'agent' ? { agentId: item.agentId, runId: item.runId } : {}),
       })),
     });
     // busy leaves the marker unset so the next tick retries; reported and unavailable (the
@@ -149,8 +153,21 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     if (result !== 'busy') this.lastSignatures.set(target.executionId, new Map(items.map((item) => [`${item.kind}:${item.id}`, activeWorkSignature([item])])));
   }
 
+  private backgroundAgents(target?: ConversationTarget) {
+    return this.db.select({
+      executionId: sql<string>`json_extract(${auditLogs.metadata}, '$.conversationId')`, workspaceId: auditLogs.workspaceId,
+      id: agentExecutions.id, agentId: agentExecutions.agentId, status: agentExecutions.status, phase: agentExecutions.phase,
+      messages: agentExecutions.displayMessages, updatedAt: agentExecutions.updatedAt,
+      agentName: sql<string>`json_extract(${auditLogs.metadata}, '$.agentName')`,
+      runId: sql<string>`coalesce(json_extract(${auditLogs.metadata}, '$.invocationId'), ${agentExecutions.id})`,
+    }).from(auditLogs).innerJoin(agentExecutions, and(eq(agentExecutions.id, auditLogs.resource), eq(agentExecutions.workspaceId, auditLogs.workspaceId)))
+      .where(and(eq(auditLogs.action, 'chat_agent.dispatched'), eq(agentExecutions.status, 'running'),
+        target ? eq(auditLogs.workspaceId, target.workspaceId) : undefined,
+        target ? sql`json_extract(${auditLogs.metadata}, '$.conversationId') = ${target.executionId}` : undefined)).orderBy(auditLogs.createdAt, auditLogs.id);
+  }
+
   private async collectActiveWork(target: ConversationTarget): Promise<ActiveWorkItem[]> {
-    const [tasks, teamRows, workflowRows] = await Promise.all([
+    const [tasks, teamRows, workflowRows, agentRows] = await Promise.all([
       this.db.select().from(chatProjectTasks)
         .where(and(eq(chatProjectTasks.executionId, target.executionId), eq(chatProjectTasks.status, 'running'))),
       this.db.select({ runId: coderRuns.id, intent: coderRuns.intent, status: coderRuns.status, updatedAt: coderRuns.updatedAt })
@@ -163,6 +180,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
         .innerJoin(workflows, eq(workflows.id, workflowRuns.workflowId))
         .innerJoin(workflowVersions, eq(workflowVersions.id, workflowRuns.workflowVersionId))
         .where(and(eq(chatSubmissions.executionId, target.executionId), sql`json_extract(${chatSubmissions.reference}, '$.kind') = 'workflow'`, inArray(workflowRuns.status, [...ACTIVE_WORKFLOW_RUN_STATUSES]))),
+      this.backgroundAgents(target),
     ]);
     const items: ActiveWorkItem[] = tasks.map((task) => ({
       kind: 'task',
@@ -174,9 +192,8 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       updatedAt: task.updatedAt.toISOString(),
     }));
     for (const row of teamRows) {
-      const progress = await this.runtime.getRunProgress(row.runId)
-        .catch(() => null);
-      const view = await this.runtime.getRunView(row.runId, target.workspaceId).catch(() => null);
+      const progress = this.runtime ? await this.runtime.getRunProgress(row.runId).catch(() => null) : null;
+      const view = this.runtime ? await this.runtime.getRunView(row.runId, target.workspaceId).catch(() => null) : null;
       const details = view?.tasks.filter((task) => task.status === 'running' || task.status === 'waiting_for_input')
         .map((task) => task.checklist?.length ? task.checklist.map((item) => `${item.status === 'completed' ? '- [x]' : item.status === 'in_progress' ? '- [~]' : '- [ ]'} ${item.step}`).join('\n') : [task.roleName || task.assignmentTitle, task.progressText.trim() || task.assignmentTitle].filter(Boolean).join('：'))
         .filter(Boolean).join('\n');
@@ -187,6 +204,25 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       const config = node?.config && typeof node.config === 'object' ? node.config as Record<string, unknown> : null;
       const currentStep = [config?.label, config?.name, config?.title].find((value): value is string => typeof value === 'string' && Boolean(value.trim()));
       items.push({ kind: 'workflow', id: row.runId, workflowName: row.workflowName, status: row.status, currentNodeId: row.currentNodeId, currentStep, updatedAt: row.updatedAt.toISOString() });
+    }
+    for (const row of agentRows) {
+      const children = await this.db.select({ metadata: auditLogs.metadata }).from(auditLogs).where(and(eq(auditLogs.workspaceId, target.workspaceId), eq(auditLogs.resource, row.id), eq(auditLogs.action, 'agent.invocation'))).orderBy(auditLogs.createdAt, auditLogs.id);
+      const labels: Record<string, string> = { running: '执行中', completed: '已完成', failed: '失败', cancelled: '已取消', waiting_for_input: '等待输入' };
+      // A recovered attempt replaces the old failure in current progress; audit history remains intact.
+      const latestAttempts = new Map<string, typeof children[number]>();
+      for (const child of children) {
+        const metadata = child.metadata;
+        if (!metadata.parentRunId || typeof metadata.agentName !== 'string' || typeof metadata.status !== 'string' || !labels[metadata.status]) continue;
+        const key = `${String(metadata.parentRunId)}:${String(metadata.agentId ?? metadata.agentName)}`;
+        const previous = latestAttempts.get(key);
+        const time = typeof metadata.createdAt === 'string' ? Date.parse(metadata.createdAt) : 0;
+        const previousTime = typeof previous?.metadata.createdAt === 'string' ? Date.parse(previous.metadata.createdAt) : 0;
+        if (!previous || (metadata.status === 'running' && previous.metadata.status !== 'running') || (previous.metadata.status !== 'running' && time >= previousTime) || (metadata.status === 'running' && time >= previousTime)) latestAttempts.set(key, child);
+      }
+      const childProgress = [...latestAttempts.values()].map(({ metadata }) => `${metadata.agentName}：${labels[metadata.status as string]}`).join('；');
+      const latest = [...row.messages].reverse().find((message) => message.role === 'assistant' && message.content.trim())?.content;
+      const details = truncate(childProgress || latest || ({ model: '正在分析与处理任务', skill: '正在执行工具', recovery: '正在恢复执行' }[row.phase] ?? '任务执行中'), PROGRESS_TEXT_LIMIT);
+      items.push({ kind: 'agent', id: row.id, agentId: row.agentId, agentName: row.agentName, runId: row.runId, status: row.status, details, updatedAt: row.updatedAt.toISOString() });
     }
     return items;
   }

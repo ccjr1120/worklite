@@ -41,6 +41,7 @@ describe('Workflow Agent output budget', () => {
       skillScripts: [],
       mcpTools: [],
       maxToolRounds: 0,
+      executeTool: async () => { throw new Error('No tools are configured for this request.'); },
     }).catch((error: unknown) => error);
 
     expect(bodies[0]?.max_tokens).toBe(64_000);
@@ -64,6 +65,7 @@ describe('Workflow Agent output budget', () => {
       skillScripts: [],
       mcpTools: [],
       maxToolRounds: 0,
+      executeTool: async () => { throw new Error('No tools are configured for this request.'); },
       maxOutputTokens: 96_000,
     }).catch((error: unknown) => error);
 

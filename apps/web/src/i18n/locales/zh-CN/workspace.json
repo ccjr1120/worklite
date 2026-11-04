@@ -17,18 +17,20 @@
     "settings": "设置",
     "title": "导航",
     "chat": "Chat",
-    "live": "有正在进行的对话"
+    "live": "有正在进行的对话",
+    "agents": "Agents"
   },
   "command": {
     "title": "命令菜单",
-    "placeholder": "搜索 Workflow 和目标…",
+    "placeholder": "搜索 Agent 和目标…",
     "empty": "没有匹配的目标。",
     "navigation": "导航",
     "create": "创建",
     "recent": "最近",
     "createWorkflow": "创建工作流",
     "open": "打开命令菜单",
-    "search": "搜索"
+    "search": "搜索",
+    "createAgent": "创建 Agent"
   },
   "offline": {
     "message": "正在重新连接。本地编辑会保留在此设备上，直到连接恢复。"
@@ -42,5 +44,6 @@
     "loading": "正在加载页面...",
     "errorTitle": "无法加载此页面",
     "errorDescription": "渲染此页面时出现问题。请重试，或前往其他目标页。"
-  }
+  },
+  "skipToContent": "跳转到主要内容"
 }

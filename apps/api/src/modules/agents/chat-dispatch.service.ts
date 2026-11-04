@@ -1,14 +1,11 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { createHash } from 'node:crypto';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { ChatTaskReference, DispatchChatRequest, DispatchChatResponse } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatSubmissions, workflowVersions, workflows, type Database } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, chatSubmissions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from './agent-executions.service';
-import { AgentTeamGroupsService } from '../coders/coder-groups.service';
-import { RunsService } from '../runs/runs.service';
 
 export const CHAT_AGENT_ID = 'agt_system_helper_chat';
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
@@ -22,8 +19,6 @@ export class ChatDispatchService {
     @Inject(DATABASE) private readonly db: Database,
     private readonly workspaces: WorkspaceService,
     private readonly executions: AgentExecutionsService,
-    private readonly teamGroups: AgentTeamGroupsService,
-    private readonly runs: RunsService,
   ) {}
 
   dispatch(request: Request, input: DispatchChatRequest): Promise<DispatchChatResponse> {
@@ -37,7 +32,8 @@ export class ChatDispatchService {
   private async accept(request: Request, input: DispatchChatRequest): Promise<DispatchChatResponse> {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
     if (!input?.submissionId?.trim() || typeof input.message !== 'string' || !input.target) throw new BadRequestException('A stable submission id, message and target are required.');
-    if (!['conversation', 'coder', 'workflow'].includes(input.target.kind)) throw new BadRequestException('Unknown conversation target.');
+    if (input.target.kind === 'workflow' || input.target.kind === 'coder') throw new BadRequestException('Workflow and Coding Team tasks have moved to Agents. Use inspect_agents and run_agent.');
+    if (input.target.kind !== 'conversation') throw new BadRequestException('Unknown conversation target.');
     if (input.executionId) {
       const [execution] = await this.db.select({ id: agentExecutions.id }).from(agentExecutions)
         .where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.workspaceId, workspace.id), eq(agentExecutions.agentId, CHAT_AGENT_ID))).limit(1);
@@ -76,27 +72,6 @@ export class ChatDispatchService {
         else if (current.status === 'waiting_for_input' && current.pendingQuestion && input.questionId === current.pendingQuestion.id) await this.executions.answer(request, 'personal', CHAT_AGENT_ID, current.id, { questionId: current.pendingQuestion.id, answer: input.message, recoveryDecision: input.recoveryDecision }, accept);
         else if (current.status === 'waiting_for_input') throw new ConflictException('A pending answer required before queued messages can continue.');
         else await this.executions.continue(request, 'personal', CHAT_AGENT_ID, current.id, { message: input.message }, accept);
-      } else if (input.target.kind === 'workflow') {
-        const [version] = await this.db.select({ id: workflowVersions.id }).from(workflowVersions)
-          .innerJoin(workflows, eq(workflows.id, workflowVersions.workflowId))
-          .where(and(eq(workflows.id, input.target.workflowId), eq(workflows.workspaceId, workspace.id), eq(workflowVersions.published, true)))
-          .orderBy(desc(workflowVersions.version)).limit(1);
-        if (!version) throw new NotFoundException('This Workflow has no published version.');
-        const runId = `run_chat_${createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex')}`;
-        await this.runs.createForVersion(request, version.id, { input: input.message }, { runId, accept: (transaction) => bind(transaction, { kind: 'workflow', runId, workflowVersionId: version.id }) });
-      } else {
-        const target = input.target;
-        const digest = createHash('sha256').update(workspace.id + ':' + submission.id).digest('hex');
-        const runId = `atrun_chat_${digest}`;
-        const groupId = `atgroup_chat_${digest}`;
-        const dispatched = await this.teamGroups.dispatchFromChat(request, 'personal', target.coderId, {
-          message: input.message,
-          projectDirectory: target.projectDirectory,
-          role: target.role,
-          submissionId: submission.id,
-          runId,
-        }, { runId, accept: (transaction, id) => bind(transaction, { kind: 'coder', coderId: target.coderId, runId: id, groupId }) });
-        if (dispatched.id !== groupId) throw new Error('Chat executor group id did not match its idempotent submission.');
       }
       const [accepted] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, submission.id)).limit(1);
       if (!accepted.reference) throw new Error('Conversation dispatch did not commit a task reference.');

@@ -1,0 +1,25 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import type { Request, Response } from 'express';
+import { artifacts, createDb, initializeDatabase, type Database } from '@worklite/db';
+import type { WorkspaceService } from '../teams/teams.service';
+import type { ArtifactStorageService } from '../artifacts/artifact-storage.service';
+import { ArtifactPreviewController } from './artifact-preview.controller';
+let db: Database;
+afterEach(() => { db?.$client.close(); vi.restoreAllMocks(); });
+it('opens an authorized artifact with an expiring link and escapes stored HTML', async () => {
+  db = createDb(':memory:'); await initializeDatabase(db);
+  db.insert(artifacts).values({ id: 'article', workspaceId: 'workspace_personal', name: 'Research', format: 'text', content: '<script>alert(1)</script>' }).run();
+  const controller = new ArtifactPreviewController(db, { getWorkspace: async () => ({ id: 'workspace_personal' }) } as unknown as WorkspaceService, {} as ArtifactStorageService);
+  const response = { setHeader: vi.fn(), redirect: vi.fn(), type: vi.fn().mockReturnThis(), send: vi.fn() };
+  const res = response as unknown as Response;
+  await expect(controller.open({} as Request, 'missing', res)).rejects.toThrow('Artifact not found');
+  await controller.open({} as Request, 'article', res);
+  const url = response.redirect.mock.calls[0]![0] as string;
+  const token = url.split('/').at(-1)!;
+  expect(token).toHaveLength(64);
+  await controller.view(token, res);
+  expect(response.send).toHaveBeenCalledWith(expect.stringContaining('&lt;script&gt;'));
+  expect(response.send).not.toHaveBeenCalledWith(expect.stringContaining('<script>'));
+  const now = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(now + 16 * 60_000);
+  await expect(controller.view(token, res)).rejects.toThrow('Preview link expired');
+});
