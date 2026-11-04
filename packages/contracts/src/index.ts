@@ -261,7 +261,13 @@ export type PluginTestResult = {
   status: 'available' | 'missing' | 'failed';
 };
 
+// Runtime selection is independent of the model provider. Native retains WorkLite's tool loop.
+export type AgentRuntimeConfiguration =
+  | { kind: 'native' }
+  | { kind: 'claude' | 'codex'; projectDirectory: string; approvalPolicy?: 'auto' | 'ask' };
+
 export type AgentView = {
+  runtime?: AgentRuntimeConfiguration;
   chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
   id: string;
   workspaceSlug: string;
@@ -293,6 +299,7 @@ export type AgentView = {
 };
 
 export type AgentVersionView = {
+  runtime?: AgentRuntimeConfiguration;
   id: string;
   agentId: string;
   version: number;
@@ -346,6 +353,7 @@ export type AgentPlanStep = {
 };
 
 export type AgentPendingQuestion = {
+  runtimeInteractionId?: string;
   action?: 'new_conversation' | 'confirm_execution';
   projectTaskId?: string;
   shellCallId?: string;
@@ -514,6 +522,7 @@ export type AnswerAgentQuestionRequest = {
 };
 
 export type CreateAgentRequest = {
+  runtime?: AgentRuntimeConfiguration;
   name: string;
   responsibility: string;
   systemPrompt: string;

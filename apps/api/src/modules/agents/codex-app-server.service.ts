@@ -4,7 +4,7 @@ import { basename, dirname, extname, resolve } from 'node:path';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
-import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type AgentRuntimeAdapter, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type CodexLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'codex' }>;
 
@@ -28,7 +28,8 @@ const GATEWAY_MODEL_PROVIDER = 'worklite';
 const GATEWAY_MODEL_API_KEY_ENV = 'WORKLITE_GATEWAY_API_KEY';
 
 @Injectable()
-export class CodexAppServerService {
+export class CodexAppServerService implements AgentRuntimeAdapter {
+  readonly capabilities = { resume: true, steer: true, liveQuestions: true, approvals: true } as const;
   constructor(private readonly commands: CommandsService) {}
 
   async captureLaunch(commandArguments: readonly string[], model: string | null, configPath?: string): Promise<CodexLaunch> {
@@ -62,7 +63,7 @@ export class CodexAppServerService {
       const gatewayModel = isGatewayPublicModel(model);
       const mcp = codexMcpServers(prepared, gatewayModel, attributionHeaders(request));
       process = await this.commands.openStdioProcess(
-        appServerArguments(launch, mcp.config), request.projectDirectory, mcp.env,
+        appServerArguments(launch, mcp.config, request.approvalPolicy), request.projectDirectory, mcp.env,
         (event) => {
           if (event.type === 'stdout') session.consume(event.data);
         },
@@ -81,16 +82,18 @@ export class CodexAppServerService {
       requireSupportedVersion(initialized.userAgent);
       await session.notify('initialized', {});
       if (prepared.skillRoot) await session.call('skills/extraRoots/set', { extraRoots: [prepared.skillRoot] });
-      const started = await session.call('thread/start', {
+      const started = await session.call(request.runtimeSession?.resumeId ? 'thread/resume' : 'thread/start', {
+        ...(request.runtimeSession?.resumeId ? { threadId: request.runtimeSession.resumeId } : {}),
         ...(model ? { model } : {}),
         ...(gatewayModel ? { modelProvider: GATEWAY_MODEL_PROVIDER } : {}),
         cwd: request.projectDirectory,
-        approvalPolicy: 'never',
-        sandbox: 'danger-full-access',
-        ephemeral: true,
+        approvalPolicy: request.approvalPolicy === 'ask' ? 'on-request' : 'never',
+        sandbox: request.approvalPolicy === 'ask' ? 'workspace-write' : 'danger-full-access',
+        ...(!request.runtimeSession?.resumeId ? { ephemeral: !request.runtimeSession } : {}),
         developerInstructions: prepared.systemPrompt,
       });
       session.threadId = started.thread.id;
+      await request.runtimeSession?.onSession(started.thread.id);
       await session.activity('codex.thread_started');
       const turn = await session.call('turn/start', {
         threadId: session.threadId,
@@ -128,17 +131,22 @@ class CodexAppServerSession {
   private buffer = '';
   private text = '';
   private questionOutput?: string;
+  private readonly items = new Map<string, Record<string, unknown>>();
   private failed?: unknown;
   private readonly pending = new Map<number | string, { method: string; resolve: (result: any) => void; reject: (error: unknown) => void }>();
   private requestQueue = Promise.resolve();
   private eventQueue = Promise.resolve();
   private readonly finished: Promise<string>;
+  private readonly failure: Promise<never>;
+  private rejectFailure!: (error: unknown) => void;
   private finish!: (text: string) => void;
   private reject!: (error: unknown) => void;
 
   constructor(private readonly request: ProjectExecutorRequest, private readonly onFailure: (error: unknown) => void) {
     this.finished = new Promise((resolve, reject) => { this.finish = resolve; this.reject = reject; });
     void this.finished.catch(() => undefined);
+    this.failure = new Promise<never>((_resolve, reject) => { this.rejectFailure = reject; });
+    void this.failure.catch(() => undefined);
   }
 
   attach(transport: CommandStdioProcess): void { this.transport = transport; }
@@ -190,6 +198,7 @@ class CodexAppServerSession {
     if (this.failed) return;
     this.failed = error;
     this.onFailure(error);
+    this.rejectFailure(error);
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     this.reject(error);
@@ -197,8 +206,8 @@ class CodexAppServerSession {
 
   async result(): Promise<string> {
     const text = await this.finished;
-    await this.requestQueue;
-    await this.eventQueue;
+    await Promise.race([this.requestQueue, this.failure]);
+    await Promise.race([this.eventQueue, this.failure]);
     if (this.failed) throw this.failed;
     if (!text.trim()) throw new Error('Codex App Server returned an empty task result.');
     return text.trim();
@@ -242,6 +251,7 @@ class CodexAppServerSession {
       this.eventQueue = this.eventQueue.then(() => this.request.onTextDelta?.(params.delta)).then(() => undefined).catch((error) => this.fail(error));
     }
     if (message.method === 'item/started' || message.method === 'item/completed') {
+      if (typeof params.item?.id === 'string') this.items.set(params.item.id, params.item);
       if (message.method === 'item/completed' && params.item?.type === 'agentMessage' && typeof params.item.text === 'string') this.text = params.item.text;
       const activityType = `codex.${message.method.replace('/', '_')}`;
       this.eventQueue = this.eventQueue.then(() => this.activity(activityType, params.item)).catch((error) => this.fail(error));
@@ -258,18 +268,35 @@ class CodexAppServerSession {
   private async respond(message: RpcMessage): Promise<void> {
     this.request.signal.throwIfAborted();
     const params = message.params ?? {};
-    // The approval policy is never, so approvals are not expected; any that arrive are accepted like the operator's cx alias.
+    // Existing tasks retain direct execution; interactive Agents can route native approvals to the owner.
     if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
-      await this.send({ id: message.id, result: { decision: 'accept' } });
+      const allowed = this.request.approvalPolicy !== 'ask' || await this.request.onApproval?.(codexApprovalDescription(message.method, params, typeof params.itemId === 'string' ? this.items.get(params.itemId) : undefined));
+      this.request.signal.throwIfAborted();
+      await this.send({ id: message.id, result: { decision: allowed ? 'accept' : 'decline' } });
       return;
     }
     if (message.method === 'item/permissions/requestApproval') {
-      await this.send({ id: message.id, result: { permissions: params.permissions ?? {}, scope: 'turn' } });
+      const allowed = this.request.approvalPolicy !== 'ask' || await this.request.onApproval?.(`Codex requests additional filesystem or network permissions:\n${JSON.stringify(params.permissions ?? {}, null, 2)}`);
+      this.request.signal.throwIfAborted();
+      await this.send({ id: message.id, result: { permissions: allowed ? params.permissions ?? {} : {}, scope: 'turn' } });
       return;
     }
     if (message.method === 'item/tool/requestUserInput') {
       const questions = Array.isArray(params.questions) ? params.questions.map((item: { question?: string }) => item.question).filter(Boolean) : [];
       if (questions.length === 0) throw new Error('Codex returned a user question without question text.');
+      if (this.request.onQuestion) {
+        const answers: Record<string, { answers: string[] }> = {};
+        for (const question of params.questions as Array<{ id: string; question: string; options?: Array<{ label: string }> }>) {
+          if (typeof question.id !== 'string' || typeof question.question !== 'string') throw new Error('Codex returned an invalid user question.');
+          const choices = question.options?.map((option) => option.label).join(', ');
+          const answer = await this.request.onQuestion(choices ? `${question.question}\n${choices}` : question.question);
+          this.request.signal.throwIfAborted();
+          if (answer === undefined) throw new Error('The Codex question was cancelled.');
+          answers[question.id] = { answers: [answer] };
+        }
+        await this.send({ id: message.id, result: { answers } });
+        return;
+      }
       this.questionOutput = JSON.stringify({ status: 'waiting_for_input', pendingInput: { question: questions.join('\n') } });
       await this.send({ id: message.id, result: { answers: {} } });
       await this.call('turn/interrupt', { threadId: this.threadId, turnId: params.turnId });
@@ -337,12 +364,12 @@ export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel
 // specifically so shell alias expansion applies (quoting it would defeat that); SAFE_COMMAND_WORD in
 // captureLaunch rejects anything containing shell syntax before it reaches here. Everything after the word is
 // forwarded as real argv elements through "$@", never interpolated into the script text.
-function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unknown>): string[] {
+function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unknown>, approvalPolicy?: 'auto' | 'ask'): string[] {
   const [word, ...fixedArguments] = launch.commandArguments;
   const config: Record<string, unknown> = {
     ...mcpServers,
-    approval_policy: 'never',
-    sandbox_mode: 'danger-full-access',
+    approval_policy: approvalPolicy === 'ask' ? 'on-request' : 'never',
+    sandbox_mode: approvalPolicy === 'ask' ? 'workspace-write' : 'danger-full-access',
   };
   const configDirectoryArguments = launch.configDirectory ? ['--config-dir', launch.configDirectory] : [];
   const trailingArguments = [...configDirectoryArguments, ...fixedArguments, ...Object.entries(config).flatMap(([key, value]) => ['-c', `${key}=${tomlValue(value)}`]), 'app-server', '--listen', 'stdio://'];
@@ -386,3 +413,12 @@ function requireSupportedVersion(userAgent: unknown): void {
 }
 
 export { LOGIN_SHELL };
+
+function codexApprovalDescription(method: string, params: Record<string, unknown>, item?: Record<string, unknown>): string {
+  const description = method === 'item/commandExecution/requestApproval' ? 'execute a command' : 'change files';
+  const command = typeof params.command === 'string' ? params.command : undefined;
+  const reason = typeof params.reason === 'string' ? params.reason : undefined;
+  const changes = item?.changes ? JSON.stringify(item.changes, null, 2) : undefined;
+  const grantRoot = typeof params.grantRoot === 'string' ? `Requested root: ${params.grantRoot}` : undefined;
+  return [`Codex requests permission to ${description}.`, command, changes, grantRoot, reason].filter(Boolean).join('\n');
+}

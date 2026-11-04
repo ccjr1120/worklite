@@ -540,6 +540,13 @@
       "when": 1795100000000,
       "tag": "0077_remove_legacy_coder_history",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1795200000000,
+      "tag": "0078_agent_runtimes",
+      "breakpoints": true
     }
   ]
 }

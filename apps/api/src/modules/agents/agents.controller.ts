@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { AgentExecutionEvent, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
+import type { AgentExecutionEvent, CreateAgentRequest, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 
@@ -8,6 +8,22 @@ import { AgentsService } from './agents.service';
 export class AgentsController {
   constructor(private readonly agents: AgentsService, private readonly executions: AgentExecutionsService) {}
 
+
+  @Get()
+  list(@Req() request: Request) { return this.agents.list(request, 'personal'); }
+
+  @Post()
+  create(@Req() request: Request, @Body() body: CreateAgentRequest) { return this.agents.create(request, 'personal', body); }
+
+  @Post(':agentId/executions/:executionId/steer')
+  steer(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: ContinueAgentExecutionRequest) {
+    return this.executions.steerRuntimeSession(request, 'personal', agentId, executionId, body);
+  }
+
+  @Delete(':agentId/executions/:executionId/session')
+  closeSession(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
+    return this.executions.closeRuntimeSession(request, 'personal', agentId, executionId);
+  }
 
   @Get(':agentId')
   get(@Req() request: Request, @Param('agentId') agentId: string) {

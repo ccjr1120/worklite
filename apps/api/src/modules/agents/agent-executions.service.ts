@@ -5,7 +5,7 @@ import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, ModelProviderProtocol, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
 import { CHAT_TURN_NOTIFICATION_DEFAULT_SOUND, WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentMcpServers, mcpServers, agentRuntimeSessions, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 import { createModelGateway, type GatewayAgentMessage, type GatewayToolDefinition, type GatewayToolResultOutput } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { SkillScriptRunnerService } from '../skills/skill-script-runner.service';
@@ -23,6 +23,8 @@ import { inlineUserAttachmentImages } from './chat-model-images';
 import { buildChatMemoriesPrompt } from './chat-memories.service';
 import { ClaudeCodeError } from './claude-code.service';
 import { CodexAppServerError } from './codex-app-server.service';
+import { AgentRuntimeService } from './agent-runtime.service';
+import { validateAgentRuntime } from './agent-runtime.configuration';
 import { requireSafeCommandWord } from './project-executor.types';
 import { CommandsService } from '../commands/commands.service';
 import { executionFailure, executionFailureSource, type ExecutionFailure } from './agent-execution-failure';
@@ -151,12 +153,14 @@ export class AgentExecutionsService implements OnModuleInit {
     private readonly attachments: ChatAttachmentsService,
     private readonly hostCommands: ChatHostCommandService,
     private readonly hostNotifications: HostNotificationsService,
+    private readonly agentRuntime: AgentRuntimeService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     const retired = await this.db.select({ executionId: auditLogs.resource, workspaceId: auditLogs.workspaceId }).from(auditLogs)
       .where(eq(auditLogs.action, 'chat_execution.question_retired')).groupBy(auditLogs.resource, auditLogs.workspaceId);
-    for (const entry of retired) {
+    const interrupted = this.db.select({ executionId: agentRuntimeSessions.id, workspaceId: agentRuntimeSessions.workspaceId }).from(agentRuntimeSessions).where(eq(agentRuntimeSessions.status, 'interrupted')).all();
+    for (const entry of [...retired, ...interrupted]) {
       const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, entry.executionId), eq(agentExecutions.workspaceId, entry.workspaceId))).limit(1);
       if (!execution) continue;
       const [latest] = await this.db.select({ data: agentExecutionEvents.data }).from(agentExecutionEvents)
@@ -315,8 +319,10 @@ export class AgentExecutionsService implements OnModuleInit {
   async continue(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest, accept?: ConversationAcceptance): Promise<AgentExecutionView> {
     assertRuntimeAdmission();
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
-    await this.requireExecutableAgent(workspace.id, agentId);
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
+    if (!execution.capabilitySnapshot?.agent.runtime || execution.capabilitySnapshot.agent.runtime.kind === 'native') await this.requireExecutableAgent(workspace.id, agentId);
+    if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native' && this.scheduledExecutions.has(executionId)) throw new ConflictException('The previous Agent turn is still settling. Try again when it has stopped.');
+    if (this.db.select({ status: agentRuntimeSessions.status }).from(agentRuntimeSessions).where(eq(agentRuntimeSessions.id, executionId)).get()?.status === 'closed') throw new ConflictException('This Agent session is closed. Start a new conversation.');
     if (execution.status === 'running' || execution.status === 'waiting_for_input') throw new ConflictException(execution.status === 'waiting_for_input' ? 'Answer the pending Agent question before sending another message.' : 'This Agent execution is already running.');
     const unresolvedToolCall = (await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).limit(1))[0];
     if (unresolvedToolCall) throw new ConflictException('请先重试本轮对话，处理尚未结束的工具调用；外部效果不会自动重跑。');
@@ -324,7 +330,8 @@ export class AgentExecutionsService implements OnModuleInit {
     let accepted = false;
     this.db.transaction((transaction) => {
       const updated = transaction.update(agentExecutions).set({
-        capabilitySnapshot: this.captureCapabilities(transaction, workspace.id, agentId),
+        capabilitySnapshot: execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native'
+          ? execution.capabilitySnapshot : this.captureCapabilities(transaction, workspace.id, agentId),
         executionAuthorization: null,
         status: 'running',
         phase: 'model',
@@ -376,6 +383,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     if (!execution.capabilitySnapshot) await this.requireExecutableAgent(workspace.id, agentId);
     if (execution.status !== 'failed') throw new ConflictException('Only a failed Agent execution can be retried.');
+    if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') throw new ConflictException('Engine-backed work cannot be replayed. Send a new message to continue the saved session after inspecting prior effects.');
     const unresolvedCalls = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false)));
     const projectTaskCall = agentId === CHAT_AGENT_ID ? unresolvedCalls.find((call) => call.toolName === 'builtin' && call.mcpToolName === 'project_task') : undefined;
     if (projectTaskCall) {
@@ -414,6 +422,15 @@ export class AgentExecutionsService implements OnModuleInit {
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     if (execution.status !== 'waiting_for_input' || !execution.pendingQuestion || execution.pendingQuestion.id !== input?.questionId) throw new ConflictException('This Agent execution is not waiting for that question.');
     const answer = normalizeUserMessage(input?.answer);
+    if (execution.pendingQuestion.runtimeInteractionId) {
+      await this.agentRuntime.answer(workspace.id, executionId, execution.pendingQuestion.runtimeInteractionId, answer, (transaction) => {
+        const updated = transaction.update(agentExecutions).set({ status: 'running', pendingQuestion: null, displayMessages: [...execution.displayMessages, { id: `msg_${randomUUID()}`, role: 'user', content: answer, createdAt: new Date().toISOString() }], updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'waiting_for_input'), sql`json_extract(${agentExecutions.pendingQuestion}, '$.id') = ${input.questionId}`)).run();
+        if (!updated.changes) throw new ConflictException('This Agent question has already been answered.');
+        accept?.(transaction, executionId);
+      });
+      await this.publishSnapshotForExecution(workspace.id, executionId);
+      return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
+    }
     if (execution.pendingQuestion.projectTaskId) {
       const taskId = execution.pendingQuestion.projectTaskId;
       await this.projectTasks.answer(workspace.id, taskId, input, (transaction) => {
@@ -504,6 +521,7 @@ export class AgentExecutionsService implements OnModuleInit {
 
     if (cancelled) {
       this.activeModelRequests.get(executionId)?.abort();
+      if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') await this.agentRuntime.waitForStop(executionId);
       for (const call of runningCalls) this.activeHostCommands.get(call.id)?.abort();
       const pluginCommandId = this.activePluginCommands.get(executionId);
       if (pluginCommandId) await this.commands.cancel(pluginCommandId).catch(() => undefined);
@@ -561,6 +579,7 @@ export class AgentExecutionsService implements OnModuleInit {
       ? { agent: execution.capabilitySnapshot.agent, assignedSkills: execution.capabilitySnapshot.skills }
       : await this.requireExecutableAgent(workspace.id, execution.agentId);
     if (agent.id === CODEX_CLI_AGENT_ID) return this.advanceCodexCli(workspace.id, execution);
+    if (agent.runtime && agent.runtime.kind !== 'native') return this.advanceRuntime(request, workspaceSlug, workspace.id, execution);
     const assignedSkills = capturedSkills;
     const clarificationPass = agent.id === CHAT_AGENT_ID && clarificationAllowed;
     const protectedPlatformSkill = agent.id === CHAT_AGENT_ID ? assignedSkills.find((skill) => isProtectedPlatformSkillId(workspace.id, skill.id)) : undefined;
@@ -1261,7 +1280,19 @@ export class AgentExecutionsService implements OnModuleInit {
   }
 
   private captureCapabilities(transaction: AcceptanceTransaction, workspaceId: string, agentId: string) {
-    if (agentId !== CHAT_AGENT_ID) return null;
+    if (agentId !== CHAT_AGENT_ID) {
+      const agent = transaction.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).get();
+      if (!agent || agent.runtime.kind === 'native') return null;
+      const selected = transaction.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId))).all();
+      if (selected.some((skill) => skill.validation !== 'valid')) throw new ConflictException('An assigned Skill is invalid.');
+      const servers = transaction.select({ id: mcpServers.id, name: mcpServers.name, endpoint: mcpServers.endpoint, authSecret: mcpServers.authSecret, allowedTools: mcpServers.allowedToolNames }).from(agentMcpServers).innerJoin(mcpServers, eq(agentMcpServers.mcpServerId, mcpServers.id)).where(and(eq(agentMcpServers.agentId, agentId), eq(mcpServers.workspaceId, workspaceId))).all();
+      return {
+        revision: 1,
+        agent: { id: agent.id, providerId: agent.providerId, model: agent.model, systemPrompt: agent.systemPrompt, runtime: agent.runtime },
+        skills: selected.map((skill) => ({ id: skill.id, name: skill.name, instructions: skill.instructions, files: transaction.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skill.id)).all() })),
+        mcpServers: servers,
+      };
+    }
     const [agent] = transaction.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).limit(1).all();
     const [configuration] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspaceId)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
     if (!agent || !configuration) throw new ConflictException('Chat configuration is unavailable.');
@@ -1300,12 +1331,89 @@ export class AgentExecutionsService implements OnModuleInit {
     if (!agent) throw new NotFoundException('Agent not found');
     if (agent.kind !== 'custom' && agent.id !== CHAT_AGENT_ID && agent.id !== CODEX_CLI_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
     if (agent.id === CODEX_CLI_AGENT_ID && !(await this.plugins.get(CODEX_CLI_PLUGIN_ID)).enabled) throw new ConflictException('Configure an available Codex CLI command before running this plugin.');
-    if (agent.id !== CODEX_CLI_AGENT_ID && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
+    if (agent.id !== CODEX_CLI_AGENT_ID && agent.runtime.kind === 'native' && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
     const rows = await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation, validationReason: skills.validationReason }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId)));
     const invalidSkill = rows.find((skill) => skill.validation !== 'valid');
     if (invalidSkill) throw new ConflictException(invalidSkill.validationReason ?? `Assigned Skill ${invalidSkill.name} is invalid.`);
     const files = rows.length === 0 ? [] : await this.db.select().from(skillFiles).where(inArray(skillFiles.skillId, rows.map((skill) => skill.id)));
     return { agent, assignedSkills: agent.id === CODEX_CLI_AGENT_ID ? [] : rows.map((skill) => ({ id: skill.id, name: skill.name, instructions: skill.instructions, files: files.filter((file) => file.skillId === skill.id).map(({ path, content }) => ({ path, content })) })) };
+  }
+
+  async steerRuntimeSession(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest): Promise<{ delivered: boolean }> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    const execution = await this.loadExecution(workspace.id, agentId, executionId);
+    if (execution.status !== 'running') throw new ConflictException('Only a running Agent turn accepts steering.');
+    const text = normalizeUserMessage(input?.message);
+    const delivered = await this.agentRuntime.steer(workspace.id, executionId, text);
+    if (delivered) {
+      // Delivery can race the final result, so append to the current conversation value atomically.
+      this.db.transaction((transaction) => {
+        const current = transaction.select().from(agentExecutions).where(eq(agentExecutions.id, executionId)).get()!;
+        transaction.update(agentExecutions).set({ displayMessages: [...current.displayMessages, { id: `msg_${randomUUID()}`, role: 'user', content: text, createdAt: new Date().toISOString() }], updatedAt: new Date() }).where(eq(agentExecutions.id, executionId)).run();
+      });
+      await this.publishSnapshotForExecution(workspace.id, executionId);
+    }
+    return { delivered };
+  }
+
+  async closeRuntimeSession(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<void> {
+    const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
+    await this.loadExecution(workspace.id, agentId, executionId);
+    await this.agentRuntime.closeSession(workspace.id, executionId);
+  }
+
+  private async advanceRuntime(request: Request, workspaceSlug: string, workspaceId: string, execution: typeof agentExecutions.$inferSelect): Promise<AgentExecutionView> {
+    const snapshot = execution.capabilitySnapshot;
+    if (!snapshot?.agent.runtime || snapshot.agent.runtime.kind === 'native') throw new ConflictException('Agent runtime snapshot is unavailable.');
+    const configuration = await validateAgentRuntime(snapshot.agent.runtime);
+    if (configuration.kind === 'native') throw new ConflictException('A native Agent cannot enter an external runtime.');
+    const existing = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, execution.id), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
+    let model = existing ? existing.launch.model : snapshot.agent.model || null;
+    if (!existing && snapshot.agent.providerId) {
+      const runtime = await this.resources.providerRuntime(request, workspaceSlug, snapshot.agent.providerId, snapshot.agent.model);
+      model = `${runtime.provider.gatewayProviderName}/${runtime.model}`;
+    }
+    const input = [...execution.modelMessages].reverse().find((message) => message.role === 'user');
+    if (!input || input.role !== 'user') throw new ConflictException('An Agent runtime turn requires user input.');
+    const controller = new AbortController();
+    this.activeModelRequests.set(execution.id, controller);
+    const messageId = `msg_${randomUUID()}`;
+    try {
+      // Recheck after async setup: cancellation may already have settled the conversation.
+      const ready = await this.loadExecution(workspaceId, execution.agentId, execution.id);
+      if (ready.status !== 'running') return this.toView(ready);
+      const output = await this.agentRuntime.executeTurn({
+        sessionId: execution.id, runtime: configuration.kind, approvalPolicy: configuration.approvalPolicy, workspaceId, model,
+        projectDirectory: configuration.projectDirectory, systemPrompt: snapshot.agent.systemPrompt,
+        input: input.content, skills: snapshot.skills,
+        mcpServers: await this.executionMcpRuntimes(request, workspaceSlug, execution),
+        signal: controller.signal, correlation: { surface: 'agent' },
+        onTextDelta: (delta) => this.persistEvent(execution.id, { kind: 'message_delta', messageId, delta }),
+        onInteraction: async (id, question) => {
+          controller.signal.throwIfAborted();
+          const updated = this.db.update(agentExecutions).set({ status: 'waiting_for_input', pendingQuestion: { id, runtimeInteractionId: id, question, options: [], createdAt: new Date().toISOString() }, updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running'))).run();
+          if (!updated.changes) throw new ConflictException('The Agent turn is no longer running.');
+          await this.publishSnapshotForExecution(workspaceId, execution.id);
+        },
+      });
+      this.db.transaction((transaction) => {
+        const current = transaction.select().from(agentExecutions).where(eq(agentExecutions.id, execution.id)).get()!;
+        transaction.update(agentExecutions).set({ status: 'completed', pendingQuestion: null, error: null, errorCode: null,
+          modelMessages: [...current.modelMessages, { role: 'assistant', content: [{ type: 'text', text: output }] }],
+          displayMessages: [...current.displayMessages, { id: messageId, role: 'assistant', content: output, createdAt: new Date().toISOString() }], updatedAt: new Date(),
+        }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running'))).run();
+      });
+      await this.publishSnapshotForExecution(workspaceId, execution.id);
+      return this.toView(await this.loadExecution(workspaceId, execution.agentId, execution.id));
+    } catch (error) {
+      const failure = executionFailure(error);
+      const message = error instanceof Error ? error.message : failure.message;
+      this.db.update(agentExecutions).set({ status: 'failed', errorCode: failure.code, error: `${message} Inspect prior effects and send a new message to continue; this turn was not replayed.`, pendingQuestion: null, updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).run();
+      await this.publishSnapshotForExecution(workspaceId, execution.id);
+      throw error;
+    } finally {
+      this.activeModelRequests.delete(execution.id);
+    }
   }
 
   private async advanceCodexCli(workspaceId: string, execution: typeof agentExecutions.$inferSelect): Promise<AgentExecutionView> {

@@ -37,8 +37,11 @@ export type ProjectExecutorMcpServer = {
 export type ProjectExecutorSteerPort = { deliver?: (text: string) => Promise<boolean> };
 
 export type ProjectExecutorRequest = {
-  owner: 'chat' | 'coder';
+  owner: 'chat' | 'coder' | 'agent';
   workspaceId: string;
+  // Present only for durable WorkLite Agent sessions. Resource paths remain stable across turns.
+  runtimeSession?: { resumeId?: string; onSession: (id: string) => Promise<void> };
+  resourceDirectory?: string;
   launch: StoredProjectExecutorLaunch;
   // Public Gateway model id; null keeps the executor's own configured default.
   model: string | null;
@@ -60,16 +63,18 @@ export type ProjectExecutorRequest = {
   onTextDelta?: (delta: string) => void | Promise<void>;
   onEvent?: (activity: ProjectExecutorActivity) => void | Promise<void>;
   /**
-   * Live-session question answering, used only by Claude's AskUserQuestion. When supplied (Chat
+   * Live-session question answering for Claude AskUserQuestion and Codex user-input requests. When supplied (Chat
    * project tasks), a question keeps the SDK session alive: the executor calls this with the
    * asked question text and awaits the task owner's answer (through its own state machine going
    * to waiting_for_input), then feeds that answer straight back into the same session. Resolving
    * with `undefined` means the task was cancelled while waiting. Chat project tasks and Coder
    * task attempts both supply it. When omitted, the executor instead ends the turn immediately with the same
-   * `{"status":"waiting_for_input","pendingInput":{"question":...}}` text result Codex produces,
+   * `{"status":"waiting_for_input","pendingInput":{"question":...}}` text result,
    * and a new attempt re-runs the whole task with the answer appended to its input.
    */
   onQuestion?: (question: string) => Promise<string | undefined>;
+  approvalPolicy?: 'auto' | 'ask';
+  onApproval?: (description: string) => Promise<boolean>;
 };
 
 export type PreparedProjectExecution = {
@@ -125,4 +130,16 @@ export function requireGatewayUrl(value: unknown, label: string): string {
     throw new BadRequestException(`${label}不属于当前 WorkLite Gateway。`);
   }
   return url.toString();
+}
+
+export type AgentRuntimeCapabilities = {
+  resume: boolean;
+  steer: boolean;
+  liveQuestions: boolean;
+  approvals: boolean;
+};
+
+export interface AgentRuntimeAdapter {
+  readonly capabilities: AgentRuntimeCapabilities;
+  execute(request: ProjectExecutorRequest, prepared: PreparedProjectExecution): Promise<string>;
 }

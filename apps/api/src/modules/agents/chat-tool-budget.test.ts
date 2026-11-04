@@ -50,7 +50,7 @@ async function setup(priorToolCalls: number) {
   const hostNotifications = { notify: () => {} } as unknown as HostNotificationsService;
   const mcpRuntime = { discover: async () => [] };
   const unused = {} as never;
-  const service = new AgentExecutionsService(db, workspaces as never, resources as never, unused, mcpRuntime as never, unused, unused, unused, unused, projectTasks, attachments as never, unused, hostNotifications);
+  const service = new AgentExecutionsService(db, workspaces as never, resources as never, unused, mcpRuntime as never, unused, unused, unused, unused, projectTasks, attachments as never, unused, hostNotifications, unused);
   return { db, service };
 }
 

@@ -122,12 +122,18 @@ export const wechatEvents = sqliteTable('wechat_events', {
   createdAt: timestamp('created_at'),
 }, (table) => [index('wechat_events_chat_idx').on(table.chatId), index('wechat_events_chat_created_idx').on(table.chatId, table.createdAt), index('wechat_events_chat_event_idx').on(table.chatId, table.id)]);
 
+export type StoredAgentRuntimeConfiguration =
+  | { kind: 'native' }
+  | { kind: 'claude' | 'codex'; projectDirectory: string; approvalPolicy?: 'auto' | 'ask' };
+
 export const agents = sqliteTable('agents', {
+  runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
   systemPrompt: text('system_prompt').notNull().default(''), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 });
 
 export const agentVersions = sqliteTable('agent_versions', {
+  runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'restrict' }), version: integer('version').notNull(), name: text('name').notNull(), responsibility: text('responsibility').notNull(), systemPrompt: text('system_prompt').notNull(), providerId: text('provider_id'), model: text('model').notNull(), skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), createdAt: timestamp('created_at'),
 }, (table) => [unique().on(table.agentId, table.version)]);
 
@@ -426,6 +432,7 @@ export type StoredAgentPlanStep = {
 };
 
 export type StoredAgentPendingQuestion = {
+  runtimeInteractionId?: string;
   action?: 'new_conversation' | 'confirm_execution';
   id: string;
   question: string;
@@ -447,7 +454,7 @@ export type StoredProjectExecutor = 'codex' | 'claude';
 
 export type StoredChatCapabilities = {
   revision: number;
-  agent: { id: string; providerId: string | null; model: string; systemPrompt: string };
+  agent: { id: string; providerId: string | null; model: string; systemPrompt: string; runtime?: StoredAgentRuntimeConfiguration };
   skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
   mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
 };
@@ -1037,3 +1044,45 @@ export type AgentTeamOperation = typeof coderOperations.$inferSelect;
 export type Artifact = typeof artifacts.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type ChatMemory = typeof chatMemories.$inferSelect;
+
+// Business conversation ids remain independent of provider session/thread ids.
+export const agentRuntimeSessions = sqliteTable('agent_runtime_sessions', {
+  id: text('id').primaryKey().references(() => agentExecutions.id, { onDelete: 'cascade' }),
+  workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  runtime: text('runtime').$type<'claude' | 'codex'>().notNull(),
+  externalSessionId: text('external_session_id'),
+  launch: text('launch', { mode: 'json' }).$type<StoredProjectExecutorLaunch>().notNull(),
+  resourceDirectory: text('resource_directory').notNull(),
+  status: text('status').$type<'idle' | 'running' | 'interrupted' | 'closed'>().notNull().default('idle'),
+  createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+});
+
+export const agentRuntimeRuns = sqliteTable('agent_runtime_runs', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => agentRuntimeSessions.id, { onDelete: 'cascade' }),
+  status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled' | 'interrupted'>().notNull(),
+  error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+}, (table) => [index('agent_runtime_runs_session_idx').on(table.sessionId)]);
+
+export const agentRuntimeInteractions = sqliteTable('agent_runtime_interactions', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => agentRuntimeRuns.id, { onDelete: 'cascade' }),
+  question: text('question').notNull(),
+  kind: text('kind').$type<'question' | 'approval'>().notNull().default('question'),
+  status: text('status').$type<'pending' | 'answered' | 'cancelled' | 'interrupted'>().notNull(),
+  answer: text('answer'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
+});
+
+export type StoredAgentRuntimeEvent =
+  | { kind: 'text_delta'; delta: string }
+  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string }
+  | { kind: 'question'; interactionId: string }
+  | { kind: 'settled'; status: string };
+
+export const agentRuntimeEvents = sqliteTable('agent_runtime_events', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => agentRuntimeRuns.id, { onDelete: 'cascade' }),
+  sequence: integer('sequence').notNull(),
+  data: text('data', { mode: 'json' }).$type<StoredAgentRuntimeEvent>().notNull(),
+  createdAt: timestamp('created_at'),
+}, (table) => [unique().on(table.runId, table.sequence)]);

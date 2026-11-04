@@ -7,7 +7,7 @@ import { CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service'
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeService } from './claude-code.service';
 import { CodexAppServerService } from './codex-app-server.service';
-import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
+import { PROJECT_EXECUTOR_PROTOCOLS, isGatewayPublicModel, type AgentRuntimeCapabilities, type PreparedProjectExecution, type ProjectExecutorRequest, type ProjectExecutorSkill } from './project-executor.types';
 
 // Chat project tasks and the executor developer role share this boundary. Executors run natively in the project
 // directory; Codex App Server and Claude Code receive the same prepared prompt plus selected resources.
@@ -42,15 +42,20 @@ export class ProjectExecutorService {
     }
   }
 
+  capabilities(executor: StoredProjectExecutor): AgentRuntimeCapabilities {
+    return (executor === 'codex' ? this.codex : this.claude).capabilities;
+  }
+
   async execute(request: ProjectExecutorRequest): Promise<string> {
-    const directory = await mkdtemp(join(tmpdir(), `worklite-executor-${request.owner}-`));
+    const directory = request.resourceDirectory ?? await mkdtemp(join(tmpdir(), `worklite-executor-${request.owner}-`));
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     try {
       const prepared = await prepare(directory, request);
       return request.launch.executor === 'codex'
         ? await this.codex.execute(request, prepared)
         : await this.claude.execute(request, prepared);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      if (!request.resourceDirectory) await rm(directory, { recursive: true, force: true });
     }
   }
 }

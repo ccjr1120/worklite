@@ -9,6 +9,8 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { WorkspaceService } from '../teams/teams.service';
 
+import { validateAgentRuntime } from './agent-runtime.configuration';
+
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
 const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
@@ -71,13 +73,14 @@ export class AgentsService {
     const systemPrompt = input.systemPrompt?.trim() ?? '';
     const providerId = input.providerId ?? null;
     const model = input.model?.trim() ?? '';
-    await this.validateDraftModel(team.id, providerId, model);
+    const runtime = await validateAgentRuntime(input.runtime);
+    if (runtime.kind === 'native' || providerId) await this.validateDraftModel(team.id, providerId, model);
     const validatedAssignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds);
     const skillIds = validatedAssignments.skillIds ?? [];
     const mcpServerIds = validatedAssignments.mcpServerIds ?? [];
     const id = `agt_${randomUUID()}`;
     await this.db.transaction((transaction) => {
-      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model }).returning({ id: agents.id }).all();
+      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, runtime }).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent could not be created');
       if (skillIds.length > 0) transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId }))).run();
       if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId }))).run();
@@ -98,7 +101,7 @@ export class AgentsService {
     await this.resources.reconcileWorkspaceSkills(team.id);
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
-    if (!agent.providerId || !agent.model) throw new BadRequestException('Configure a model provider and model before publishing an Agent version.');
+    if (agent.runtime.kind === 'native' && (!agent.providerId || !agent.model)) throw new BadRequestException('Configure a model provider and model before publishing an Agent version.');
     const assignments = await Promise.all([
       this.db.select({ id: agentSkills.skillId }).from(agentSkills).where(eq(agentSkills.agentId, agentId)),
       this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)),
@@ -113,6 +116,7 @@ export class AgentsService {
         name: agent.name,
         responsibility: agent.responsibility,
         systemPrompt: agent.systemPrompt,
+        runtime: agent.runtime,
         providerId: agent.providerId,
         model: agent.model,
         skillIds: assignments[0].map(({ id }) => id),
@@ -183,12 +187,14 @@ export class AgentsService {
     if (!name) throw new BadRequestException('Agent name is required.');
     const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
     const model = input.model === undefined ? existing.model : input.model.trim();
-    await this.validateDraftModel(team.id, nextProviderId, model);
+    const runtime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
+    if (runtime.kind === 'native' || nextProviderId) await this.validateDraftModel(team.id, nextProviderId, model);
     const assignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds, true);
 
     await this.db.transaction((transaction) => {
       const [row] = transaction.update(agents).set({
         name,
+        runtime,
         ...(input.responsibility === undefined ? {} : { responsibility: input.responsibility.trim() }),
         ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt.trim() }),
         providerId: nextProviderId ?? null,
@@ -306,6 +312,7 @@ export class AgentsService {
       id: row.id,
       workspaceSlug,
       kind: row.kind,
+      runtime: row.runtime,
       name: row.name,
       responsibility: row.responsibility,
       systemPrompt: row.systemPrompt,
@@ -335,6 +342,7 @@ function toAgentVersionView(row: typeof agentVersions.$inferSelect): AgentVersio
     id: row.id,
     agentId: row.agentId,
     version: row.version,
+    runtime: row.runtime,
     name: row.name,
     responsibility: row.responsibility,
     systemPrompt: row.systemPrompt,

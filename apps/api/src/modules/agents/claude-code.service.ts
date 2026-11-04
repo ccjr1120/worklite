@@ -6,7 +6,7 @@ import { query, type CanUseTool, type McpServerConfig, type Options, type Permis
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
-import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
+import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type AgentRuntimeAdapter, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type ClaudeLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'claude' }>;
 
@@ -18,7 +18,8 @@ export class ClaudeCodeError extends Error {}
 // owning task state machine and keeping the SDK session alive while it is answered, and converts
 // SDK failures, error results and abnormal termination into readable task failures.
 @Injectable()
-export class ClaudeCodeService {
+export class ClaudeCodeService implements AgentRuntimeAdapter {
+  readonly capabilities = { resume: true, steer: false, liveQuestions: true, approvals: true } as const;
   constructor(private readonly mcp: McpClientService) {}
 
   async captureLaunch(model: string | null): Promise<ClaudeLaunch> {
@@ -56,7 +57,8 @@ export class ClaudeCodeService {
         systemPrompt: { type: 'preset', preset: 'claude_code', append: prepared.systemPrompt },
         ...(model ? { model } : {}),
         includePartialMessages: true,
-        persistSession: request.owner === 'coder',
+        persistSession: Boolean(request.runtimeSession) || request.owner === 'coder',
+        ...(request.runtimeSession?.resumeId ? { resume: request.runtimeSession.resumeId } : {}),
         // 'user' resolves inside WorkLite's own CLAUDE_CONFIG_DIR (see `env`), so the operator's
         // ~/.claude settings, plugins and login never apply. 'project' is required for CLAUDE.md
         // discovery in the task's working directory (confirmed live: omitting it silently drops
@@ -65,8 +67,8 @@ export class ClaudeCodeService {
         settingSources: ['user', 'project', 'local'],
         settings: { env: await this.gatewaySettingsEnv(model, launch, request) },
         env: await isolatedEnvironment(model, launch),
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
+        permissionMode: request.approvalPolicy === 'ask' ? 'default' : 'bypassPermissions',
+        allowDangerouslySkipPermissions: request.approvalPolicy !== 'ask',
         canUseTool: session.canUseTool,
         ...(mcpServers.config ? { mcpServers: mcpServers.config } : {}),
         ...(mcpServers.disallowedTools.length ? { disallowedTools: mcpServers.disallowedTools } : {}),
@@ -228,7 +230,14 @@ class ClaudeCodeSession {
 
   readonly canUseTool: CanUseTool = async (toolName, input, options) => {
     if (this.failed) return { behavior: 'deny', message: 'The Claude Code session has ended.' };
-    if (toolName !== 'AskUserQuestion') return { behavior: 'allow', updatedInput: input };
+    if (toolName !== 'AskUserQuestion') {
+      if (this.request.approvalPolicy === 'ask') {
+        const allowed = await this.request.onApproval?.(`Claude requests permission to use ${toolName}.\n${JSON.stringify(input, null, 2)}`);
+        this.request.signal.throwIfAborted();
+        return allowed ? { behavior: 'allow', updatedInput: input } : { behavior: 'deny', message: 'The user declined this tool request.' };
+      }
+      return { behavior: 'allow', updatedInput: input };
+    }
     const questions = Array.isArray((input as { questions?: unknown }).questions)
       ? (input as { questions: Array<{ question?: unknown }> }).questions
       : [];
@@ -324,6 +333,7 @@ class ClaudeCodeSession {
 
   private async receive(message: SDKMessage): Promise<void> {
     if (message.type === 'system' && message.subtype === 'init') {
+      await this.request.runtimeSession?.onSession(message.session_id);
       this.queueActivity('claude.session_started', { sessionId: message.session_id });
       return;
     }

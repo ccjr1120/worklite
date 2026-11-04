@@ -14,7 +14,7 @@ describe('progress reports when the Gateway is unavailable', () => {
       const id = 'aex_gateway_fallback';
       db.insert(agentExecutions).values({ id, workspaceId: 'workspace_personal', agentId: 'agt_system_helper_chat', status: 'running', modelMessages: [{ role: 'user', content: 'progress' }], capabilitySnapshot: { agent: { id: 'agt_system_helper_chat', providerId: 'provider', model: 'model', systemPrompt: 'Chat' }, skills: [] } as never }).run();
       const unused = {} as never;
-      const service = new AgentExecutionsService(db, { getWorkspace: async () => ({ id: 'workspace_personal' }) } as never, { providerRuntime: async () => { throw new ServiceUnavailableException('Portkey Gateway is unavailable.'); } } as never, unused, { discover: async () => [] } as never, unused, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never);
+      const service = new AgentExecutionsService(db, { getWorkspace: async () => ({ id: 'workspace_personal' }) } as never, { providerRuntime: async () => { throw new ServiceUnavailableException('Portkey Gateway is unavailable.'); } } as never, unused, { discover: async () => [] } as never, unused, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never, unused);
       const report = { items: [{ kind: 'coder' as const, id: 'run_1', title: 'Coding task', status: 'running' }] };
       await (service as unknown as { advance(request: unknown, slug: string, id: string, report: ChatProgressReport): Promise<unknown> }).advance({}, 'personal', id, report);
       const row = db.select().from(agentExecutions).where(eq(agentExecutions.id, id)).get()!;

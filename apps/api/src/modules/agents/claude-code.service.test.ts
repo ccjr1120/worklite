@@ -346,3 +346,14 @@ describe('ClaudeCodeService', () => {
     }));
   });
 });
+
+describe('Claude durable runtime sessions', () => {
+  it('persists and resumes a session through SDK options and captures the native id', async () => {
+    fakeQuery.impl = () => new FakeQuery([systemInit('saved-session'), resultSuccess('continued')]);
+    const onSession = vi.fn(async (_id: string) => {});
+    const { request, prepared } = buildRequest({ owner: 'agent', runtimeSession: { resumeId: 'saved-session', onSession } });
+    await expect(service().execute(request, prepared)).resolves.toBe('continued');
+    expect(captured.lastOptions).toMatchObject({ persistSession: true, resume: 'saved-session' });
+    expect(onSession).toHaveBeenCalledWith('saved-session');
+  });
+});

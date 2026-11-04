@@ -37,7 +37,7 @@ WorkLite Gateway / MCP servers / 项目文件
 5. 使用 SDK 的本地 `plugins` 配置加载任务选定的 Skill 包。项目和用户的 Claude 配置来源应显式指定为 `user`、`project`、`local`，使运行环境可预测；项目指令、用户配置与任务资源的合并顺序在实施时固定并验证。
 6. Gateway 模型通过 SDK 的 `settings` 设置 `ANTHROPIC_BASE_URL` 和认证值，通过 `env` 注入请求归属头。传入 `env` 时保留所需的继承环境。继续校验所选 Gateway 模型支持 `anthropic/messages`。
 7. 显式设置 `permissionMode: 'bypassPermissions'` 和 `allowDangerouslySkipPermissions: true`，与当前直接执行授权一致；`canUseTool` 专门处理到达应用的提问或权限请求。明确的拒绝规则和选定 MCP 工具限制仍须生效。
-8. 设置 `persistSession: false`。一次任务执行对应一个 SDK session；WorkLite 数据库存储任务状态和必要活动，不依赖 Claude 本地会话文件恢复任务。
+8. Chat 项目任务设置 `persistSession: false`；Coder 任务保留原生会话文件供历史查询，但新任务尝试不自动恢复旧会话。普通 Agent 通过下述运行时中间层显式持久化和恢复会话。
 
 ## 生命周期与用户提问
 
@@ -74,6 +74,44 @@ SDK session 是进程内状态，API 重启后不能继续等待原回调。启�
 在真实 SDK 和测试 Gateway 环境中完成端到端验证：普通任务、工具调用、流式输出、提问后继续、运行中取消、Gateway 模型、选定 MCP 与 Skill，以及 API 重启。验证过程中确认没有自动重放，任务记录和实际执行结果一致。部署构建还需验证目标系统的 SDK binary 可被解析和启动。
 
 完成标准：Claude 任务完全通过 Agent SDK 公开接口执行；任务问答、取消、结果和历史记录正常；Claude 不再要求用户配置或安装独立的 `claude` 命令；平台不再自行实现 Claude 的 stdio 控制协议。
+
+## 通用 Agent 运行时
+
+`AgentRuntimeService` 管理普通 Agent 的长期会话、每轮执行、问题和审批交互；`ProjectExecutorService` 继续负责资源准备和适配器分发。Claude SDK 与 Codex app-server 共享 `AgentRuntimeAdapter` 接口，并分别声明恢复会话、执行中追加指令、原生提问和审批能力。原有 Chat 和 Coder 入口继续使用项目执行边界。
+
+Agent 的 `runtime` 配置独立于 `providerId` 和 `model`。省略 `runtime` 时使用 `{ "kind": "native" }`，保留 WorkLite 原有工具循环。使用引擎内置工具时，可以通过 `POST /agents` 创建普通 Agent，或通过 `PATCH /agents/:agentId` 设置：
+
+```json
+{
+  "runtime": {
+    "kind": "codex",
+    "projectDirectory": "/absolute/existing/project",
+    "approvalPolicy": "ask"
+  }
+}
+```
+
+`kind` 也可以是 `claude`。目录必须存在且为绝对路径，保存时解析实际路径。`approvalPolicy` 为 `ask` 时，原生权限请求转交用户；省略或设置 `auto` 时沿用现有执行器直接执行的权限配置。两个引擎的权限与沙箱语义分别由适配器映射，不承诺相同的工具集或隔离方式。Claude 继续使用 WorkLite 自己的配置目录。
+
+保留 `providerId` 时，所选模型通过 WorkLite Gateway，协议必须兼容相应引擎。设置 `providerId: null` 时，`model` 可以使用引擎原生模型名，空字符串使用其配置默认值。选定的 Skills 和 MCP 资源由共同的资源准备层交给运行时，无需在 WorkLite 重建引擎内置工具。
+
+普通 Agent 沿用以下接口；浏览器代理路径额外带 `/api` 前缀：
+
+- `POST /agents/:agentId/executions`：以 `{ "message": "..." }` 创建会话并执行首轮任务。
+- `POST /agents/:agentId/executions/:executionId/messages`：发送下一轮消息。
+- `GET /agents/:agentId/executions/:executionId/events`：订阅现有 SSE 消息和状态。
+- `POST /agents/:agentId/executions/:executionId/answers`：使用现有 `questionId` 与 `answer` 字段回答问题或审批；审批明确回答 `approve` / `同意` 才允许请求，其他回答视为拒绝。
+- `POST /agents/:agentId/executions/:executionId/cancel`：取消当前执行，包括等待中的交互，并等待运行时结束。
+- `POST /agents/:agentId/executions/:executionId/steer`：向执行中的 Codex 发送 `{ "message": "..." }`，返回 `{ "delivered": true | false }`。未送达时不自动排队；Claude 返回未送达。
+- `DELETE /agents/:agentId/executions/:executionId/session`：在运行时停止后关闭会话并清理 WorkLite 资源目录，后续工作需要新建会话。引擎原生历史仍保留。
+
+每个会话固定 Agent 指令、运行时、目录、模型和选定资源；草稿修改只影响新会话。后续执行传入原生 session/thread ID 和新增用户消息，不重发整段业务历史。资源目录默认为 `~/.worklite/agent-sessions`，可以通过 `WORKLITE_AGENT_RUNTIME_DIR` 修改；同一会话的资源路径跨轮保持稳定。
+
+`agent_runtime_sessions`、`agent_runtime_runs`、`agent_runtime_interactions` 和 `agent_runtime_events` 分别保存映射、执行状态、交互和必要事件。活动归档只保留阶段与条目标识，不保存原始 SDK 消息或完整工具输入输出。产品 UI 使用既有消息、问题和状态，不新增执行卡片字段。
+
+服务重启将丢失的运行和交互标记为中断，并将业务执行标记为失败；不会自动重放。用户检查已有操作后，可以发送新消息继续保存的原生会话。普通引擎 Agent 的失败轮次拒绝 `/retry`，避免把重试当作恢复。丢失资源目录、关闭会话或后端返回不同会话 ID 时，继续操作会明确失败。
+
+新增验证覆盖数据库迁移后的默认配置、会话连续性、配置快照、实时问答与取消、审批拒绝、原生协议恢复、关闭资源和重启中断。SDK 与 app-server 边界使用模拟消息和 JSON-RPC 对端，真实账号的模型执行仍需要运行环境联调。
 
 ## 参考
 
