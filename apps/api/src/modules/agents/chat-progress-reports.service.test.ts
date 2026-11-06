@@ -128,6 +128,7 @@ describe('ChatProgressReportsService', () => {
     const { db, tick, reportActiveWorkProgress } = setup();
     db.$client.prepare('INSERT INTO agents(id) VALUES (?)').run('article');
     db.$client.prepare('INSERT INTO agent_executions(id, workspace_id, agent_id, status) VALUES (?, ?, ?, ?)').run('background', WORKSPACE_ID, 'article', 'running');
+    db.$client.prepare('UPDATE agent_executions SET display_messages = ? WHERE id = ?').run(JSON.stringify([{ id: 'request', role: 'user', content: '撰写趋势文章', createdAt: new Date().toISOString() }]), 'background');
     db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('dispatch', WORKSPACE_ID, 'chat_agent.dispatched', 'background', JSON.stringify({ conversationId: EXECUTION_ID, agentName: 'wechat-article', invocationId: 'air_article' }));
     db.$client.prepare('INSERT INTO audit_logs(id, workspace_id, action, resource, metadata) VALUES (?, ?, ?, ?, ?)').run('child', WORKSPACE_ID, 'agent.invocation', 'background', JSON.stringify({ agentName: '调研', parentRunId: 'air_article', status: 'running' }));
     await tick();
@@ -135,7 +136,7 @@ describe('ChatProgressReportsService', () => {
     expect(reportActiveWorkProgress.mock.calls[0]?.[1]).toBe(EXECUTION_ID);
     expect(reportActiveWorkProgress.mock.calls[0]?.[2]).toContain('调研：执行中');
     const report = (reportActiveWorkProgress.mock.calls[0] as unknown as unknown[])[3];
-    expect(report).toMatchObject({ items: [{ kind: 'agent', id: 'background', title: 'wechat-article', agentId: 'article', runId: 'air_article' }] });
+    expect(report).toMatchObject({ items: [{ kind: 'agent', id: 'background', title: 'wechat-article', agentId: 'article', runId: 'air_article', task: '撰写趋势文章' }] });
     await tick();
     expect(reportActiveWorkProgress).toHaveBeenCalledTimes(1);
     db.$client.prepare('UPDATE audit_logs SET metadata = ? WHERE id = ?').run(JSON.stringify({ agentName: '调研', parentRunId: 'air_article', status: 'completed' }), 'child');

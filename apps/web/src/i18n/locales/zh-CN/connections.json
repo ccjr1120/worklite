@@ -1,0 +1,46 @@
+{
+  "loading": "正在加载连接配置...",
+  "loadFailed": "无法加载连接配置。",
+  "saveFailed": "无法保存连接配置。",
+  "officialAccount": {
+    "title": "公众号会话",
+    "description": "连接此 Agent 发布文章使用的公众号。会话由工作区共享，浏览器存储状态仅加密保存在 API 主机。",
+    "login": "开始登录",
+    "disconnect": "断开连接",
+    "loginFailed": "无法开始公众号登录。",
+    "disconnectFailed": "无法断开公众号会话。",
+    "qrAlt": "微信公众号登录二维码",
+    "scan": "使用公众号管理员微信扫码。",
+    "account": "账号",
+    "lastVerified": "最近验证",
+    "never": "从未"
+  },
+  "wechat": {
+    "title": "微信连接",
+    "description": "使用微信扫码登录，在微信私聊中与 Chat 文字对话。仅扫码用户本人可以向 Chat 发送消息。",
+    "login": "扫码登录",
+    "relogin": "重新扫码登录",
+    "cancel": "取消扫码",
+    "disconnect": "断开微信连接",
+    "loginFailed": "无法开始微信扫码登录。",
+    "cancelFailed": "无法取消扫码，请重试。",
+    "disconnectFailed": "无法断开微信连接。",
+    "qrAlt": "微信登录二维码",
+    "qrFailed": "无法显示二维码，请重新扫码。",
+    "allowedUserId": "允许使用的用户 ID",
+    "allowedUserIdHint": "扫码登录时自动绑定扫码用户；仅该用户的私聊消息会被接收。",
+    "status": {
+      "disconnected": "未连接",
+      "connecting": "正在连接微信",
+      "connected": "已连接微信",
+      "error": "微信连接失败"
+    },
+    "loginStatus": {
+      "pending": "等待微信扫码",
+      "scanned": "已扫码，请在微信中确认登录",
+      "confirmed": "登录成功",
+      "expired": "二维码已过期，请重新扫码。",
+      "error": "扫码登录失败，请重试。"
+    }
+  }
+}

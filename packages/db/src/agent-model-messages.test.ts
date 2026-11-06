@@ -10,6 +10,19 @@ const toolResult = (toolCallId: string, value = 'result'): StoredAgentToolResult
 });
 
 describe('agent model message helpers', () => {
+  it('removes duplicate generated evidence snapshots and preserves merged user requirements', () => {
+    const evidence = '[Saved instance tool evidence] [{"callId":"old"}]\nContinue this instance with the saved results and resultRef references.';
+    const messages = [
+      { role: 'user', content: 'original' },
+      { role: 'user', content: evidence },
+      { role: 'user', content: [{ type: 'text', text: evidence }, { type: 'text', text: 'new requirement' }, { type: 'text', text: evidence }] },
+    ] as unknown as StoredAgentModelMessage[];
+    const cleaned = normalizeAgentModelMessages(messages);
+    expect(cleaned).toEqual([{ role: 'user', content: 'original' }, { role: 'user', content: [{ type: 'text', text: 'new requirement' }] }]);
+    expect(normalizeAgentModelMessages(cleaned)).toEqual(cleaned);
+    expect(messages).toHaveLength(3);
+  });
+
   it('inserts results directly after their originating assistant message', () => {
     const messages: StoredAgentModelMessage[] = [
       { role: 'user', content: 'request' },

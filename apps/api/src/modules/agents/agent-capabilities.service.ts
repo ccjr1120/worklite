@@ -1,4 +1,4 @@
-import { WechatDraftRevisionService } from '../plugins/wechat-draft-revision.service';
+import { WechatDraftRevisionService } from '../connections/wechat-draft-revision.service';
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { Lexer } from 'marked';
 import { randomUUID } from 'node:crypto';
@@ -7,22 +7,30 @@ import { agentPublications, agentToolCalls, artifacts, auditLogs, type Database,
 import { NodeTypeRegistry, resolveWorkflowNodeCapability, readWorkflowOutputPath, composeWorkflowArticle } from '@worklite/workflow-engine';
 import { AgentJsonOutputError } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
-import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import { renderCanvasSticker, validateCanvasStickerConfig } from '../runs/canvas-sticker';
 import { renderCanvasScript, validateCanvasRenderCode, validateCanvasRenderConfig } from '../runs/canvas-render';
+import { LocalProjectsService } from '../local-projects/local-projects.service';
 
 /** Individual tools selected by an Agent; this service has no graph scheduler or Workflow Run. */
 @Injectable()
 export class AgentCapabilitiesService {
   private readonly registry = new NodeTypeRegistry();
-  constructor(@Inject(DATABASE) private readonly db: Database, private readonly wechatOfficialAccount: WechatOfficialAccountService, private readonly gateway: PortkeyGatewayService, private readonly artifactStorage: ArtifactStorageService, private readonly draftRevisions?: WechatDraftRevisionService) {
+  constructor(@Inject(DATABASE) private readonly db: Database, private readonly wechatOfficialAccount: WechatOfficialAccountService, private readonly gateway: PortkeyGatewayService, private readonly artifactStorage: ArtifactStorageService, private readonly draftRevisions?: WechatDraftRevisionService, private readonly localProjects?: LocalProjectsService) {
     const capability = (id: string, version = '1') => {
       const value = resolveWorkflowNodeCapability(id, version);
       if (!value) throw new Error('Agent capability is unavailable: ' + id + '@' + version);
       return value;
     };
+    this.registry.register({
+      ...capability('worklite/local-project-search'),
+      execute: async ({ input }) => {
+        if (!this.localProjects) throw new Error('Local project search service is unavailable.');
+        return { output: await this.localProjects.searchForAgent(input) };
+      },
+    });
 this.registry.register({
       ...capability('worklite/artifact'),
       execute: async ({ input }) => ({ output: (input as { data?: unknown } | null | undefined)?.data ?? null }),
@@ -69,7 +77,7 @@ this.registry.register({
           model: config.model,
           state: inputs.state,
           questions: config.questions as Record<string, unknown>,
-          correlation: { surface: 'agent' },
+          correlation: capabilityCorrelation(request.context),
           signal: request.signal,
         });
         const state = inputs.state;
@@ -111,7 +119,7 @@ this.registry.register({
               model: (config.model as string).trim(),
               state: { item, context },
               questions,
-              correlation: { surface: 'agent' },
+              correlation: capabilityCorrelation(request.context),
               signal: request.signal,
             });
             const record = asRecord(item);
@@ -184,7 +192,7 @@ this.registry.register({
           background: config.background,
           quality: config.quality,
           size: config.size,
-          correlation: { surface: 'agent' },
+          correlation: capabilityCorrelation(request.context),
           signal: request.signal,
         });
         const key = typeof config.key === 'string' && config.key.trim() ? config.key.trim() : undefined;
@@ -272,9 +280,10 @@ async execute(workspaceId: string, executionId: string, callId: string, capabili
     }
     if (['worklite/agent', 'worklite/map', 'worklite/input', 'worklite/timer', 'worklite/branch', 'worklite/join', 'worklite/dashboard'].includes(capability.type)) throw new BadRequestException('Control-flow nodes are unavailable to Agents.');
     const nodeType = this.registry.resolve(capability.type, capability.typeVersion);
+    const ownerCall = this.db.select({ input: agentToolCalls.input }).from(agentToolCalls).where(and(eq(agentToolCalls.id, callId), eq(agentToolCalls.workspaceId, workspaceId), eq(agentToolCalls.executionId, executionId))).get();
     const result = await nodeType.execute({ input, config: capability.config, signal, context: {
       workspaceId, workflowId: '', workflowVersionId: '', workflowRunId: executionId,
-      nodeId: capability.id, nodeRunId: callId, pendingActionId: `apa_${callId}`, variables: { workflowInput: input },
+      nodeId: capability.id, nodeRunId: callId, pendingActionId: `apa_${callId}`, variables: { workflowInput: input, agentRunId: asRecord(ownerCall?.input)?.__agentRunId ?? executionId },
     } });
     if (result.status === 'waiting_for_input') return result;
     if (capability.type === 'worklite/artifact') {
@@ -539,4 +548,9 @@ function pngDimensions(content: Buffer): { width: number; height: number } {
   const height = content.readUInt32BE(20);
   if (width < 1 || height < 1) throw new Error('Artifact image format has invalid PNG dimensions.');
   return { width, height };
+}
+
+function capabilityCorrelation(context: { workflowRunId: string; variables: Readonly<Record<string, unknown>> }) {
+  return { surface: 'agent' as const, agentExecutionId: context.workflowRunId,
+    agentRunId: typeof context.variables.agentRunId === 'string' ? context.variables.agentRunId : context.workflowRunId };
 }

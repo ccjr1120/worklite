@@ -2,6 +2,30 @@ import { describe, expect, it } from 'vitest';
 import { agentInvocationDisplays } from './agent-invocation-display';
 
 describe('Chat Agent invocation mentions', () => {
+  it.each(['running', 'waiting_for_input', 'completed', 'failed', 'cancelled'] as const)('reads the actual %s background execution independently of the launch receipt', (status) => {
+    const calls = [{ id: 'dispatch', mcpToolName: 'run_agent', input: { agentId: 'agent', __agentName: 'qcoder', __backgroundExecutionId: 'background', __agentInvocationId: 'air_run' }, createdAt: new Date() }];
+    expect(agentInvocationDisplays(calls, [], [], [{ id: 'background', status, phase: 'model' }]).get('dispatch')?.status).toBe(status);
+  });
+
+  it.each(['paused', 'waiting_for_input', 'completed', 'failed', 'cancelled'] as const)('retains the recorded %s state of historical inline invocations', (status) => {
+    const calls = [{ id: 'dispatch', mcpToolName: 'run_agent', input: { agentId: 'agent', __agentInvocationId: 'air_old' }, createdAt: new Date() }];
+    const rows = [{ id: 'air_old', metadata: { agentId: 'agent', agentName: 'qcoder', status } }];
+    expect(agentInvocationDisplays(calls, rows, []).get('dispatch')?.status).toBe(status);
+  });
+
+  it.each(['failed', 'cancelled'] as const)('settles stale historical invocations when their owning execution is %s', (status) => {
+    const calls = [{ id: 'dispatch', mcpToolName: 'run_agent', input: { agentId: 'agent', __agentInvocationId: 'air_old' }, createdAt: new Date() }];
+    const rows = [{ id: 'air_old', metadata: { agentId: 'agent', agentName: 'qcoder', status: 'running' } }];
+    expect(agentInvocationDisplays(calls, rows, [], [], status).get('dispatch')?.status).toBe(status);
+  });
+
+  it('uses the background execution state instead of the completed launch tool state', () => {
+    const calls = [{ id: 'dispatch', mcpToolName: 'run_agent', input: { agentId: 'agent', task: '修复任务卡片', __agentName: 'qcoder', __backgroundExecutionId: 'background', __agentInvocationId: 'air_run' }, createdAt: new Date() }];
+    const backgrounds = [{ id: 'background', status: 'running' as const, phase: 'skill' as const }];
+    expect(agentInvocationDisplays(calls, [], [], backgrounds).get('dispatch')).toMatchObject({ task: '修复任务卡片', status: 'running', phase: 'skill' });
+    expect(agentInvocationDisplays(calls, [], [], [{ ...backgrounds[0]!, status: 'completed' }]).get('dispatch')?.status).toBe('completed');
+  });
+
   it('links a background launch to its independent run before a result is available', () => {
     const calls = [{ id: 'dispatch', mcpToolName: 'run_agent', input: { agentId: 'agent', __agentName: 'qcoder', __backgroundExecutionId: 'aex_background', __agentInvocationId: 'air_background' }, createdAt: new Date() }];
     expect(agentInvocationDisplays(calls, [], []).get('dispatch')).toEqual({ agentId: 'agent', agentName: 'qcoder', runId: 'air_background', task: '' });

@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Brain, ChevronRight, List, Plus, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
+import { Brain, ChevronRight, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentExecutionView, AgentToolCallView, ChatAttachmentView, ChatConversationView, ChatSubmissionView, DispatchChatRequest, AgentView } from '@worklite/contracts';
@@ -24,7 +24,6 @@ import { ChannelConfiguration } from './channel-configuration';
 import { TaskCard } from './task-messages';
 import { PinnedExecutionBar, PinTrackingContext, usePinTracking, type PinCandidate } from './pinned-executions';
 import { WorkspaceChrome } from '@/components/workspace/workspace-chrome';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CHAT_AGENT_ID, CHAT_TURN_NOTIFICATION_DEFAULT_SOUND } from '@worklite/contracts';
 import { AgentInvocationMessage, AssistantTurn, buildTimeline, CancelledNote, FailureNote, ProgressReportExpansionContext, QuestionNote, QueueRows, SummaryDivider, TranscriptSkeleton, UserMessage } from './transcript';
@@ -350,13 +349,20 @@ function ChatWorkspace() {
   const connectionState = mainConnectionState;
   const running = visibleExecution?.status === 'running';
   const waitingForInput = visibleExecution?.status === 'waiting_for_input';
-  // Background project tasks keep the stream open after their turn settles so progress and the
-  // automatic report turn arrive live.
+  const conversationStatus = visibleExecution?.conversationStatus ?? visibleExecution?.status;
+  // Unfinished background work keeps the stream open after its Chat turn settles.
   const activeProjectTasks = Boolean(visibleExecution?.toolCalls.some((call) => call.projectTask && (call.projectTask.status === 'running' || call.projectTask.status === 'waiting_for_input')));
-  const observingExecution = running || waitingForInput || activeProjectTasks;
+  const observingExecution = running || waitingForInput || activeProjectTasks || conversationStatus === 'running' || conversationStatus === 'waiting_for_input';
   const mentionMatch = !selectedAgent ? /(?:^|\s)@([^\s@]*)$/.exec(draft) : null;
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase() ?? '';
-  const eligibleAgents = useMemo(() => (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom'), [agentsQuery.data]);
+  const eligibleAgents = useMemo(() => {
+    const agents = (agentsQuery.data ?? []).filter((agent) => agent.kind === 'custom');
+    const children = new Set(agents.flatMap((agent) => agent.collaboration?.subAgentIds ?? []));
+    return agents.filter((agent) => !children.has(agent.id));
+  }, [agentsQuery.data]);
+  useEffect(() => {
+    if (agentsQuery.data && selectedAgent && !eligibleAgents.some((agent) => agent.id === selectedAgent.id)) setSelectedAgent(null);
+  }, [agentsQuery.data, eligibleAgents, selectedAgent]);
   const { agentId: continuationAgentId, agentRunId: continuationRunId, agentExecutionId: continuationExecutionId } = locationSearch;
   useEffect(() => {
     const agentId = continuationAgentId;
@@ -545,6 +551,7 @@ function ChatWorkspace() {
       runCommand(command);
       return;
     }
+    if (!isConfigured || (selectedConversationId && !activeId)) return;
     if (waitingForInput && visibleExecution?.pendingQuestion) {
       setBusy(true);
       setError('');
@@ -732,6 +739,10 @@ function ChatWorkspace() {
   // Escape dismisses exactly one layer per press, innermost first, so recovering from a
   // mistyped slash never also discards a chosen Workflow or collapses the conversation.
   function handleEscape(): boolean {
+    if (switcherOpen) {
+      setSwitcherOpen(false);
+      return true;
+    }
     if (commandMenuOpen || mentionMenuOpen) {
       setSlashDismissed(true);
       setMentionDismissed(true);
@@ -760,6 +771,13 @@ function ChatWorkspace() {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'ArrowLeft' && event.currentTarget.value === '' && !draft && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.repeat && !isImeComposing(event) && event.nativeEvent.keyCode !== 229) {
+      event.preventDefault();
+      setSlashDismissed(true);
+      setMentionDismissed(true);
+      setSwitcherOpen(true);
+      return;
+    }
     if (event.key === 'Escape') {
       if (handleEscape()) event.preventDefault();
       return;
@@ -860,14 +878,14 @@ function ChatWorkspace() {
     pendingPinnedReveal.current = null;
   }, [showAllTimeline, revealTrackedPin]);
 
-  // The header badge reports server execution state only. A submission the server has
+  // The header badge reports server aggregate conversation state. A submission the server has
   // not accepted yet is reported by the Send control, not as a running execution.
   const headerStatus: { key: StatusKey; label: string } | null = connectionState === 'reconnecting' ? { key: 'pending', label: t('assistant:status.reconnecting') }
-    : visibleExecution?.status === 'failed' ? { key: 'failed', label: t('assistant:status.failed') }
-      : visibleExecution?.status === 'cancelled' ? { key: 'cancelled', label: t('assistant:status.cancelled') }
-        : visibleExecution?.status === 'completed' ? { key: 'completed', label: t('assistant:status.completed') }
-          : visibleExecution?.status === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:status.waiting_for_input') }
-            : visibleExecution?.status === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
+    : conversationStatus === 'failed' ? { key: 'failed', label: t('assistant:status.failed') }
+      : conversationStatus === 'cancelled' ? { key: 'cancelled', label: t('assistant:status.cancelled') }
+        : conversationStatus === 'completed' ? { key: 'completed', label: t('assistant:status.completed') }
+          : conversationStatus === 'waiting_for_input' ? { key: 'waiting_for_input', label: t('assistant:status.waiting_for_input') }
+            : conversationStatus === 'running' ? { key: 'running', label: t('assistant:status.running') } : null;
   const canCancel = Boolean((running || waitingForInput || activeProjectTasks) && !visibleExecution?.pendingQuestion?.recovery);
   const composerAvailable = Boolean(isConfigured || canCancel);
   const composerLoading = agentQuery.isLoading || agentsQuery.isLoading;
@@ -890,12 +908,9 @@ function ChatWorkspace() {
         )}
       />
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-72 shrink-0 border-r border-border bg-surface md:flex"><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></aside>
         <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
             <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 md:px-5">
-              <Button variant="ghost" size="icon-compact" className="md:hidden" aria-label={t('assistant:history.title')} onClick={() => setSwitcherOpen(true)}><List className="size-4" /></Button>
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={selected?.title || undefined}>{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' || selected?.channel === 'wechat' ? t(currentView?.channelDelivery === 'unbound' ? `assistant:channels.${selected.channel}Unbound` : currentView?.channelDelivery === 'disconnected' ? `assistant:channels.${selected.channel}Disconnected` : `assistant:channels.${selected.channel}Bound`) : 'Web'}</p></div>
-              <Button type="button" variant="ghost" size="icon-compact" aria-label={t('assistant:history.new')} onClick={() => selectConversation(null)} className="md:hidden"><Plus className="size-4" /></Button>
               {selectedConversationId ? <Button type="button" variant="ghost" size="compact" aria-expanded={recordsOpen} onClick={() => setRecordsOpen((value) => !value)}><ScrollText className="size-4" />{t('assistant:records.title')}</Button> : null}
             </header>
             <div ref={transcriptHostRef} className="relative min-h-0 flex-1">
@@ -933,17 +948,19 @@ function ChatWorkspace() {
               </PinTrackingContext.Provider>
               {recordsOpen && selectedConversationId ? <div className="absolute inset-0 z-10 flex flex-col bg-background"><ConversationRecords conversationId={selectedConversationId} /></div> : null}
             </div>
-            {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : selectedWithoutExecution ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' || selected?.channel === 'wechat' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : composerAvailable ? (
+            {!recordsOpen && selectedWithoutExecution && !loadingConversation ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' || selected?.channel === 'wechat' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : null}
+            {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : (
               <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
+                switcherOpen={switcherOpen} onSwitcherOpenChange={setSwitcherOpen} switcher={<ConversationList selectedId={selectedConversationId} onSelect={selectConversation} />}
                 onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
                 selectedAgent={selectedAgent} onRemoveAgent={() => setSelectedAgent(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 attachments={attachments} attachmentsUploading={attachmentsUploading} attachmentError={attachmentError} onPasteImages={(files) => void uploadPastedImages(files)} onRemoveAttachment={removeAttachment}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
                 onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
-            ) : <div className="px-4 pb-4 md:px-8"><button type="button" className={cn('wl-press mx-auto flex min-h-12 w-full max-w-3xl items-center gap-2.5 rounded-xl border border-warning/30 bg-warning-subtle px-4 text-left text-[13px] font-medium text-foreground shadow-xs hover:border-warning/50', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4 text-warning" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button></div>}
+            )}
+            {!recordsOpen && !composerLoading && !composerAvailable ? <div className="px-4 pb-4 md:px-8"><button type="button" className={cn('wl-press mx-auto flex min-h-12 w-full max-w-3xl items-center gap-2.5 rounded-xl border border-warning/30 bg-warning-subtle px-4 text-left text-[13px] font-medium text-foreground shadow-xs hover:border-warning/50', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4 text-warning" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button></div> : null}
         </section>
       </div>
-      <Sheet open={switcherOpen} onOpenChange={setSwitcherOpen}><SheetContent side="left" className="flex w-80 flex-col p-0 pt-10 sm:max-w-80"><SheetHeader className="sr-only"><SheetTitle>{t('assistant:history.title')}</SheetTitle></SheetHeader><ConversationList selectedId={selectedConversationId} onSelect={selectConversation} onNew={() => selectConversation(null)} /></SheetContent></Sheet>
       <Dialog open={settingsOpen} onOpenChange={handleSettingsOpenChange}>
         <DialogContent className="flex h-[min(40rem,85vh)] w-[calc(100%-2rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="px-6 pt-6">

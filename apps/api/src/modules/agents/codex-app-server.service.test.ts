@@ -4,40 +4,13 @@ import { CodexAppServerService } from './codex-app-server.service';
 describe('CodexAppServerService.captureLaunch', () => {
   const service = new CodexAppServerService({} as never);
 
-  it('accepts a bare alias command word and keeps the configured model', async () => {
-    const launch = await service.captureLaunch(['cxo'], 'gpt-6-luna');
-    expect(launch).toEqual({ executor: 'codex', commandArguments: ['cxo'], model: 'gpt-6-luna' });
-  });
-
-  it('uses the native command and local config when no model is selected', async () => {
-    const launch = await service.captureLaunch(['cx'], null);
-    expect(launch.model).toBeNull();
-    expect(launch.commandArguments).toEqual(['codex']);
-  });
-
-  it('keeps additional fixed arguments after the command word', async () => {
-    const launch = await service.captureLaunch(['codex', '--some-flag'], 'provider/model');
-    expect(launch.commandArguments).toEqual(['codex', '--some-flag']);
-  });
-
-  it('rejects an empty command', async () => {
-    await expect(service.captureLaunch([], 'provider/model')).rejects.toThrow('A Codex command is required');
-  });
-
-  it('rejects a command word containing shell metacharacters', async () => {
-    await expect(service.captureLaunch(['codex; rm -rf /'], 'provider/model')).rejects.toThrow('without shell syntax');
-    await expect(service.captureLaunch(['codex && echo hi'], 'provider/model')).rejects.toThrow('without shell syntax');
-    await expect(service.captureLaunch(['codex`whoami`'], 'provider/model')).rejects.toThrow('without shell syntax');
-  });
-
-  it('accepts a path-like command word', async () => {
-    const launch = await service.captureLaunch(['/usr/local/bin/codex'], 'provider/model');
-    expect(launch.commandArguments).toEqual(['/usr/local/bin/codex']);
+  it.each([null, 'gpt-6-luna', 'provider/model'])('uses the built-in command for model %s without plugin configuration', async (model) => {
+    expect(await service.captureLaunch(model)).toEqual({ executor: 'codex', commandArguments: ['codex'], model });
   });
 });
 
 // A JSON-RPC peer exercises the real adapter without launching a model-backed process.
-function rpcPeer(control?: { method: string; params: Record<string, unknown> }) {
+function rpcPeer(control?: { method: string; params: Record<string, unknown> }, notifications: unknown[] = [], turnStatus = 'completed') {
   const sent: Array<{ id?: string | number; method?: string; params?: Record<string, unknown>; result?: unknown }> = [];
   let receive!: (event: { type: string; data: string }) => void;
   let complete!: (value: { status: string }) => void;
@@ -45,7 +18,7 @@ function rpcPeer(control?: { method: string; params: Record<string, unknown> }) 
   const emit = (message: unknown) => receive({ type: 'stdout', data: `${JSON.stringify(message)}\n` });
   const finish = () => {
     emit({ method: 'item/completed', params: { threadId: 'thread-1', item: { id: 'answer', type: 'agentMessage', text: 'Done' } } });
-    emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } });
+    emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: turnStatus } } });
   };
   const commands = {
     openStdioProcess: async (_args: unknown, _cwd: unknown, _env: unknown, listener: typeof receive) => {
@@ -60,6 +33,7 @@ function rpcPeer(control?: { method: string; params: Record<string, unknown> }) 
             if (message.method === 'thread/start' || message.method === 'thread/resume') emit({ id: message.id, result: { thread: { id: 'thread-1' } } });
             if (message.method === 'turn/start') {
               emit({ id: message.id, result: { turn: { id: 'turn-1' } } });
+              for (const notification of notifications) emit(notification);
               if (control) emit({ id: 'control-1', method: control.method, params: { threadId: 'thread-1', turnId: 'turn-1', ...control.params } });
               else finish();
             }
@@ -80,6 +54,46 @@ function runtimeRequest(): import('./project-executor.types').ProjectExecutorReq
 }
 
 const prepared = { directory: '/tmp/materialized', systemPrompt: 'WorkLite', mcpServers: [] };
+
+const usageUpdate = (total: Record<string, unknown>, threadId = 'thread-1') => ({
+  method: 'thread/tokenUsage/updated', params: { threadId, turnId: 'turn-1', tokenUsage: { total, last: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } } },
+});
+
+describe('Codex executor-reported token usage', () => {
+  it('reads cumulative usage with an empty model, ignores foreign threads and duplicate notifications, and keeps cache inside input', async () => {
+    const total = { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 80, cacheWriteInputTokens: 5, reasoningOutputTokens: 10 };
+    const peer = rpcPeer(undefined, [usageUpdate({ inputTokens: 30, outputTokens: 5, totalTokens: 35 }), usageUpdate(total), usageUpdate(total), usageUpdate({ totalTokens: 999 }, 'other-thread')]);
+    const activities: import('./project-executor.types').ProjectExecutorActivity[] = [];
+    await peer.service.execute({ ...runtimeRequest(), onEvent: (event) => { activities.push(event); } }, prepared);
+    const usages = activities.filter((event) => event.usage);
+    expect(usages).toHaveLength(2);
+    expect(usages.at(-1)).toMatchObject({ phase: 'codex.usage', commandExecutionId: 'command-1', threadId: 'thread-1', turnId: 'turn-1',
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: 5 } });
+    expect(peer.sent.find((message) => message.method === 'thread/start')?.params?.model).toBeUndefined();
+  });
+
+  it.each(['failed', 'interrupted'])('waits for the final usage persistence before returning a %s turn', async (status) => {
+    const peer = rpcPeer(undefined, [usageUpdate({ inputTokens: 10, outputTokens: 2 })], status);
+    const saved: unknown[] = [];
+    await expect(peer.service.execute({ ...runtimeRequest(), onEvent: async (event) => {
+      if (event.usage) { await Promise.resolve(); saved.push(event.usage); }
+    } }, prepared)).rejects.toThrow(status === 'failed' ? 'turn failed' : 'turn was interrupted');
+    expect(saved).toEqual([{ inputTokens: 10, outputTokens: 2, totalTokens: 12, cacheReadTokens: null, cacheCreationTokens: null }]);
+  });
+
+  it('preserves zero, leaves unreported counters unknown and discards invalid counts', async () => {
+    const peer = rpcPeer(undefined, [usageUpdate({ inputTokens: -1, outputTokens: '4', totalTokens: 1.5 }), usageUpdate({ inputTokens: 0, outputTokens: 0 })]);
+    const saved: unknown[] = [];
+    await peer.service.execute({ ...runtimeRequest(), onEvent: (event) => { if (event.usage) saved.push(event.usage); } }, prepared);
+    expect(saved).toEqual([{ inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: null, cacheCreationTokens: null }]);
+  });
+});
+
+it('rejects shell syntax in a historical launch before opening the app server', async () => {
+  const peer = rpcPeer();
+  await expect(peer.service.execute({ ...runtimeRequest(), model: 'provider/model', launch: { executor: 'codex', commandArguments: ['codex; echo unsafe'], model: 'provider/model' } }, prepared)).rejects.toThrow('without shell syntax');
+  expect(peer.sent).toEqual([]);
+});
 
 describe('Codex app-server durable sessions', () => {
   it('creates a persisted thread and resumes it for the next turn', async () => {

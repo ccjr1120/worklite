@@ -24,6 +24,8 @@ function attributionFilters(query: RawQuery): GatewayAttributionFilters {
   return {
     surface: surface as GatewaySurface | undefined,
     conversationId: queryText(query.conversationId),
+    agentRunId: queryText(query.agentRunId),
+    agentExecutionId: queryText(query.agentExecutionId),
     projectTaskId: queryText(query.projectTaskId),
     executor: queryText(query.executor),
     coderId: queryText(query.coderId),

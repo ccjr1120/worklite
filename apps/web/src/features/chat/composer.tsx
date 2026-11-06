@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { ArrowUp, Download, History, LoaderCircle, Play, Plus, Sparkles, Square, X } from 'lucide-react';
-import { type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatAttachmentView, AgentView } from '@worklite/contracts';
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from '@/components/ai-elements/prompt-input';
@@ -21,6 +21,9 @@ const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descri
 ];
 
 type ComposerProps = {
+  switcherOpen: boolean;
+  onSwitcherOpenChange: (open: boolean) => void;
+  switcher: ReactNode;
   draft: string;
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
@@ -57,6 +60,7 @@ type ComposerProps = {
 // and scroll-into-view have one implementation. cmdk does not own an input here:
 // filtering follows the composer text and keyboard focus never leaves the textarea.
 function Composer({
+  switcherOpen, onSwitcherOpenChange, switcher,
   draft, onDraftChange, onSubmit, onKeyDown, onCompositionStart, onCompositionEnd, onFocus,
   selectedAgent, onRemoveAgent,
   attachments, attachmentsUploading, attachmentError, onPasteImages, onRemoveAttachment,
@@ -66,7 +70,7 @@ function Composer({
   running, busy, canCancel, cancelling, submitDisabled, waitingForInput, onStop,
 }: ComposerProps) {
   const { t } = useTranslation('assistant');
-  const menuOpen = commandMenuOpen || mentionMenuOpen;
+  const menuOpen = switcherOpen || commandMenuOpen || mentionMenuOpen;
 
   // Ctrl/Cmd+V of a screenshot puts the image on the clipboard as a file. Text pasted alongside it
   // keeps the browser's own insertion, so only an image-only paste is taken over here.
@@ -80,7 +84,7 @@ function Composer({
   return (
     <PromptInput onSubmit={onSubmit} className="mx-auto max-w-3xl px-4 pb-4 pt-1 md:px-0">
       <label htmlFor="assistant-message" className="sr-only">{t('composer.label')}</label>
-      <Popover open={menuOpen} onOpenChange={(next) => { if (!next) onDismissMenus(); }}>
+      <Popover open={menuOpen} onOpenChange={(next) => { if (!next) { onSwitcherOpenChange(false); onDismissMenus(); } }}>
         <PopoverAnchor asChild>
           {/* The composer is one floating card: mention token, auto-growing text, and submit share it. */}
           <div className="flex min-w-0 flex-1 flex-wrap items-end gap-1.5 rounded-2xl border border-border bg-surface py-1.5 pl-2.5 pr-1.5 shadow-sm transition-[border-color,box-shadow] duration-[200ms] ease-[var(--ease-out)] focus-within:border-brand/60 focus-within:shadow-md focus-within:ring-[3px] focus-within:ring-ring/15">
@@ -173,13 +177,14 @@ function Composer({
         </PopoverAnchor>
         <PopoverContent
           side="top"
+          avoidCollisions={false}
           align="start"
           matchTrigger
           className="p-0"
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          onOpenAutoFocus={(event) => { if (!switcherOpen) event.preventDefault(); }}
+          onCloseAutoFocus={(event) => { event.preventDefault(); document.getElementById('assistant-message')?.focus(); }}
         >
-          <Command shouldFilter={false} value={activeValue} onValueChange={onActiveValueChange} className="bg-transparent">
+          {switcherOpen ? <div role="dialog" aria-label={t('history.title')} className="flex h-[min(24rem,50dvh)] flex-col">{switcher}</div> : <Command shouldFilter={false} value={activeValue} onValueChange={onActiveValueChange} className="bg-transparent">
             <CommandList className="max-h-64" aria-label={mentionMenuOpen ? t('mentions.menuLabel') : t('commands.menuLabel')}>
               {mentionMenuOpen ? (
                 <>
@@ -209,7 +214,7 @@ function Composer({
                 </>
               )}
             </CommandList>
-          </Command>
+          </Command>}
         </PopoverContent>
       </Popover>
     </PromptInput>

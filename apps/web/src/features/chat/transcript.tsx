@@ -210,7 +210,7 @@ function ProgressReportCard({ report, streaming }: {
 }) {
   const { t } = useTranslation('assistant');
   return <div className="my-2 space-y-2" aria-busy={streaming || undefined}>
-    {report.items.map((item) => <article key={`${item.kind}:${item.id}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
+    {report.items.map((item) => item.kind === 'agent' && item.agentId && item.runId ? <AgentTaskCard key={`${item.kind}:${item.id}`} agentId={item.agentId} runId={item.runId} agentName={item.title} task={item.task} status={item.status} progress={item.progress} /> : <article key={`${item.kind}:${item.id}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 break-words text-sm font-medium">{item.kind === 'agent' && item.agentId && item.runId ? <Link to="/agents/$agentId" params={{ agentId: item.agentId }} search={{ runId: item.runId }} className="text-brand-text hover:underline">@{item.title}</Link> : item.title}</p>
         <StatusBadge status={toStatusKey(item.status)} className="shrink-0" />
@@ -849,15 +849,40 @@ function CodexToolCallPanel({ task: inputTask }: { task: ChatProjectTaskView }) 
   );
 }
 
+function AgentTaskCard({ agentId, runId, agentName, task, status, progress }: {
+  agentId: string;
+  runId: string;
+  agentName: string;
+  task?: string;
+  status: string;
+  progress?: string;
+}) {
+  const { t } = useTranslation('assistant');
+  return (
+    <article className="min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 truncate text-sm font-medium">
+          <Link to="/agents/$agentId" params={{ agentId }} search={{ runId }} className="text-brand-text hover:underline">@{agentName}</Link>
+          {task ? <> {toSingleLine(task)}</> : null}
+        </p>
+        <StatusBadge status={toStatusKey(status)} label={status === 'running' ? t('agentTask.running') : status === 'unknown' ? t('agentTask.unknown') : undefined} className="shrink-0" />
+      </div>
+      {progress ? <p className="mt-1 whitespace-pre-line break-words text-[13px] text-muted-foreground">{progress}</p> : null}
+    </article>
+  );
+}
+
 function AgentInvocationMessage({ call }: { call: AgentToolCallView }) {
   const pins = useContext(PinTrackingContext);
+  const { t } = useTranslation('assistant');
   const invocation = call.agentInvocation;
   if (!invocation) return null;
+  const status = invocation.status ?? (call.status === 'completed' ? 'unknown' : call.status);
+  const progress = status === 'running' && invocation.phase ? t(`agentTask.phase.${invocation.phase}`) : undefined;
   return (
     <Message ref={pins?.track(call.id, 'outside')} tabIndex={-1} from="assistant" className="wl-enter outline-none">
-      <MessageContent className="min-w-0 space-y-2 rounded-lg bg-surface-subtle px-4 py-3">
-        <Link to="/agents/$agentId" params={{ agentId: invocation.agentId }} search={{ runId: invocation.runId }} className="font-medium text-brand-text hover:underline">@{invocation.agentName}</Link>
-        {invocation.task ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{invocation.task}</p> : null}
+      <MessageContent className="min-w-0 w-full">
+        <AgentTaskCard {...invocation} status={status} progress={progress} />
       </MessageContent>
     </Message>
   );

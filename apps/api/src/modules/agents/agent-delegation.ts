@@ -28,7 +28,7 @@ export const delegationOverridesSchema = {
     outputFormat: { type: 'string', enum: ['text', 'json'] },
     outputContract: { type: 'array', items: { type: 'string' }, description: 'Required JSON keys for this task; [] removes the template contract.' },
     allowEmptyOutputKeys: { type: 'array', items: { type: 'string' } },
-    limits: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['maxToolCalls', 'maxToolRounds', 'maxToolResultChars', 'maxOutputTokens'].map((key) => [key, { type: 'integer', minimum: 1, maximum: key === 'maxToolRounds' ? 100 : key === 'maxToolCalls' ? 128 : 100000 }])) },
+    limits: { type: 'object', additionalProperties: false, properties: Object.fromEntries(['maxToolCalls', 'maxToolRounds', 'maxToolResultChars', 'maxOutputTokens'].map((key) => [key, { type: 'integer', minimum: 1, maximum: key === 'maxToolRounds' ? 100 : key === 'maxToolCalls' ? 128 : key === 'maxOutputTokens' ? Number.MAX_SAFE_INTEGER : 100000 }])) },
   },
 };
 export function delegationOverrides(value: unknown): DelegationOverrides {
@@ -43,8 +43,8 @@ export function delegationOverrides(value: unknown): DelegationOverrides {
   if (input.limits !== undefined) {
     if (!input.limits || typeof input.limits !== 'object' || Array.isArray(input.limits)) throw new BadRequestException('limits must be an object.');
     for (const [key, limit] of Object.entries(input.limits)) {
-      const maximum = key === 'maxToolRounds' ? 100 : key === 'maxToolCalls' ? 128 : 100000;
-      if (!['maxToolCalls', 'maxToolRounds', 'maxToolResultChars', 'maxOutputTokens'].includes(key) || typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > maximum) throw new BadRequestException(`Invalid invocation limit: ${key}.`);
+      const maximum = key === 'maxToolRounds' ? 100 : key === 'maxToolCalls' ? 128 : key === 'maxOutputTokens' ? Number.MAX_SAFE_INTEGER : 100000;
+      if (!['maxToolCalls', 'maxToolRounds', 'maxToolResultChars', 'maxOutputTokens'].includes(key) || typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > maximum) throw new BadRequestException(`Invalid invocation limit: ${key}.`);
     }
   }
   return input as DelegationOverrides;
@@ -57,6 +57,7 @@ export class DelegationFailure extends Error {
 }
 
 export const TASK_OWNERSHIP_PROMPT = `You own the user's entire task and its final delivery. Sub-Agents are optional specialist templates used for parallelism and focused work, not mandatory stages or judges of task success.
+For follow-up questions about completed work, first answer from your saved conversation, results and tool evidence. Read referenced results with read_result when needed. Do not launch fresh investigation just to explain work already performed. If evidence is missing, ask the original sub-Agent by passing its exact runId to run_sub_agent with the focused question; this continues its saved context. If that context is unavailable, report the limitation rather than silently launching replacement work. Only investigate new or changed facts when the question requires it.
 Inspect their effective instructions and output requirements before delegation. You may replace a specialist's instructions, output contract, model or limits for one invocation using overrides; saved templates are unchanged. You may also handle the work yourself. use_sub_agent_tool lets you inspect and directly use a specialist’s assigned tools without invoking its model.
 A failed sub-Agent is an intermediate result, not a failed user task. Read its failure resultRef: reuse rawOutput, partialResult and tool evidence. Repair formatting or field names yourself using store_result, supplement only missing evidence, adjust the next invocation, or take over. Explicit user requirements always remain binding when you override template research prerequisites. Never invent missing facts or blindly repeat research. Read referenced content with read_result; a textual mention of a resultRef does not deliver its contents to another Agent, so pass actual context or a structured $result reference.
 For controllable engine-backed specialists, launch run_sub_agent with background:true, retain its exact runId, and use pause_sub_agent/resume_sub_agent/wait_sub_agent for that instance. Pause preserves the saved engine session and existing files; it does not undo external effects or freeze a process. Wait for results before claiming completion. Controls are available only while the owning execution is alive.

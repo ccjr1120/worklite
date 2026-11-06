@@ -142,7 +142,7 @@ function GatewayUsage({ from, to, groupBy, onGroupByChange, onViewRequests }: {
       <Select value={groupBy} onValueChange={(value) => onGroupByChange(value as GatewayStatsGroupBy)}>
         <SelectTrigger className="w-[220px]" aria-label={t('usage.groupBy')}><SelectValue /></SelectTrigger>
         <SelectContent>
-          {GATEWAY_STATS_GROUP_BYS.filter((option) => !['coder', 'workflow', 'team_run', 'node_run'].includes(option)).map((option) => <SelectItem key={option} value={option}>{t(`usage.groupBys.${option}` as never)}</SelectItem>)}
+          {GATEWAY_STATS_GROUP_BYS.filter((option) => !['coder', 'workflow', 'team_run', 'node_run', 'agent_run'].includes(option)).map((option) => <SelectItem key={option} value={option}>{t(`usage.groupBys.${option}` as never)}</SelectItem>)}
         </SelectContent>
       </Select>
       {groups.length === 0 ? (

@@ -13,13 +13,10 @@ export const workspaceSettings = sqliteTable('workspace_settings', {
   updatedAt: timestamp('updated_at'),
 });
 
-export const plugins = sqliteTable('plugins', {
+// External channels belong to Chat, independently of the execution runtimes.
+export const chatChannels = sqliteTable('chat_channels', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  description: text('description').notNull(),
-  command: text('command').notNull().default('codex'),
-  codexConfigPath: text('codex_config_path').notNull().default(''),
   feishuAppId: text('feishu_app_id').notNull().default(''),
   feishuAppSecret: text('feishu_app_secret'),
   feishuAllowedUserId: text('feishu_allowed_user_id').notNull().default(''),
@@ -38,7 +35,7 @@ export const plugins = sqliteTable('plugins', {
 });
 
 export const feishuRegistrations = sqliteTable('feishu_registrations', {
-  pluginId: text('plugin_id').primaryKey().references(() => plugins.id, { onDelete: 'cascade' }),
+  channelId: text('channel_id').primaryKey().references(() => chatChannels.id, { onDelete: 'cascade' }),
   id: text('id').notNull().unique(),
   status: text('status').$type<'pending' | 'completed' | 'needs_user_id' | 'denied' | 'expired' | 'error' | 'cancelled'>().notNull(),
   deviceCode: text('device_code'),
@@ -138,6 +135,13 @@ export type StoredAgentCollaboration = {
   requiredSkillIds?: string[];
   limits?: { maxToolCalls?: number; maxToolRounds?: number; maxToolResultChars?: number; maxOutputTokens?: number };
 };
+
+// Migration marker only. Agent definitions live in the filesystem; rows below are a runtime index.
+export const agentFileCatalogMigrations = sqliteTable('agent_file_catalog_migrations', {
+  workspaceId: text('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  root: text('root').notNull(),
+  migratedAt: timestamp('migrated_at'),
+});
 
 export const agents = sqliteTable('agents', {
   collaboration: text('collaboration', { mode: 'json' }).$type<StoredAgentCollaboration | null>(),
@@ -1021,7 +1025,7 @@ export const apiRequestLogs = sqliteTable('api_request_logs', {
 ]);
 
 export type Workspace = typeof workspaces.$inferSelect;
-export type Plugin = typeof plugins.$inferSelect;
+export type ChatChannelConfiguration = typeof chatChannels.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type AgentVersion = typeof agentVersions.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
@@ -1091,7 +1095,7 @@ export const agentRuntimeInteractions = sqliteTable('agent_runtime_interactions'
 
 export type StoredAgentRuntimeEvent =
   | { kind: 'text_delta'; delta: string }
-  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string; usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null } }
+  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string; usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null } }
   | { kind: 'question'; interactionId: string }
   | { kind: 'settled'; status: string };
 

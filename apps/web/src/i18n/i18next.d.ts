@@ -7,7 +7,7 @@ import type zhCommon from './locales/zh-CN/common.json';
 import type zhHome from './locales/zh-CN/home.json';
 import type zhLogs from './locales/zh-CN/logs.json';
 import type zhMcpServers from './locales/zh-CN/mcpServers.json';
-import type zhPlugins from './locales/zh-CN/plugins.json';
+import type zhConnections from './locales/zh-CN/connections.json';
 import type zhRuns from './locales/zh-CN/runs.json';
 import type zhSettings from './locales/zh-CN/settings.json';
 import type zhSkills from './locales/zh-CN/skills.json';
@@ -28,7 +28,7 @@ declare module 'i18next' {
       runs: typeof zhRuns;
       skills: typeof zhSkills;
       mcpServers: typeof zhMcpServers;
-      plugins: typeof zhPlugins;
+      connections: typeof zhConnections;
       artifacts: typeof zhArtifacts;
       settings: typeof zhSettings;
       logs: typeof zhLogs;

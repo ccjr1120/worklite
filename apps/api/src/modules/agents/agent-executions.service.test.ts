@@ -83,8 +83,8 @@ describe('projectTaskCaptureFailureMessage', () => {
   });
 
   it('falls back to the generic message for an unrecognized error type', () => {
-    expect(projectTaskCaptureFailureMessage(new Error('ECONNRESET'))).toBe('无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。');
-    expect(projectTaskCaptureFailureMessage('not an Error instance')).toBe('无法启动项目任务，请检查项目目录、执行器插件可用性和 Gateway 模型。');
+    expect(projectTaskCaptureFailureMessage(new Error('ECONNRESET'))).toBe('无法启动项目任务，请检查项目目录、内置执行器可用性和 Gateway 模型。');
+    expect(projectTaskCaptureFailureMessage('not an Error instance')).toBe('无法启动项目任务，请检查项目目录、内置执行器可用性和 Gateway 模型。');
   });
 });
 

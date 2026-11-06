@@ -41,6 +41,8 @@ describe('generateAgentStep with toolsDisabled', () => {
     const bodies = captureRequests();
     await finalStep({ id: 'p', adapter: 'openai', operation: 'responses', apiKey: 'key' }).catch(() => undefined);
     expect(bodies[0]?.tool_choice).toBe('none');
+    expect(bodies[0]).not.toHaveProperty('max_output_tokens');
+    expect(bodies[0]).not.toHaveProperty('max_completion_tokens');
     expect((bodies[0]?.tools as unknown[]).length).toBe(1);
   });
 

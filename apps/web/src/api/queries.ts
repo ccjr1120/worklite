@@ -4,7 +4,6 @@ import { api } from './client';
 import type { ApiRequestLogQuery, ArtifactListQuery, AssignHomeBoardRequest, CreateHomeBoardCategoryRequest, GatewayRequestLogQuery, PortkeyGatewayStatsQuery, UpdateChatMemoryRequest, UpdateHomeBoardCategoryRequest } from '@worklite/contracts';
 
 export const workflowScheduleQueryKey = (workflowId: string) => ['workflow-schedule', workflowId] as const;
-export const pluginsQueryKey = () => ['plugins'] as const;
 export const chatConversationsQueryKey = ['chat-conversations'] as const;
 
 export function useChatChannelsQuery() {
@@ -105,12 +104,8 @@ export function useWorkflowScheduleQuery(workspace: string | undefined, workflow
   });
 }
 
-export function usePluginsQuery() {
-  return useQuery({ queryKey: pluginsQueryKey(), queryFn: api.plugins, staleTime: 30_000 });
-}
-
-export function usePluginQuery(pluginId: string) {
-  return useQuery({ queryKey: ['plugin', pluginId] as const, queryFn: () => api.plugin(pluginId), enabled: Boolean(pluginId), refetchInterval: pluginId === 'feishu-bot' || pluginId === 'wechat-official-account' || pluginId === 'wechat-bot' ? 2_000 : false });
+export function useChatChannelConfigurationQuery(channelId: string) {
+  return useQuery({ queryKey: ['chat-channel-configuration', channelId] as const, queryFn: () => api.chatChannelConfiguration(channelId), refetchInterval: 2_000 });
 }
 
 const homeBoardPreferencesQueryKey = ['home-board-preferences'] as const;

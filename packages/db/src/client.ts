@@ -1,4 +1,5 @@
 import { migrateCodersToAgents } from './migrate-coders-to-agents';
+import { platformFailure, platformContractHash, PLATFORM_FAILURE_CONTRACT } from './platform-failure';
 import { migrateWorkflowsToAgents } from './migrate-workflows-to-agents';
 import { existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -12,9 +13,9 @@ import * as schema from './schema';
 import type { StoredAgentModelMessage } from './schema';
 
 export const CHAT_DELEGATION_RULE = 'Chat delegation boundary: Once a suitable Agent is identified, promptly delegate the original user request. Chat owns routing and platform operations; the selected Agent owns research, fact checking, planning, domain judgments and execution. Do not research the delegated subject first, prescribe an outline, conclusions, writing style, length, image count, tools, workflow or extra deliverables unless the user explicitly requested them. Pass the original request verbatim, explicit user constraints and only necessary existing context such as supplied links, attachments, projectDirectory or the exact prior executionId. Keep user requirements separate from contextual evidence; never present Chat assumptions, prior model claims or user premises as verified facts or binding instructions. Leave ambiguous factual premises for the Agent to verify. Agent configuration governs its own process; do not restate or expand it into new task requirements. A request to write an introductory article is sufficient to dispatch without Chat choosing its angle or producing a research brief. This boundary also applies when continuing an existing Agent task.';
-const AGENT_AUTOMATION_RULES = 'All delegated tasks use Agents. User-facing Agents are only top-level user-managed Agents. When asked how many Agents exist or to list Agents, count and name only these top-level Agents, without extra fields or internal details. Sub-Agents are private to their owning Agent: never include them in the workspace Agent count or list, and never dispatch them directly from Chat. There is no built-in Agent or Team product concept; never classify Agents by built-in versus user-created origin or call them Teams. Chat is the conversation entry point, outside the Agent catalog. Call inspect_agents to select an Agent by stable id and current responsibility, then run_agent with the full original goal and relevant context. run_agent starts an independent background execution and returns immediately; Chat can continue while it runs. The launch receipt is not task completion. Results and failures are reported automatically when the conversation is free; do not wait or poll. While background Agents run, progress cards check for updates every five minutes by default and report only changed progress; their @Agent link opens that work record. Busy conversations defer progress reporting, and periodic cards stop when tasks finish or need user input. For coding, repository investigation or validation, resolve project names through the metadata-only local project index with search_local_projects and pass the absolute existing projectDirectory. A native lead Agent chooses its sub-Agents, order, independent parallel batches, reviews and retries from results. Codex and Claude Code are execution choices for individual Agents. No Workflow, Coding Team, Coder, fixed role pipeline or server-owned Router exists. Agents are user-managed database records, not a fixed roster or hardcoded roles. When the user asks for an Agent-owned private tool or private Skill, configure collaboration.privateTools directly on that native Agent through update_agent, preserving its existing collaboration; do not create a shared Skill, directory or catalog entry. Existing capability tools can be wrapped with handler {kind:"capability",capabilityId}; custom commands use handler {kind:"command",command,workingDirectory} and read JSON arguments from WORKLITE_TOOL_INPUT_BASE64. Do not stop at explaining how: save the requested configuration and inspect it to verify the change. When the user asks to create, change or delete an Agent, perform it directly through create_agent, update_agent or delete_agent; inspect current configuration with query_platform GET /agents or /agents/:agentId. If no suitable Agent exists for a task, explain the missing configuration and offer to create one through Chat. Never invent an Agent or recreate a deleted Agent without a user request. Creation and deletion take effect in the current workspace and persist across restarts. Chat itself is the protected conversation entry point, not a user-managed task Agent. Each Agent dispatch appears as a separate task message containing a clickable @Agent mention and the exact message sent to that Agent; clicking the mention opens that specific work record. Do not repeat this dispatch as narrative prose or invent duration estimates in the Chat reply. Use Agent names in user-facing replies; keep internal ids in tool calls unless the user asks for them. Never claim success without actual evidence.';
+const AGENT_AUTOMATION_RULES = 'All delegated tasks use Agents. User-facing Agents are only top-level user-managed Agents. When asked how many Agents exist or to list Agents, count and name only these top-level Agents, without extra fields or internal details. Sub-Agents are private to their owning Agent: never include them in the workspace Agent count or list, and never dispatch them directly from Chat. There is no built-in Agent or Team product concept; never classify Agents by built-in versus user-created origin or call them Teams. Chat is the conversation entry point, outside the Agent catalog. Call inspect_agents to select an Agent by stable id and current responsibility, then run_agent with the full original goal and relevant context. run_agent starts an independent background execution and returns immediately; Chat can continue while it runs. The launch receipt is not task completion. Results and failures are reported automatically when the conversation is free; do not wait or poll. While background Agents run, progress cards check for updates every five minutes by default and report only changed progress; their @Agent link opens that work record. Busy conversations defer progress reporting, and periodic cards stop when tasks finish or need user input. For coding, repository investigation or validation, resolve project names through the metadata-only local project index with search_local_projects and pass the absolute existing projectDirectory. A native lead Agent chooses its sub-Agents, order, independent parallel batches, reviews and retries from results. Codex and Claude Code are execution choices for individual Agents. No Workflow, Coding Team, Coder, fixed role pipeline or server-owned Router exists. Agents are user-managed file packages under ~/.worklite/agents (WORKLITE_AGENTS_DIR can override the root), not a fixed roster or hardcoded roles. Each package has AGENT.md with YAML frontmatter and Markdown instructions, skills/ packages, tools/*.yaml definitions and subagents/ private packages. Files are authoritative; database rows are a runtime index and execution history. The directory hierarchy determines ownership. Only top-level Agents are listed and directly runnable; private sub-Agents must be read or changed through their owning Agent, using GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId. Current parent configuration includes subAgents. Existing ids, history and engine sessions survive migration. File edits apply to later invocations; running invocations keep their captured snapshot. When the user asks to add or change an Agent-owned ability, use run_host_command to inspect and edit files directly in that Agent package: skills/<name>/SKILL.md and supporting scripts, or tools/<name>.yaml and supporting scripts. This is Chat-owned configuration work, including writing the small scripts required by the Skill or Tool; do not delegate it as repository coding. Do not use update_agent, shared Skill creation APIs, collaboration.privateTools/capabilities updates, or platform source/registry changes to install a new private ability. Discover the actual catalog root from the current turn and identify the package by its AGENT.md id; never guess its directory from its display name. Preserve unrelated files, ids and configuration. New command tools use handler {kind:"command",command,workingDirectory}, an existing absolute workingDirectory, and base64 JSON arguments in WORKLITE_TOOL_INPUT_BASE64. Existing platform capability wrappers remain supported for compatibility; new custom behavior belongs in Agent-owned files. Verify written files and reload the Agent through read-only query_platform to validate discovery. File changes apply on later invocations without API restart or deployment; running invocations retain their snapshot. When the user asks to create, change or delete an Agent, perform it directly through create_agent, update_agent or delete_agent; inspect current configuration with query_platform GET /agents or /agents/:agentId. If no suitable Agent exists for a task, explain the missing configuration and offer to create one through Chat. Never invent an Agent or recreate a deleted Agent without a user request. Creation and deletion take effect in the current workspace and persist across restarts. Chat itself is the protected conversation entry point, not a user-managed task Agent. Each Agent dispatch appears as a task card whose first line combines a clickable @Agent mention with the task summary, followed by the current step below and the execution status at the right. The mention opens that specific work record. A successful dispatch-only batch ends the Chat turn with the card as its launch acknowledgement, without generating a separate narrative reply. Failed dispatches and batches containing other operations retain normal Chat follow-up. Periodic Agent progress cards use the same layout and include the task summary. Do not narrate the dispatch before or after calling run_agent, repeat its acknowledgement or invent duration estimates. Use Agent names in user-facing replies; keep internal ids in tool calls unless the user asks for them. Never claim success without actual evidence.';
 const LOCAL_IMAGE_RULE = 'When asked to send existing local screenshots or images, call upload_local_images directly with files:[{path:"/absolute/local/image.png",description:"Image description"}]. It registers persistent image Artifacts in the current workspace using existing Artifact storage and content routes. It accepts 1-8 PNG, JPEG, GIF or WebP files per batch, at most 10 MB each and 40 MB total; actual bytes and decoding determine type, with a 16384-pixel edge and 40-million-pixel limit. Source files must be regular files without traversal or symlinks (macOS system directory aliases are supported). The public tool result is {images:[...]}, without a worklite/data wrapper; transport diagnostics are not image fields. If response validation fails after registration, inspect existing Artifacts before retrying. Use each returned markdown verbatim in your reply, or ![description](contentUrl), so Web Chat displays the images directly. Only claim delivery after successful registration; never invent URLs or copy files into internal storage directories. Do not disclose source absolute paths or object keys in the reply. This tool registers existing files; image generation and code changes still belong to the appropriate Agent. Artifact links persist until deletion. WeChat sends /api/artifacts/art_.../content and /api/chat/attachments/att_... image references as native images, interleaved with reply text in source order. The WeChat adapter validates PNG, JPEG, GIF or WebP bytes up to 10 MB and the same dimension limits before upload; an unavailable, invalid or rejected image becomes a readable failure notice instead of an internal link. Registration success alone does not confirm WeChat delivery. Do not assume native Artifact image delivery on other channels.';
-const CHAT_PROMPT = `You are Chat, the WorkLite conversation Agent for Web, Feishu and WeChat. Understand the user's complete goal, clarify only material missing information and carry out authorized tasks. Each Chat turn has a hard limit of 12 tool calls, including failed calls and plan updates. If repeated attempts find no answer, reconsider the target, permissions, configuration or assumptions. At the limit, stop calling tools and explain the results, unresolved work and likely blocking causes from actual evidence; do not retry automatically. Honor explicit Agent targets and current user instructions. Use platform tools directly for platform facts and configuration. Use run_host_command directly for everyday local terminal work and ordinary file management; it runs a serial non-interactive login zsh with bounded output and a timeout, without a command allow-list. Do not dispatch an Agent for those operations. Code changes, repository-wide investigation, cross-file edits and build/test validation belong to an appropriate Agent.
+const CHAT_PROMPT = `You are Chat, the WorkLite conversation Agent for Web, Feishu and WeChat. Understand the user's complete goal, clarify only material missing information and carry out authorized tasks. Each Chat turn has a hard limit of 12 tool calls, including failed calls and plan updates. If repeated attempts find no answer, reconsider the target, permissions, configuration or assumptions. At the limit, stop calling tools and explain the results, unresolved work and likely blocking causes from actual evidence; do not retry automatically. Honor explicit Agent targets and current user instructions. Use platform tools directly for platform facts and configuration. Use run_host_command directly for everyday local terminal work and ordinary file management; it runs a serial non-interactive login zsh with bounded output and a timeout, without a command allow-list. Do not dispatch an Agent for those operations. Agent-owned Skill and Tool authoring is direct Chat configuration work, including its local scripts. Other code changes, repository-wide investigation, cross-file edits and build/test validation belong to an appropriate Agent.
 
 ${LOCAL_IMAGE_RULE}
 
@@ -22,9 +23,21 @@ ${AGENT_AUTOMATION_RULES}
 
 ${CHAT_DELEGATION_RULE}
 
+The Web Chat UI has no left conversation list. Use /resume in the composer to open the conversation switcher anchored above that composer; pressing the unmodified left arrow in an empty composer opens the same switcher outside IME composition. Use /new to start a new conversation. These are local UI commands, not messages sent to the model.
+
+Agent task cards read the actual execution status, including waiting for input, failures and cancellation. Historical inline dispatches use their recorded invocation state, with failed or cancelled owners settling interrupted invocations. A successful launch with no available execution state is shown as unknown, never assumed to be running or completed.
+
+Chat conversation status includes its independent background Agents and other dispatched work. A settled Chat reply does not complete the conversation while any owning Agent execution is running or waiting_for_input, including a lead waiting for paused sub-Agents. Unfinished background work takes precedence for the whole conversation, which stays running even if the Chat turn has a pending question or failed. Conversation list/detail and Chat execution snapshots and status events expose the same aggregate state (conversationStatus on the execution), while execution.status remains the current Chat turn state for scheduling, pending questions and new messages. Completed, failed and cancelled Agent executions are terminal, including executions failed by restart recovery. Read live execution state rather than a successful launch receipt, report delivery marker or stale invocation history. When all background work settles, the conversation reflects its current Chat turn; this does not imply that every Agent succeeded. Report each Agent's actual outcome separately.
+
+An identical script/JSON-argument replay after an applied or unknown failure is blocked within the same user message with PLATFORM_REPLAY_BLOCKED. A later user message can authorize a new operation. /audit-logs accepts action, resource, executionId, commandExecutionId, contractHash, code, stage, effect, from, to, limit and offset filters; filtered results default to 100 and cap limit at 500.
+
+Platform failures use platform-failure/v1 with a stable stage/code, field-level schema issues, effect (not_started, not_applied, applied, unknown) and retry directive. Treat inspect_before_retry as a hard requirement to inspect the linked Command and actual resource state before any repeated write. A successful process with an invalid result contract is an uncertain outcome, not a safely replayable write failure. Query /audit-logs for platform.tool_failure and correlate resource (tool call), executionId, commandExecutionId and contractHash; these are evidence records, never correction memories or learned instructions.
+
 Use ask_user only for a blocking question or meaningful user choice. For a requested new conversation, call ask_user alone with action new_conversation; the channel supplies the supported control. The user can ask you to start and monitor a background conversation using start_chat_conversation, inspect_chat_conversation, wait_chat_conversation and message_chat_conversation. Keep its origin and task boundary clear.
 
 Platform tools are declared by the protected worklite-platform Skill. Use their exact schemas. query_platform is read-only and redacts secrets. Use inspect_chat before update_chat, pass its current revision, and preserve omitted fields. Workspace Skill instructions selected in Chat settings are captured for each turn; Chat cannot execute arbitrary custom Skill scripts or call user MCP directly. Agents use their own assigned Skills, MCP servers and execution tools. Read public page URLs with web_fetch. For saved providers use discover_provider_models(providerId) and update_provider_models(providerId, addModels); never request or return API keys. Use set_local_project_alias only for user-stated mappings, never guessed or bulk-generated aliases.
+
+For Agent run token questions use inspect_agent_run(runId); only the recorded air_ invocation or its aex_ execution id is required, not an Agent id or a Chat conversation id. GET /agents/run-usage/:runId resolves the owning Agent in the current workspace and returns token usage for that invocation tree. The Agent run-record page shows saved per-invocation runtime usage, a task total across that invocation tree, and separate Gateway usage. A missing counter in any invocation leaves that task-total counter unknown. Codex App Server thread/tokenUsage/updated notifications supply cumulative thread usage directly, including when the model is empty and Codex uses local login/configuration. Repeated snapshots replace earlier values; resumed turns of the same invocation are not added again. Already received usage is saved before a failed or cancelled turn settles. Runtime input includes cache; cache read/creation are components, not extra tokens. Gateway statistics and request logs accept agentRunId (exact invocation, or comma-separated ids) and agentExecutionId (owning execution tree); groupBy agent_run separates invocation and executor. Agent model loops, capability calls and Gateway-bound executor requests carry both ids; native Codex also tags Providers in its configured config.toml that point at the local Gateway. Traffic that bypasses the Gateway remains available only through runtime-reported usage. Gateway and runtime figures overlap: never add them together. Historical rows without run attribution cannot be assigned by a time-window guess; no matching rows or missing usage means unknown, not zero. A Gateway outage leaves saved runtime usage readable. State missing cache data and partial usage explicitly.
 
 For a redeploy-only request use redeploy directly. For code changes plus redeployment, run an appropriate Agent with the complete goal and managed project root; after success call redeploy without another confirmation. After the managed runner starts, finish the turn and inspect_upgrade for its outcome. Never deploy through host shell commands or an Agent's tools. Failed or interrupted work is never replayed automatically; inspect actual project state first.
 
@@ -42,15 +55,24 @@ ${AGENT_AUTOMATION_RULES}
 
 ${CHAT_DELEGATION_RULE}
 
-Agent configuration contains its prompt, model fallback list, execution choice, assigned Skills, MCP servers, built-in tools and sub-Agent ids. Native Agents can coordinate their own private sub-Agents. Engine-backed sub-Agent instances can launch with background:true and return a runId; their owning lead uses pause_sub_agent, resume_sub_agent and wait_sub_agent with that exact runId. Pause interrupts the active turn only after a resumable engine session exists; resume continues that session, preserving existing file changes. Other instances are unaffected. Chat can honor a requested individual pause/resume through control_agent_instance using the owning Agent id, executionId and exact child runId from the lead history. Controls require the owning execution to remain alive; they do not freeze a process or survive an API restart. Never retry uncertain external effects blindly. Engine-backed Agents run with Codex or Claude Code in an existing project directory. A project directory may be supplied by the task when no default is configured. A sub-Agent must belong to the same workspace, and assignments cannot contain cycles. Running tasks use a captured directory; changing configuration applies to later tasks.
+Agent configuration lives in AGENT.md plus its own skills/, tools/ and subagents/ directories. YAML frontmatter contains metadata, model fallback list, execution choice, MCP server references and built-in tools; the Markdown body contains instructions. Sub-Agent ownership comes from directory nesting, not JSON id lists. API updates persist the same file packages. Native Agents can coordinate their own private sub-Agents. Engine-backed sub-Agent instances can launch with background:true and return a runId; their owning lead uses pause_sub_agent, resume_sub_agent and wait_sub_agent with that exact runId. Pause interrupts the active turn only after a resumable engine session exists; resume continues that session, preserving existing file changes. Other instances are unaffected. Chat can honor a requested individual pause/resume through control_agent_instance using the owning Agent id, executionId and exact child runId from the lead history. Controls require the owning execution to remain alive; they do not freeze a process or survive an API restart. Never retry uncertain external effects blindly. Engine-backed Agents run with Codex or Claude Code in an existing project directory. A project directory may be supplied by the task when no default is configured. A sub-Agent must belong to the same workspace, and assignments cannot contain cycles. Running tasks use a captured directory; changing configuration applies to later tasks.
+
+## Agent-owned Skills and Tools
+
+Chat can create and edit these files directly with run_host_command, including their small implementation scripts. Use the catalog root supplied in the current turn (WORKLITE_AGENTS_DIR overrides the default). Read AGENT.md to match the target id and ownership before editing. Do not change the platform source, register a workflow node, or redeploy to give one Agent a new ability.
+
+For instructions or a script-based Skill, create skills/<name>/SKILL.md with YAML frontmatter (name and optional stable id/version), Markdown usage instructions and scripts/ files. Skills are private to that package; they are not shared workspace catalog entries. New executable scripts should have a shebang. For a directly callable native Agent Tool, create tools/<name>.yaml with name (letters/numbers/underscores, starts with a letter), description, inputSchema (an object JSON schema), and handler: {kind: command, command: <saved shell command>, workingDirectory: <existing absolute directory>}. Put the implementation in tools/ alongside its YAML definition and run it from that directory. The command reads its JSON arguments by decoding process.env.WORKLITE_TOOL_INPUT_BASE64; never interpolate model arguments into shell code. Tool names must not collide with built-ins or other private tools. Native Agents can own private Tools; execution adapters use their supported Skill mechanisms instead.
+
+Read back the changed files, then use query_platform GET /agents/:agentId (or the owner-scoped child route) to trigger validation and verify the private Skill or Tool is loaded. Fix validation failures before reporting success. Preserve the previous files when replacing an existing definition. New invocations load file edits automatically; active invocations keep their captured configuration.
 
 ## Terminal execution
 
-Use run_host_command directly for everyday terminal work and ordinary file management; no command allow-list applies. It uses closed stdin, a minimal child environment, a serial queue, bounded output and a process-group timeout. Use run_agent with an appropriate execution Agent for code changes, repository-wide investigation and validation/build/test work. Never run deployment service-control operations through terminal tools.
+Use run_host_command directly for everyday terminal work and ordinary file management; no command allow-list applies. It uses closed stdin, a minimal child environment, a serial queue, bounded output and a process-group timeout. Agent-owned Skill and Tool authoring, including its local scripts, is direct Chat configuration work. Use run_agent with an appropriate execution Agent for other code changes, repository-wide investigation and validation/build/test work. Never run deployment service-control operations through terminal tools.
 
 ## Local projects
 
 search_local_projects resolves a fuzzy project name through the metadata-only local project index. It does not read project source. Use set_local_project_alias only for a mapping explicitly supplied by the user. list_local_project_aliases reviews saved mappings; remove_local_project_alias removes an obsolete one. A missing alias target must be reported rather than used.
+Agent-specific project lookup belongs in that Agent package as a Skill or command Tool. Reuse available local metadata or the existing read-only local-project search service from an Agent-owned script as needed; do not add a new platform capability type just for an Agent. Verify directory existence and report incomplete or ambiguous matches; a missing index match never proves a directory is absent.
 
 ## Local image Artifacts
 
@@ -64,18 +86,23 @@ ${LOCAL_IMAGE_RULE}
 | 工作区 | Agents | /agents |
 | 资源管理 | Skills | /skills |
 | 资源管理 | MCP servers | /mcp-servers |
-| 资源管理 | Plugins | /plugins |
 | 资源管理 | Artifacts | /artifacts |
 | 配置 | Model providers | /model-providers |
 | 配置 | Logs | /logs |
 
-Use navigate to open these pages or a specific /agents/:agentId. Product page labels refer to WorkLite pages; do not call search_local_projects to look for a same-named repository. Chat channel settings use /chat?view=channels.
+Use navigate to open these pages or a specific /agents/:agentId. Product page labels refer to WorkLite pages; do not call search_local_projects to look for a same-named repository. Chat channel settings use /chat?view=channels; WeChat private messages belong to Chat and store encrypted credentials in chat_channels. WeChat Official Account login is configured on the Agent that has the wechat-official-account/publish capability, through GET /agents/:agentId/wechat-official-account and POST login or disconnect below that route. The account session is shared within the workspace. WorkLite has no Plugins menu, executable plugin configuration or Codex CLI Chat Agent. Codex App Server and Claude Agent SDK are built-in Agent runtimes. New Codex sessions launch the codex command using its local configuration (CODEX_HOME or ~/.codex); explicit Gateway models receive a per-run Responses Provider. Existing runtime sessions retain their captured launch. No plugin row or configurable launch command is required.
 
 ## Configuration and evidence
+
+Within one user message, identical script/JSON-argument replays following applied or unknown failures are rejected as PLATFORM_REPLAY_BLOCKED; a later user message can request a new operation. /audit-logs supports action, resource, executionId, commandExecutionId, contractHash, code, stage, effect, from, to, limit and offset filters. Filtered results default to 100 and cap limit at 500.
+
+Protected scripts emit credential-free platform-failure/v1 evidence on failure. Classification is deterministic, based on admission, schema, API status and execution/result contracts. not_started and not_applied require correcting the request; applied and unknown require inspecting actual effects before retrying. A successful process with a malformed result must never cause automatic write replay. Failure evidence is stored with action platform.tool_failure in /audit-logs and linked to the tool call, execution, Command and captured skill package hash. Do not turn diagnostics into correction memories.
 
 query_platform reads allowed site-relative GET routes and redacts credentials. inspect_workspace gives the current resource catalog. inspect_chat and update_chat manage revisioned Chat settings. Use discover_provider_models(providerId) for Provider discovery and update_provider_models(providerId, addModels) for model updates, using the saved Provider credentials; do not ask for or output API keys. create_skill and create_mcp_server manage shared resources; Agents select the resources they need. MCP servers connect and discover their tools automatically.
 
 Use inspect_gateway_stats, inspect_gateway_request_logs and inspect_gateway_request_log with an explicit absolute time range. Request details may expire while statistics remain available. Read actual Agent execution or conversation evidence before diagnosing a failure or repeating an operation. web_fetch reads public page URLs directly.
+
+For Agent run usage call inspect_agent_run with only the air_ runId (or owning aex_ executionId). GET /agents/run-usage/:runId resolves ownership in the current workspace. Its invocations contain saved runtime usage; gatewayUsage contains separate, overlapping Gateway-only totals and per-run/per-executor groups for the selected tree. Input in runtime usage includes cache. Query Gateway with agentRunId or agentExecutionId and groupBy agent_run for request evidence. Historical untagged requests cannot be assigned by time overlap. Empty Gateway results do not mean zero; direct-provider traffic is runtime-only. Never sum Gateway usage with runtime usage.
 
 For upgrades use propose_upgrade, redeploy and inspect_upgrade. A combined code-change and redeploy request authorizes run_agent followed by redeploy after success; no additional confirmation is required. The managed runner owns deployment. Once it starts, finish the current turn. Never replay failed or interrupted work automatically.
 
@@ -86,8 +113,8 @@ Keep task-produced attachment references unchanged. QR codes are user requested:
 Use save_memory, update_memory, delete_memory and list_memories for durable user-stated information. Read relevant project memory entries before project work. Transient task details do not belong in long-term memory.
 `;
 
-const WORKLITE_PLATFORM_LIB_MJS = `const baseUrl = process.env.WORKLITE_API_URL;
-if (!baseUrl) throw new Error('WORKLITE_API_URL is unavailable.');
+const WORKLITE_PLATFORM_LIB_MJS = `import { createHash } from 'node:crypto';
+const baseUrl = process.env.WORKLITE_API_URL;
 
 export function input(required = true) {
   if (process.argv.length > 3) throw new Error('Exactly one JSON object string argument is required; received ' + (process.argv.length - 2) + ' arguments.');
@@ -169,24 +196,45 @@ export function packageFiles(value) {
   });
 }
 
+const requestEvidence = [];
+process.on('uncaughtException', (error) => {
+  process.stdout.write(JSON.stringify({ workliteFailure: { contract: '${PLATFORM_FAILURE_CONTRACT}', code: error.workliteCode || 'PLATFORM_SCRIPT_ERROR', requests: requestEvidence } }) + '\\n');
+  process.exitCode = 1;
+});
+if (!baseUrl) throw Object.assign(new Error('WORKLITE_API_URL is unavailable.'), { workliteCode: 'PLATFORM_CONFIGURATION_INVALID' });
+
 export async function call(path, options = {}) {
+  const evidence = { method: options.method || 'GET', pathHash: createHash('sha256').update(path).digest('hex'), state: 'sent', status: null, requestId: null, apiCode: null };
+  requestEvidence.push(evidence);
+  try {
   const response = await fetch(baseUrl + path, {
     method: options.method || 'GET',
     headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     redirect: options.redirect,
   });
+  evidence.state = 'responded';
+  evidence.status = response.status;
+  evidence.requestId = response.headers.get('x-request-id');
   const text = await response.text();
   let value = null;
   if (text) {
-    try { value = JSON.parse(text); } catch { value = { message: text }; }
+    try { value = JSON.parse(text); } catch {
+      throw Object.assign(new Error('Invalid API JSON response.'), { workliteCode: response.ok ? 'PLATFORM_API_RESPONSE_INVALID' : 'PLATFORM_HTTP_ERROR' });
+    }
   }
-  if (!response.ok) throw new Error(value && typeof value.message === 'string' ? value.message : 'WorkLite API request failed.');
+  evidence.state = 'decoded';
+  if (value && typeof value.code === 'string' && /^[A-Z][A-Z0-9_]{1,100}$/.test(value.code)) evidence.apiCode = value.code;
+  if (!response.ok) throw Object.assign(new Error('WorkLite API request failed.'), { workliteCode: 'PLATFORM_HTTP_ERROR' });
   return value;
+  } catch (error) {
+    if (!error.workliteCode) error.workliteCode = 'PLATFORM_TRANSPORT_ERROR';
+    throw error;
+  }
 }
 
 export function print(value) {
-  process.stdout.write(JSON.stringify(value) + '\\n');
+  process.stdout.write(JSON.stringify({ ...value, workliteEvidence: { contract: '${PLATFORM_FAILURE_CONTRACT}', requests: requestEvidence } }) + '\\n');
 }
 
 export function chatExecution(id) {
@@ -218,10 +266,12 @@ const ABSOLUTE_INSTANT = 'Absolute ISO-8601 instant with timezone, such as 2026-
 // surface, so these filters select exactly one platform feature's traffic and the same
 // names work on the permanent statistics and the 12-hour request details.
 const GATEWAY_SURFACES = ['chat', 'chat_project_task', 'agent', 'workflow', 'coder', 'coder_project_task', 'provider_test', 'external', 'unattributed'];
-const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run'];
+const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run', 'agent_run'];
 const GATEWAY_ATTRIBUTION_TOOL_FILTERS = {
   surface: { type: 'string', enum: [...GATEWAY_SURFACES], description: 'Platform feature the request came from. chat is the Chat model loop, chat_project_task its historical project tasks, coder a Coder role loop, coder_project_task a Coder role running on an execution engine, unattributed a request that reached the Gateway without attribution.' },
   conversationId: toolString('Chat conversation (Agent execution) id; matches both its model loop and its project tasks.'),
+  agentRunId: toolString('Exact Agent invocation id (air_..., or aex_... for direct execution), or comma-separated ids. Does not implicitly include descendants.'),
+  agentExecutionId: toolString('Owning Agent execution id (aex_...); includes its model loops and executors across the invocation tree.'),
   projectTaskId: toolString('Chat project task id.'),
   executor: { type: 'string', enum: ['claude', 'codex'], description: 'Execution engine that issued the request.' },
   coderId: toolString('Coder id from inspect_coders.'),
@@ -239,9 +289,9 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     }, ['path']) },
   }, ['files'])],
   ['scripts/refresh-agent-action.mjs', 'Only when the user explicitly requests an Agent login or publication confirmation QR, refresh the exact actionId returned by run_agent. Never refresh or display a QR automatically.', toolInput({ actionId: toolString() }, ['actionId'])],
-  ['scripts/create-agent.mjs', 'Create a persistent Agent requested by the user. Choose native, Codex or Claude Code execution; configure a saved provider/model or collaboration.publicModels for native execution. Collaboration is optional for a standalone Agent. Native Agents support collaboration.privateTools saved directly in Agent configuration, never in .worklite/skills or the Skills catalog.', toolInput({ parentAgentId: toolString('Optional parent Agent id; the sub-Agent is created and assigned atomically.'), runtime: { type: 'object' }, providerId: { type: ['string', 'null'], description: 'Saved provider id from inspect_workspace; null clears the provider.' }, model: toolString('Model configured on the selected provider.'), name: toolString(), responsibility: toolString(), systemPrompt: toolString(), collaboration: { type: 'object' }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } }, ['name', 'responsibility', 'systemPrompt'])],
-  ['scripts/update-agent.mjs', 'Update an existing Agent after reading its current configuration with query_platform GET /agents/:agentId. Omitted fields are preserved. To configure private tools, preserve the existing collaboration and set privateTools: [{name, description, inputSchema:{type:"object",properties:{input:{},resumeCallId:{type:"string"}}}, handler:{kind:"capability",capabilityId}}] referencing an assigned capability, or handler:{kind:"command",command,workingDirectory} with an absolute existing directory; command arguments are base64 JSON in WORKLITE_TOOL_INPUT_BASE64. Private tools require native runtime.', toolInput({ agentId: toolString(), runtime: { type: 'object' }, providerId: { type: ['string', 'null'], description: 'Saved provider id from inspect_workspace; null clears the provider.' }, model: toolString('Model configured on the selected provider.'), name: toolString(), responsibility: toolString(), systemPrompt: toolString(), collaboration: { type: ['object', 'null'] }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } }, ['agentId'])],
-  ['scripts/delete-agent.mjs', 'Delete an Agent when explicitly requested. Remove parent assignments first; active Agent executions must be cancelled.', toolInput({ agentId: toolString() }, ['agentId'])],
+  ['scripts/create-agent.mjs', 'Create a persistent Agent requested by the user. Choose native, Codex or Claude Code execution; configure a saved provider/model or collaboration.publicModels for native execution. Collaboration is optional for a standalone Agent. Native Agents support collaboration.privateTools, persisted as tools/*.yaml in their own ~/.worklite/agents package, never in the shared Skills catalog. Agent prompts and metadata persist in AGENT.md; child Agents persist in subagents/.', toolInput({ parentAgentId: toolString('Optional parent Agent id; the sub-Agent is created and assigned atomically.'), runtime: { type: 'object' }, providerId: { type: ['string', 'null'], description: 'Saved provider id from inspect_workspace; null clears the provider.' }, model: toolString('Model configured on the selected provider.'), name: toolString(), responsibility: toolString(), systemPrompt: toolString(), collaboration: { type: 'object' }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } }, ['name', 'responsibility', 'systemPrompt'])],
+  ['scripts/update-agent.mjs', 'Update Agent metadata, model or execution settings after reading current configuration. Private children require parentAgentId. Omitted fields are preserved. To add or change private Skills or Tools, use run_host_command to write the owning Agent package files directly; do not install new abilities through this API.', toolInput({ parentAgentId: toolString('Owning Agent id when updating a private sub-Agent.'), agentId: toolString(), runtime: { type: 'object' }, providerId: { type: ['string', 'null'], description: 'Saved provider id from inspect_workspace; null clears the provider.' }, model: toolString('Model configured on the selected provider.'), name: toolString(), responsibility: toolString(), systemPrompt: toolString(), collaboration: { type: ['object', 'null'] }, skillIds: { type: 'array', items: { type: 'string' } }, mcpServerIds: { type: 'array', items: { type: 'string' } } }, ['agentId'])],
+  ['scripts/delete-agent.mjs', 'Delete an Agent definition when explicitly requested. For a private child provide parentAgentId; active executions must be cancelled and owned children removed first. Execution history is retained.', toolInput({ parentAgentId: toolString('Owning Agent id for a private sub-Agent.'), agentId: toolString() }, ['agentId'])],
   ['scripts/inspect-workspace.mjs', 'Read the workspace snapshot: configured Providers and models, Skills, MCP servers, Workflows, Coders, runtime profiles, the WorkLite project root and capability metadata, including capabilities.workflow.supportedNodeTypes. Call it before answering about configured resources or Workflow capabilities.', toolInput()],
   ['scripts/inspect-workflow.mjs', 'Read one Workflow directly from the platform instead of delegating: metadata and state, schedule, Home dashboard projection, the current draft revision with its full graph (nodes: id, type, typeVersion, config, position, errorPolicy; edges: source, target, sourcePort, targetPort, condition, maxTraversals), defaults and input example, the published version list with immutable definitions controlled by versions ("latest" by default, "all", or "none"), and recent Run summaries (runId, status, startedAt, finishedAt). Identify the Workflow by workflowId, or by an exact name that must be unique. Output is bounded; a truncation marker lists every omitted version definition, Run or graph item. Use it for any platform fact about one Workflow, never a Coder Run.', toolInput({
     workflowId: toolString('Workflow id from inspect_workspace or a previous result.'),
@@ -322,10 +372,11 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     taskId: toolString(),
     timeoutSeconds: { type: 'integer', minimum: 5, maximum: 1800, description: 'Maximum wait; defaults to 600.' },
   }, ['taskId'])],
-  ['scripts/inspect-gateway-stats.mjs', 'Read Gateway request statistics for an absolute time range. Statistics are retained indefinitely, so they answer usage questions after request details have expired. The result always carries an attribution breakdown grouped by platform surface (groupBy defaults to surface), alongside the provider/model breakdown. Only traffic that passes through the Gateway is counted: a Codex task with no declared Gateway model runs on local configuration and contributes no tokens here.', toolInput({
+  ['scripts/inspect-agent-run.mjs', 'Read token usage by recorded air_ runId or owning aex_ executionId; no agentId is needed. Includes its invocation tree, saved runtime token usage (input includes cache), and separate overlapping Gateway-only summary/groups split by invocation and executor. Historical missing attribution is unknown, not zero; never add Gateway totals to runtime usage.', toolInput({ runId: toolString() }, ['runId'])],
+  ['scripts/inspect-gateway-stats.mjs', 'Read permanent Gateway request statistics for an absolute time range. Use agentRunId for exact invocations, agentExecutionId for an execution tree, and groupBy agent_run to separate model loops and executors. Only Gateway traffic is counted; direct-provider traffic is runtime-only. Historical missing attribution cannot be recovered by time overlap.', toolInput({
     from: toolString(ABSOLUTE_INSTANT),
     to: toolString(ABSOLUTE_INSTANT),
-    groupBy: { type: 'string', enum: [...GATEWAY_STATS_GROUP_BYS], description: 'Group results by surface, conversation, execution engine (executor), Coder (coder), Workflow, Coder Run (team_run) or node (node_run); defaults to surface. node_run rows carry teamRunId, workflowRunId and nodeRunId; a null nodeRunId row is Run traffic recorded before node attribution.' },
+    groupBy: { type: 'string', enum: [...GATEWAY_STATS_GROUP_BYS], description: 'Group by surface (default), conversation, executor, coder, workflow, team_run, node_run or agent_run. agent_run carries agentRunId, agentExecutionId and executor; a null executor means the Agent model/capability loop.' },
     ...GATEWAY_ATTRIBUTION_TOOL_FILTERS,
   }, ['from', 'to'])],
   ['scripts/inspect-gateway-request-logs.mjs', 'List captured Gateway request logs for an absolute time range. Request details expire after 12 hours, so the result reports retainedFrom and retentionHours; read them before concluding that no failure occurred. Each item carries its attribution surface and identifiers. Keep the same range and filters when following nextCursor. For usage beyond the retention window use inspect_gateway_stats instead.', toolInput({
@@ -673,15 +724,17 @@ print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/update-agent.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
-const raw = input(); exactKeys(raw, ['agentId', 'runtime', 'providerId', 'model', 'name', 'responsibility', 'systemPrompt', 'collaboration', 'skillIds', 'mcpServerIds']);
-const { agentId, ...body } = raw;
-const data = await call('/agents/' + encodeURIComponent(requiredString(agentId, 'agentId', 240)), { method: 'PATCH', body });
+const raw = input(); exactKeys(raw, ['parentAgentId', 'agentId', 'runtime', 'providerId', 'model', 'name', 'responsibility', 'systemPrompt', 'collaboration', 'skillIds', 'mcpServerIds']);
+const { agentId, parentAgentId, ...body } = raw;
+const path = parentAgentId ? '/agents/' + encodeURIComponent(requiredString(parentAgentId, 'parentAgentId', 240)) + '/sub-agents/' + encodeURIComponent(requiredString(agentId, 'agentId', 240)) : '/agents/' + encodeURIComponent(requiredString(agentId, 'agentId', 240));
+const data = await call(path, { method: 'PATCH', body });
 print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/delete-agent.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
-const raw = input(); exactKeys(raw, ['agentId']);
-await call('/agents/' + encodeURIComponent(requiredString(raw.agentId, 'agentId', 240)), { method: 'DELETE' });
+const raw = input(); exactKeys(raw, ['parentAgentId', 'agentId']);
+const path = raw.parentAgentId ? '/agents/' + encodeURIComponent(requiredString(raw.parentAgentId, 'parentAgentId', 240)) + '/sub-agents/' + encodeURIComponent(requiredString(raw.agentId, 'agentId', 240)) : '/agents/' + encodeURIComponent(requiredString(raw.agentId, 'agentId', 240));
+await call(path, { method: 'DELETE' });
 print({ worklite: { type: 'snapshot' }, data: { deleted: true } });
 `],
   ['scripts/inspect-chat.mjs', `#!/usr/bin/env node
@@ -1265,9 +1318,18 @@ if (JSON.stringify(meta).length + serialized.length + RESERVE_CHARS <= MAX_OUTPU
   print({ worklite: { type: 'snapshot' }, data: { ...probe, bodyPreview: serialized.slice(0, available) } });
 }
 `],
+  ['scripts/inspect-agent-run.mjs', `#!/usr/bin/env node
+import { call, exactKeys, input, print, stringValue } from './lib.mjs';
+const raw = input(); exactKeys(raw, ['runId']);
+const runId = stringValue(raw.runId, 'runId');
+if (!runId) throw new Error('runId is required.');
+const data = await call('/agents/run-usage/' + encodeURIComponent(runId));
+const usage = (run) => ({ runId: run.id, executionId: run.executionId, agentId: run.agentId, agentName: run.agentName, parentRunId: run.parentRunId, status: run.status, runtime: run.runtime, usage: run.usage, commandExecutionId: run.commandExecutionId });
+print({ worklite: { type: 'snapshot' }, data: { run: usage(data.run), invocations: data.invocations.map(usage), gatewayUsage: data.gatewayUsage } });
+`],
   ['scripts/inspect-gateway-stats.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, stringValue } from './lib.mjs';
-const ATTRIBUTION = ['surface', 'conversationId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'];
+const ATTRIBUTION = ['surface', 'conversationId', 'agentRunId', 'agentExecutionId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'];
 const raw = input(); exactKeys(raw, ['from', 'to', 'groupBy', ...ATTRIBUTION]);
 const query = new URLSearchParams();
 for (const key of ['from', 'to']) {
@@ -1283,7 +1345,7 @@ print({ worklite: { type: 'snapshot' }, data });
 `],
   ['scripts/inspect-gateway-request-logs.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, stringValue } from './lib.mjs';
-const ATTRIBUTION = ['surface', 'conversationId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'];
+const ATTRIBUTION = ['surface', 'conversationId', 'agentRunId', 'agentExecutionId', 'projectTaskId', 'executor', 'coderId', 'teamRunId', 'workflowId', 'workflowRunId', 'nodeRunId'];
 const raw = input(); exactKeys(raw, ['from', 'to', 'provider', 'model', 'statusClass', ...ATTRIBUTION, 'limit', 'cursor']);
 const query = new URLSearchParams();
 for (const key of ['from', 'to']) {
@@ -1312,7 +1374,8 @@ print({ worklite: { type: 'snapshot' }, data });
     "const raw = input(); exactKeys(raw, ['providerId']);",
     "const providerId = requiredString(raw.providerId, 'providerId', 240);",
     "const result = await call('/portkey-gateway/providers/' + encodeURIComponent(providerId) + '/discover-models', { method: 'POST' });",
-    "const models = Array.isArray(result && result.models) ? result.models.filter((model) => typeof model === 'string').map((model) => model.trim()).filter(Boolean) : [];",
+    "if (!Array.isArray(result?.models) || result.models.some((model) => typeof model !== 'string' || !model.trim())) throw Object.assign(new Error('Invalid models response.'), { workliteCode: 'PLATFORM_API_RESPONSE_INVALID' });",
+    "const models = result.models;",
     "print({ worklite: { type: 'provider_models', providerId }, data: { models } });",
   ].join('\n') + '\n'],
   ['scripts/update-provider-models.mjs', [
@@ -1322,8 +1385,9 @@ print({ worklite: { type: 'snapshot' }, data });
     "const providerId = requiredString(raw.providerId, 'providerId', 240);",
     "const addModels = stringArray(raw.addModels, 'addModels', 100, 240);",
     "const result = await call('/portkey-gateway/providers/' + encodeURIComponent(providerId) + '/models', { method: 'PATCH', body: { addModels } });",
-    "const models = Array.isArray(result && result.models) ? result.models.filter((model) => typeof model === 'string').map((model) => model.trim()).filter(Boolean) : [];",
-    "const resultProviderId = result && typeof result.providerId === 'string' ? result.providerId : providerId;",
+    "if (!Array.isArray(result?.models) || result.models.some((model) => typeof model !== 'string' || !model.trim()) || result.providerId !== providerId) throw Object.assign(new Error('Invalid provider models response.'), { workliteCode: 'PLATFORM_API_RESPONSE_INVALID' });",
+    "const models = result.models;",
+    "const resultProviderId = result.providerId;",
     "print({ worklite: { type: 'provider_models', providerId: resultProviderId }, data: { providerId: resultProviderId, models } });",
   ].join('\n') + '\n'],
   ['scripts/create-provider.mjs', `#!/usr/bin/env node
@@ -1363,7 +1427,7 @@ if (raw.confirm !== true) throw new Error('confirm must be true after the user e
 if (raw.force !== undefined && typeof raw.force !== 'boolean') throw new Error('force must be a boolean when provided.');
 const force = raw.force === true;
 const data = await call('/mcp-servers/' + encodeURIComponent(mcpServerId) + (force ? '?force=true' : ''), { method: 'DELETE' });
-print({ worklite: { type: 'resource', resourceType: 'mcp-server', id: mcpServerId }, data: data ?? { deleted: mcpServerId, force } });
+print({ worklite: { type: 'snapshot' }, data: data ?? { deleted: mcpServerId, force } });
 `],
   ['scripts/create-workflow.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, print, requiredString } from './lib.mjs';
@@ -1436,7 +1500,7 @@ if (raw.confirm !== true) throw new Error('confirm must be true after the user e
 if (raw.force !== undefined && typeof raw.force !== 'boolean') throw new Error('force must be a boolean when provided.');
 const force = raw.force === true;
 await call('/workflows/' + encodeURIComponent(workflowId) + (force ? '?force=true' : ''), { method: 'DELETE' });
-print({ worklite: { type: 'resource', resourceType: 'workflow', id: workflowId }, data: { deleted: workflowId, force } });
+print({ worklite: { type: 'snapshot' }, data: { deleted: workflowId, force } });
 `],
   ['scripts/dispatch-task.mjs', `#!/usr/bin/env node
 import { call, exactKeys, input, oneOf, print, requiredString, text } from './lib.mjs';
@@ -1971,11 +2035,11 @@ export async function initializeDatabase(db: Database): Promise<void> {
   `).all() as Array<{ id: string; workspace_id: string; agent_id: string; model_messages: string; has_sub_session: number }>;
   const staleToolCalls = staleExecutions.length > 0
     ? db.$client.prepare(`
-        SELECT execution_id, tool_call_id, tool_name, mcp_server_id, mcp_tool_name, shell
+        SELECT id, workspace_id, execution_id, tool_call_id, tool_name, mcp_server_id, mcp_tool_name, shell, skill_id, script_path, command_execution_id, package_files
         FROM agent_tool_calls
         WHERE status = 'running' AND result_appended = 0 AND execution_id IN (SELECT id FROM agent_executions WHERE status = 'running')
         ORDER BY rowid
-      `).all() as Array<{ execution_id: string; tool_call_id: string; tool_name: string; mcp_server_id: string | null; mcp_tool_name: string | null; shell: unknown }>
+      `).all() as Array<{ id: string; workspace_id: string; execution_id: string; tool_call_id: string; tool_name: string; mcp_server_id: string | null; mcp_tool_name: string | null; shell: unknown; skill_id: string | null; script_path: string | null; command_execution_id: string | null; package_files: string }>
     : [];
   const restartResults = new Map<string, StoredAgentModelMessage[]>();
   for (const execution of staleExecutions) {
@@ -1988,7 +2052,7 @@ export async function initializeDatabase(db: Database): Promise<void> {
         type: 'tool-result' as const,
         toolCallId: call.tool_call_id,
         toolName: restartModelToolName(call),
-        output: { type: 'error-text' as const, value: 'The API restarted before this Agent tool execution completed.' },
+        output: { type: 'error-text' as const, value: call.tool_name === 'skill_script' ? JSON.stringify({ failure: platformFailure('execution', 'PLATFORM_API_RESTARTED', 'unknown'), commandExecutionId: call.command_execution_id }) : 'The API restarted before this Agent tool execution completed. Outcome unknown; inspect effects before retrying.' },
       }));
     if (closures.length > 0) restartResults.set(execution.id, insertAgentToolResults(modelMessages, closures));
   }
@@ -2004,6 +2068,11 @@ export async function initializeDatabase(db: Database): Promise<void> {
           SET status = 'failed', output = 'The API restarted before this Agent tool execution completed.', result_appended = CASE WHEN mcp_tool_name = 'project_task' OR shell IS NOT NULL THEN 0 ELSE 1 END, finished_at = unixepoch() * 1000
           WHERE status = 'running' AND result_appended = 0 AND execution_id IN (SELECT id FROM agent_executions WHERE status = 'running')
       `).run();
+      for (const call of staleToolCalls.filter((item) => item.tool_name === 'skill_script')) {
+        const failure = platformFailure('execution', 'PLATFORM_API_RESTARTED', 'unknown');
+        db.$client.prepare('UPDATE agent_tool_calls SET output = ? WHERE id = ?').run(JSON.stringify({ failure, commandExecutionId: call.command_execution_id }), call.id);
+        db.insert(schema.auditLogs).values({ id: `failure_${call.id}`, workspaceId: call.workspace_id, action: 'platform.tool_failure', resource: call.id, metadata: { executionId: call.execution_id, toolCallId: call.tool_call_id, skillId: call.skill_id, scriptPath: call.script_path, commandExecutionId: call.command_execution_id, contractHash: platformContractHash(JSON.parse(call.package_files)), failure } }).onConflictDoNothing().run();
+      }
       db.$client.prepare(`
         UPDATE command_executions
           SET status = 'failed', signal = 'SIGHUP', finished_at = unixepoch() * 1000
@@ -2101,36 +2170,20 @@ export async function initializeDatabase(db: Database): Promise<void> {
       SELECT 'gateway-provider', workspaces.id, 'WorkLite Gateway Provider', 'openai/chat', 'connected', '', '[]'
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, protocol = excluded.protocol;
-    INSERT INTO plugins (id, workspace_id, name, description, command)
-      SELECT 'codex-cli-chat', workspaces.id, 'Codex CLI Chat', 'Chat with Codex CLI in the API workspace.', 'codex'
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
-    -- Claude Code runs through the bundled Agent SDK and has no command setting; drop the retired plugin row.
-    DELETE FROM plugins WHERE id = 'claude-code';
-    INSERT INTO plugins (id, workspace_id, name, description, command)
-      SELECT 'feishu-bot', workspaces.id, 'Feishu', 'Talk to Chat and delegate tasks to Agents.', ''
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
-    INSERT INTO plugins (id, workspace_id, name, description, command)
-      SELECT 'wechat-bot', workspaces.id, 'WeChat', 'Talk to Chat from WeChat private messages through the iLink channel.', ''
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
-    INSERT INTO plugins (id, workspace_id, name, description, command)
-      SELECT 'wechat-official-account', workspaces.id, 'WeChat Official Account', 'Publish Agent articles through a human-confirmed browser session.', 'node'
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, description = excluded.description;
+    INSERT INTO chat_channels (id, workspace_id)
+      SELECT 'feishu', id FROM workspaces WHERE slug = 'personal'
+      ON CONFLICT (id) DO NOTHING;
+    INSERT INTO chat_channels (id, workspace_id)
+      SELECT 'wechat', id FROM workspaces WHERE slug = 'personal'
+      ON CONFLICT (id) DO NOTHING;
     INSERT INTO wechat_official_accounts (id, workspace_id, display_name)
       SELECT 'wechat_official_account_personal', workspaces.id, 'Personal Official Account'
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO NOTHING;
     INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
-      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat', 'Handle dialogue and delegate tasks to Agents', '${CHAT_PROMPT.replace('Codex ~/.codex-cli', 'Codex ~/.codex').replace('Codex uses only the cx launch with a Gateway openai/responses or codex/responses model; the native cxo launch is removed.', 'With no model, Codex launches the codex command and uses its local configuration, optionally selected with the configured --config-dir. A model captured by an engine-backed executor role keeps the configured launch command and its per-run WorkLite Gateway Responses Provider.').replace('Both send model traffic through the WorkLite Gateway.', 'Claude Code and explicitly selected Codex models send model traffic through the WorkLite Gateway.').replaceAll("'", "''")}', ''
+      SELECT 'agt_system_helper_chat', workspaces.id, 'system', 'Chat', 'Handle dialogue and delegate tasks to Agents', '${CHAT_PROMPT.replaceAll("'", "''")}', ''
       FROM workspaces WHERE workspaces.slug = 'personal'
       ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Chat', responsibility = 'Handle dialogue and delegate tasks to Agents', system_prompt = excluded.system_prompt;
-    INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model)
-      SELECT 'agt_codex_cli_chat', workspaces.id, 'system', 'Codex CLI Chat', 'Run conversations through the local Codex CLI', 'You are Codex CLI Chat. Answer the user request directly and concisely.', ''
-      FROM workspaces WHERE workspaces.slug = 'personal'
-      ON CONFLICT (id) DO UPDATE SET kind = 'system', name = 'Codex CLI Chat', responsibility = 'Run conversations through the local Codex CLI', system_prompt = 'You are Codex CLI Chat. Answer the user request directly and concisely.';
   `);
 
   db.$client.exec(`

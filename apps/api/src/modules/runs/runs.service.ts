@@ -26,7 +26,7 @@ import { AgentJsonOutputError, type GatewayCorrelation } from '@worklite/model-g
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
-import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
 import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import { renderCanvasSticker, validateCanvasStickerConfig } from './canvas-sticker';
 import { renderCanvasScript, validateCanvasRenderCode, validateCanvasRenderConfig } from './canvas-render';

@@ -1,3 +1,4 @@
+import { agentFiles } from './agent-file-store';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Request } from 'express';
@@ -5,10 +6,21 @@ import type { AgentRunDetailView, AgentRunListView, AgentRunView } from '@workli
 import { agentCapabilityResults, agentExecutions, agentRuntimeEvents, agentRuntimeRuns, agentRuntimeSessions, agents, agentToolCalls, artifacts, auditLogs, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
+import { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 
 @Injectable()
 export class AgentHistoryService {
-  constructor(@Inject(DATABASE) private readonly db: Database, private readonly workspaces: WorkspaceService) {}
+  constructor(@Inject(DATABASE) private readonly db: Database, private readonly workspaces: WorkspaceService, private readonly gateway?: PortkeyGatewayService) {}
+
+  async usage(request: Request, runId: string) {
+    const { id: workspaceId } = await this.workspaces.getWorkspace(request, 'personal');
+    const invocation = this.db.select().from(auditLogs).where(and(eq(auditLogs.id, runId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'agent.invocation'))).get();
+    const owner = this.db.select({ agentId: agentExecutions.agentId }).from(agentExecutions).where(and(eq(agentExecutions.id, invocation?.resource ?? runId), eq(agentExecutions.workspaceId, workspaceId))).get();
+    if (!owner) throw new NotFoundException('Agent run not found.');
+    const detail = await this.detail(request, owner.agentId, runId);
+    const usage = ({ id, executionId, agentId, agentName, parentRunId, status, runtime, usage, commandExecutionId }: AgentRunView) => ({ id, executionId, agentId, agentName, parentRunId, status, runtime, usage, commandExecutionId });
+    return { run: usage(detail.run), invocations: detail.invocations.map(usage), gatewayUsage: detail.gatewayUsage };
+  }
 
   async list(request: Request, agentId: string, offset = 0): Promise<AgentRunListView> {
     const { id: workspaceId } = await this.workspaces.getWorkspace(request, 'personal');
@@ -25,7 +37,12 @@ export class AgentHistoryService {
   async detail(request: Request, agentId: string, runId: string): Promise<AgentRunDetailView> {
     const { id: workspaceId } = await this.workspaces.getWorkspace(request, 'personal');
     const agent = this.agent(workspaceId, agentId);
-    const row = this.db.select().from(auditLogs).where(and(eq(auditLogs.id, runId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'agent.invocation'), sql`json_extract(${auditLogs.metadata}, '$.agentId') = ${agentId}`)).get();
+    // An execution id resolves to its recorded root, including the child invocation tree.
+    const row = this.db.select().from(auditLogs).where(and(
+      sql`(${auditLogs.id} = ${runId} or (${auditLogs.resource} = ${runId} and json_extract(${auditLogs.metadata}, '$.parentRunId') is null))`,
+      eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.action, 'agent.invocation'),
+      sql`(json_extract(${auditLogs.metadata}, '$.agentId') = ${agentId} or exists (select 1 from agent_executions e where e.id = ${auditLogs.resource} and e.workspace_id = ${workspaceId} and e.agent_id = ${agentId}))`,
+    )).orderBy(auditLogs.createdAt, auditLogs.id).get();
     let run: AgentRunView;
     let invocations: AgentRunView[];
     if (row) {
@@ -67,10 +84,43 @@ export class AgentHistoryService {
       const active = calls.filter((call) => call.status === 'running' && (!row || (call.input as { __agentRunId?: string } | null)?.__agentRunId === item.id));
       return { ...item, currentActivity: active.length ? { phase: 'tool', toolName: active.map((call) => call.toolName ?? 'tool').join(', ') } : { phase: 'model' } };
     };
-    return { run: withActivity(run), invocations: invocations.map(withActivity), artifacts: outputs };
+    const gatewayUsage = await this.gatewayUsage(run, invocations);
+    return { run: withActivity(run), invocations: invocations.map(withActivity), artifacts: outputs, gatewayUsage };
+  }
+
+  private async gatewayUsage(run: AgentRunView, invocations: AgentRunView[]): Promise<NonNullable<AgentRunDetailView['gatewayUsage']>> {
+    try {
+      if (!this.gateway) return { status: 'unavailable', summary: null, groups: [] };
+      const stats = await this.gateway.stats({ from: run.createdAt, to: new Date().toISOString(), agentExecutionId: run.executionId, groupBy: 'agent_run' }, { startGateway: false, timeoutMs: 3000 });
+      const ids = new Set(invocations.map((item) => item.id));
+      const groups = stats.attribution.groups.filter((group) => group.agentRunId && ids.has(group.agentRunId));
+      // Build the selected subtree's totals from SQL groups. Sibling requests must
+      // not leak into a child detail, and an empty historical result is not zero usage.
+      if (!groups.length) return { status: 'available', summary: null, groups };
+      const total = (key: 'promptTokens' | 'completionTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'totalTokens') => {
+        const values = groups.map((group) => group[key]).filter((value): value is number => value !== null);
+        return values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+      };
+      const requests = groups.reduce((sum, group) => sum + group.requests, 0);
+      const successful = groups.reduce((sum, group) => sum + group.successful, 0);
+      return { status: 'available', groups, summary: {
+        requests, successful, failed: requests - successful, successRate: requests ? Math.round(successful / requests * 1000) / 10 : null,
+        averageLatencyMs: requests ? Math.round(groups.reduce((sum, group) => sum + (group.averageLatencyMs ?? 0) * group.requests, 0) / requests) : null,
+        promptTokens: total('promptTokens'), completionTokens: total('completionTokens'), cacheReadTokens: total('cacheReadTokens'), cacheCreationTokens: total('cacheCreationTokens'), totalTokens: total('totalTokens'),
+        usageRequests: groups.reduce((sum, group) => sum + group.usageRequests, 0),
+      } };
+    } catch {
+      // History and saved runtime usage remain readable during Gateway upgrades/outages.
+      return { status: 'unavailable', summary: null, groups: [] };
+    }
   }
 
   private agent(workspaceId: string, agentId: string) {
+    const catalog = agentFiles(this.db);
+    catalog?.refresh(workspaceId);
+    if (catalog && catalog.get(agentId)?.parentId !== null) throw new NotFoundException('Agent not found.');
+    const children = new Set(this.db.select().from(agents).where(eq(agents.workspaceId, workspaceId)).all().flatMap((row) => row.collaboration?.subAgentIds ?? []));
+    if (!catalog && children.has(agentId)) throw new NotFoundException('Sub-Agent history belongs to its owning Agent.');
     const agent = this.db.select({ name: agents.name }).from(agents).where(and(eq(agents.workspaceId, workspaceId), eq(agents.id, agentId))).get();
     if (!agent) throw new NotFoundException('Agent not found.');
     return agent;
@@ -93,17 +143,21 @@ export class AgentHistoryService {
   private runtimeUsage(workspaceId: string, executionId: string): AgentRunView['usage'] {
     const session = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, executionId), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
     if (!session) return null;
-    const rows = this.db.select({ runId: agentRuntimeEvents.runId, data: agentRuntimeEvents.data }).from(agentRuntimeEvents).innerJoin(agentRuntimeRuns, eq(agentRuntimeRuns.id, agentRuntimeEvents.runId)).where(eq(agentRuntimeRuns.sessionId, executionId)).orderBy(agentRuntimeRuns.createdAt, agentRuntimeEvents.sequence).all();
+    // Two turns can have the same creation timestamp. Keep each turn's events
+    // together so an older turn with more notifications cannot become the latest.
+    const rows = this.db.select({ runId: agentRuntimeEvents.runId, data: agentRuntimeEvents.data }).from(agentRuntimeEvents).innerJoin(agentRuntimeRuns, eq(agentRuntimeRuns.id, agentRuntimeEvents.runId)).where(eq(agentRuntimeRuns.sessionId, executionId)).orderBy(agentRuntimeRuns.createdAt, sql`${agentRuntimeRuns}.rowid`, agentRuntimeEvents.sequence).all();
     const byRun = new Map<string, NonNullable<AgentRunView['usage']>>();
     for (const row of rows) if (row.data.kind === 'activity' && row.data.usage) byRun.set(row.runId, row.data.usage);
     const usages = [...byRun.values()];
     if (session.runtime === 'codex') return usages.at(-1) ?? null;
     if (!usages.length) return null;
-    return usages.reduce((sum, usage) => ({ inputTokens: sum.inputTokens === null || usage.inputTokens === null ? null : sum.inputTokens + usage.inputTokens, outputTokens: sum.outputTokens === null || usage.outputTokens === null ? null : sum.outputTokens + usage.outputTokens, totalTokens: sum.totalTokens === null || usage.totalTokens === null ? null : sum.totalTokens + usage.totalTokens }));
+    return usages.reduce((sum, usage) => ({ inputTokens: sum.inputTokens === null || usage.inputTokens === null ? null : sum.inputTokens + usage.inputTokens, outputTokens: sum.outputTokens === null || usage.outputTokens === null ? null : sum.outputTokens + usage.outputTokens, totalTokens: sum.totalTokens === null || usage.totalTokens === null ? null : sum.totalTokens + usage.totalTokens,
+      cacheReadTokens: sum.cacheReadTokens == null || usage.cacheReadTokens == null ? null : sum.cacheReadTokens + usage.cacheReadTokens,
+      cacheCreationTokens: sum.cacheCreationTokens == null || usage.cacheCreationTokens == null ? null : sum.cacheCreationTokens + usage.cacheCreationTokens }));
   }
 
   private execution(row: typeof agentExecutions.$inferSelect, name: string): AgentRunView {
-    return { id: row.id, executionId: row.id, agentId: row.agentId, agentName: name, parentRunId: null, task: row.displayMessages.find((message) => message.role === 'user')?.content ?? '', status: row.status, usage: this.runtimeUsage(row.workspaceId, row.id),
+    return { id: row.id, executionId: row.id, agentId: row.agentId, agentName: name, parentRunId: null, runtime: row.capabilitySnapshot?.agent.runtime?.kind, task: row.displayMessages.find((message) => message.role === 'user')?.content ?? '', status: row.status, usage: this.runtimeUsage(row.workspaceId, row.id),
       output: row.displayMessages.filter((message) => message.role === 'assistant').map((message) => message.content).join('\n\n'), error: row.error, createdAt: row.createdAt.toISOString(), finishedAt: ['running', 'waiting_for_input'].includes(row.status) ? null : row.updatedAt.toISOString() };
   }
 }

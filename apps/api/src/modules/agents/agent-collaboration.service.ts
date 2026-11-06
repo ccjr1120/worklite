@@ -1,3 +1,4 @@
+import { agentFiles } from './agent-file-store';
 import { SubAgentInstance } from './sub-agent-instance';
 import { delegationOverrides, delegationOverridesSchema, DelegationFailure, TASK_OWNERSHIP_PROMPT, type DelegationOverrides } from './agent-delegation';
 import { BuiltinAgentToolsService } from './builtin-agent-tools.service';
@@ -10,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { AgentRunView } from '@worklite/contracts';
 import type { Request } from 'express';
-import { agentCapabilityResults, artifacts, auditLogs, agentExecutions, agentMcpServers, agentPendingActions, agents, agentSkills, agentToolCalls, skillFiles, skills, type Database } from '@worklite/db';
+import { normalizeAgentModelMessages, agentCapabilityResults, artifacts, auditLogs, agentExecutions, agentMcpServers, agentPendingActions, agents, agentSkills, agentToolCalls, skillFiles, skills, type Database } from '@worklite/db';
 import type { GatewayAgentMessage, GatewayToolDefinition } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
@@ -22,9 +23,9 @@ const invocationSchema = { type: 'object', additionalProperties: false, required
 export const CHAT_AGENT_TOOLS: GatewayToolDefinition[] = [
   { name: 'control_agent_instance', description: 'Pause or resume one existing engine-backed sub-Agent instance inside an active lead execution. Read the lead history to identify the exact child runId; never guess or start replacement work. Other instances continue. Pause requires a saved engine session; resume continues that same session. Controls last only for the owning execution lifetime, not across API restarts.', inputSchema: { type: 'object', additionalProperties: false, required: ['agentId', 'executionId', 'runId', 'action'], properties: { agentId: { type: 'string', description: 'Owning top-level Agent id.' }, executionId: { type: 'string' }, runId: { type: 'string', description: 'Exact child invocation id from the lead history.' }, action: { type: 'string', enum: ['pause', 'resume'] } } } },
   { name: 'inspect_agents', description: 'List the user-facing Agents and their responsibilities. Only top-level Agents are listed and counted. Sub-Agents are private implementation details of their owning Agent; do not enumerate them or classify Agents as built-in or Teams.', inputSchema: { type: 'object', additionalProperties: false, properties: {} } },
-  { name: 'run_agent', description: 'Delegate the original user request and explicit constraints to an existing Agent by id. Do not add Chat-authored research, plans, conclusions or extra requirements; the selected Agent decides how to fulfill the goal. It dynamically coordinates its sub-Agents and capabilities. Starts independent background work, or wakes the exact saved instance when executionId is provided, and returns its accepted reference immediately. Chat remains available. Completed, failed and cancelled native Agent instances can continue with saved context and tool evidence. To change models and continue, first update and verify the Agent configuration, then supply the original executionId; native continuation uses the latest configuration. Running or still-settling instances cannot continue yet, and pending questions must be answered first. Do not replay uncertain external effects. Completion or failure is reported automatically; do not poll, wait for completion, or claim the task is complete from the launch receipt.', inputSchema: { ...invocationSchema, properties: { ...invocationSchema.properties, executionId: { type: 'string', description: 'Continue or modify this exact saved Agent instance. Never start a replacement instance when this is provided.' }, projectDirectory: { type: 'string', description: 'Absolute existing project directory for code or local file work. Resolve project names with search_local_projects.' } } } },
+  { name: 'run_agent', description: 'Delegate the original user request and explicit constraints; the selected Agent decides how to fulfill the goal. Do not add extra research requirements or deliverables. Start or continue actual work, never a status/explanation query or stop request. mode=new starts an independent task with only necessary context. mode=continue appends new requirements to the exact same task; supply executionId and continuationReason. Same Agent, same project or an instance mention alone does not imply continuation. Read saved records to answer progress/failure questions; use cancellation APIs to stop. Cancelled tasks require an explicit user request to resume and resumeCancelled=true. Running or pending-input tasks must be controlled or answered, not relaunched. Inspect failed/uncertain external effects before retrying. A launch receipt is not completion; results are reported automatically.', inputSchema: { ...invocationSchema, required: ['agentId', 'task', 'mode'], properties: { ...invocationSchema.properties, mode: { type: 'string', enum: ['new', 'continue'] }, continuationReason: { type: 'string', description: 'For continue: identify the same task and the new requirement or supplied information. Do not use for status queries or unrelated goals.' }, resumeCancelled: { type: 'boolean', description: 'True only when the user explicitly asks to resume a cancelled task.' }, executionId: { type: 'string', description: 'Exact existing task for mode=continue only.' }, projectDirectory: { type: 'string', description: 'Absolute existing project directory; resolve names with search_local_projects.' } } } },
 ];
-const subInvocationSchema = { ...invocationSchema, properties: { ...invocationSchema.properties, overrides: delegationOverridesSchema, background: { type: 'boolean', description: 'Return the instance runId immediately so you can pause/resume it; collect its result with wait_sub_agent.' } } };
+const subInvocationSchema = { ...invocationSchema, properties: { ...invocationSchema.properties, runId: { type: 'string', description: 'Continue this exact completed or failed directly owned invocation with its saved context. Never replace it with a new instance.' }, overrides: delegationOverridesSchema, background: { type: 'boolean', description: 'Return the instance runId immediately so you can pause/resume it; collect its result with wait_sub_agent.' } } };
 const RESULT_TOOLS: GatewayToolDefinition[] = [
   { name: 'read_result', description: 'Read a saved result, including failed specialist raw output and tool evidence. Use path to focus on a field. For large values use offset and maxChars to read serialized text in pages. References are scoped to this task.', inputSchema: { type: 'object', additionalProperties: false, required: ['resultRef'], properties: { resultRef: { type: 'string' }, path: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, maxChars: { type: 'integer', minimum: 1, maximum: 12000 } } } },
   { name: 'store_result', description: 'Save your own work or a repaired specialist result for subsequent tools. This only stores data; it does not publish, execute or verify its factual accuracy.', inputSchema: { type: 'object', additionalProperties: false, required: ['value'], properties: { value: {} } } },
@@ -33,10 +34,12 @@ const instanceSchema = { type: 'object', additionalProperties: false, required: 
 const SUB_AGENT_TOOLS: GatewayToolDefinition[] = [
   ...(['pause', 'resume', 'wait'] as const).map((action) => ({ name: `${action}_sub_agent`, description: action === 'pause' ? 'Pause one directly owned engine sub-Agent instance after its session is saved. Other instances continue. Existing file changes remain.' : action === 'resume' ? 'Resume a paused instance using its saved engine session and original runId. Inspect interrupted external effects before retrying.' : 'Wait for one directly owned instance and receive its result. Paused instances wait until resumed.', inputSchema: instanceSchema })),
   { name: 'use_sub_agent_tool', description: 'Take over a directly assigned specialist’s tools yourself without launching its model. Omit toolName to inspect its assigned Skills, executable scripts and tool schemas; then supply an exact toolName and arguments. This does not grant unassigned tools or change saved templates.', inputSchema: { type: 'object', additionalProperties: false, required: ['agentId'], properties: { agentId: { type: 'string' }, toolName: { type: 'string' }, input: {}, skillId: { type: 'string' }, scriptPath: { type: 'string' }, arguments: { type: 'array', items: { type: 'string' } } } } },
-  { name: 'run_sub_agent', description: 'Ask one assigned sub-Agent to perform a task with explicit context. Choose the specialist and next task from current evidence.', inputSchema: subInvocationSchema },
+  { name: 'run_sub_agent', description: 'Ask one assigned sub-Agent to perform a task with explicit context. Choose the specialist and next task from current evidence. For questions about previous work, answer from existing results first; if needed, pass its runId to ask the original specialist using saved context.', inputSchema: subInvocationSchema },
   { name: 'run_sub_agents', description: 'Run independent assigned sub-Agent tasks concurrently and receive each result. Use a separate call when a task depends on an earlier result.', inputSchema: { type: 'object', additionalProperties: false, required: ['tasks'], properties: { tasks: { type: 'array', minItems: 1, maxItems: 4, items: subInvocationSchema } } } },
 ];
 const CAPABILITY_TOOL: GatewayToolDefinition = { name: 'use_capability', description: 'Call one configured capability with its declared input ports. A WeChat publish capability also accepts independent article operations in input: {operation:"list"}; {operation:"inspect"|"verify",runId,draftId}; {operation:"render_image",runId,draftId,key,html,width?,height?}; {operation:"revise",runId,draftId,requestKey,title?,imageReplacements?:{imageKey:artifactId}}; {operation:"publish",mode:"draft"|"publish",runId?,draftId?,article?,metadata?,images?,coverImage?,imageReplacements?}. List identifies saved articles; inspect reads their text and images; publish can reuse a recorded article and replace selected images. Only call the operations needed for the user task. Supply {$result: resultRef, path?: "$.field"} anywhere in input to pass a previous result without copying large images or text. To resume a user action, supply resumeCallId from the prior result with the same capabilityId; do not create a fresh publication.', inputSchema: { type: 'object', additionalProperties: false, required: ['capabilityId'], properties: { capabilityId: { type: 'string' }, input: {}, resumeCallId: { type: 'string' } } } };
+
+type InvocationState = { messages?: GatewayAgentMessage[]; resumeId?: string };
 
 type AgentSnapshot = { agent: typeof agents.$inferSelect; skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>; serverIds: string[] };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -63,25 +66,41 @@ export class AgentCollaborationService {
   constructor(@Inject(DATABASE) private readonly db: Database, private readonly resources: WorkspaceResourcesService, private readonly invocations: IsolatedAgentInvocationService, private readonly capabilities: AgentCapabilitiesService, private readonly executors?: ProjectExecutorService, private readonly builtinTools?: BuiltinAgentToolsService) {}
 
   list(workspaceId: string) {
+    const catalog = agentFiles(this.db);
+    catalog?.refresh(workspaceId);
     const rows = this.db.select().from(agents).where(and(eq(agents.workspaceId, workspaceId), eq(agents.kind, 'custom'))).all();
     const privateIds = new Set(rows.flatMap((agent) => agent.collaboration?.subAgentIds ?? []));
-    return rows.filter((agent) => !privateIds.has(agent.id)).map((agent) => ({ id: agent.id, name: agent.name, responsibility: agent.responsibility }));
+    return rows.filter((agent) => catalog ? catalog.get(agent.id)?.parentId === null : !privateIds.has(agent.id)).map((agent) => ({ id: agent.id, name: agent.name, responsibility: agent.responsibility }));
   }
 
   async run(workspaceId: string, executionId: string, agentId: string, task: unknown, signal: AbortSignal, onTextDelta?: (delta: string) => void | Promise<void>, projectDirectory?: string, rootToolCallId?: string, preferredRootRunId?: string): Promise<string> {
     const owner = this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).get();
     if (!owner) throw new NotFoundException('Agent execution not found.');
+    const cleaned = normalizeAgentModelMessages(owner.modelMessages);
+    if (JSON.stringify(cleaned) !== JSON.stringify(owner.modelMessages)) {
+      signal.throwIfAborted();
+      const resultRef = `acr_${randomUUID()}`;
+      const messages = [{ role: 'user' as const, content: `Original history before recovery repair: resultRef ${resultRef}. Use read_result only when needed.` }, ...cleaned];
+      this.db.transaction((tx) => {
+        tx.insert(agentCapabilityResults).values({ id: resultRef, executionId, value: { kind: 'conversation-history', messages: owner.modelMessages } }).run();
+        tx.update(agentExecutions).set({ modelMessages: messages }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
+      });
+      owner.modelMessages = messages;
+    }
+    const catalog = agentFiles(this.db);
+    catalog?.refresh(workspaceId);
     // Freeze the complete reachable directory before invoking any model or tool.
     const directory = new Map<string, AgentSnapshot>();
     const capture = (id: string, ancestors: string[]) => {
       if (ancestors.includes(id)) throw new BadRequestException('Sub-Agent assignments contain a cycle.');
       if (directory.has(id)) return;
       const agent = this.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.workspaceId, workspaceId), eq(agents.kind, 'custom'))).get();
-      if (!agent) throw new BadRequestException('The selected Agent must be available in this workspace.');
+      if (!agent || (catalog && !catalog.get(id))) throw new BadRequestException('The selected Agent must be available in this workspace.');
       if (agent.runtime.kind !== 'native' && ((agent.collaboration?.subAgentIds.length ?? 0) > 0 || (agent.collaboration?.capabilities.length ?? 0) > 0 || (agent.collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate engine-backed sub-Agents.');
       const assigned = this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation }).from(agentSkills).innerJoin(skills, eq(skills.id, agentSkills.skillId)).where(and(eq(agentSkills.agentId, id), eq(skills.workspaceId, workspaceId))).all();
-      if (assigned.some((skill) => skill.validation !== 'valid')) throw new BadRequestException('An assigned Skill is invalid.');
-      directory.set(id, { agent, skills: assigned.map((skill) => ({ ...skill, files: this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skill.id)).all() })), serverIds: this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, id)).all().map((row) => row.id) });
+      if (!catalog && assigned.some((skill) => skill.validation !== 'valid')) throw new BadRequestException('An assigned Skill is invalid.');
+      const fileEntry = catalog?.get(id);
+      directory.set(id, fileEntry ? { agent, skills: fileEntry.skills, serverIds: fileEntry.serverIds } : { agent, skills: assigned.map((skill) => ({ ...skill, files: this.db.select({ path: skillFiles.path, content: skillFiles.content }).from(skillFiles).where(eq(skillFiles.skillId, skill.id)).all() })), serverIds: this.db.select({ id: agentMcpServers.mcpServerId }).from(agentMcpServers).where(eq(agentMcpServers.agentId, id)).all().map((row) => row.id) });
       for (const child of agent.collaboration?.subAgentIds ?? []) capture(child, [...ancestors, id]);
     };
     this.db.transaction(() => {
@@ -105,15 +124,30 @@ export class AgentCollaborationService {
       return Object.fromEntries(Object.entries(input).map(([key, item]) => [key, resolve(item)]));
     };
     // Audit records retain the actual invocation tree independently of later Agent edits.
-    const invoke = async (id: string, context: unknown, ancestors: string[], parentRunId: string | null = null, overrides: DelegationOverrides = {}, invocationSignal: AbortSignal = signal, instanceRunId?: string): Promise<unknown> => {
+    const invoke = async (id: string, context: unknown, ancestors: string[], parentRunId: string | null = null, overrides: DelegationOverrides = {}, invocationSignal: AbortSignal = signal, instanceRunId?: string, continuationRunId?: string): Promise<unknown> => {
       const lastUser = [...owner.displayMessages].reverse().find((message) => message.role === 'user')?.content ?? '';
       const mention = /\[@[^\]\n]+\]\(\/agents\/([^?/)]+)\?runId=(air_[A-Za-z0-9-]+)\)/.exec(lastUser);
       const requestedRunId = parentRunId === null ? preferredRootRunId ?? (mention && decodeURIComponent(mention[1]!) === id ? mention[2] : undefined) : undefined;
-      const previous = parentRunId === null && preferredRootRunId ? this.db.select().from(auditLogs).where(and(eq(auditLogs.id, preferredRootRunId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).get() : undefined;
+      const previousId = continuationRunId ?? (parentRunId === null ? preferredRootRunId : undefined);
+      const previous = previousId ? this.db.select().from(auditLogs).where(and(eq(auditLogs.id, previousId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).get() : undefined;
       const savedRun = previous?.metadata as AgentRunView | undefined;
-      if (savedRun && (savedRun.agentId !== id || savedRun.parentRunId)) throw new BadRequestException('Only the owning lead Agent instance can be continued.');
-      const runId = instanceRunId ?? savedRun?.id ?? (requestedRunId && !this.db.select({ id: auditLogs.id }).from(auditLogs).where(eq(auditLogs.id, requestedRunId)).get() ? requestedRunId : `air_${randomUUID()}`);
+      if (continuationRunId && !savedRun) throw new BadRequestException('The original sub-Agent invocation is unavailable.');
+      if (savedRun && (savedRun.agentId !== id || savedRun.parentRunId !== parentRunId)) throw new BadRequestException('Only the owning Agent can continue this exact invocation.');
+      if (continuationRunId && !['completed', 'failed', 'cancelled'].includes(savedRun!.status)) throw new BadRequestException('The sub-Agent invocation must settle before a follow-up.');
+      const runId = savedRun?.id ?? instanceRunId ?? (requestedRunId && !this.db.select({ id: auditLogs.id }).from(auditLogs).where(eq(auditLogs.id, requestedRunId)).get() ? requestedRunId : `air_${randomUUID()}`);
+      const stateId = `${runId}:state`;
+      const savedState = this.db.select().from(auditLogs).where(and(eq(auditLogs.id, stateId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation_state'))).get();
+      const state = (savedState?.metadata ?? {}) as InvocationState;
+      if (continuationRunId) {
+        if (directory.get(id)!.agent.runtime.kind === 'native') {
+          if (!state.messages?.length) throw new BadRequestException('The original model context was not saved; do not silently start replacement research.');
+          state.messages = [...state.messages, { role: 'user', content: JSON.stringify(resolve(context)) }];
+        } else if (!state.resumeId) throw new BadRequestException('The original engine session was not saved; do not silently start replacement research.');
+      }
+      const saveState = () => this.db.insert(auditLogs).values({ id: stateId, workspaceId, action: 'agent.invocation_state', resource: executionId, metadata: state }).onConflictDoUpdate({ target: auditLogs.id, set: { metadata: state } }).run();
       const run: AgentRunView = { id: runId, executionId, agentId: id, agentName: directory.get(id)?.agent.name ?? id, parentRunId,
+        runtime: savedRun?.runtime ?? directory.get(id)!.agent.runtime.kind,
+        ...(savedRun?.commandExecutionId ? { commandExecutionId: savedRun.commandExecutionId } : {}),
         task: savedRun?.task ?? invocationTask(context), currentActivity: { phase: 'model' }, status: 'running', usage: savedRun?.usage ?? null, output: '', error: null, createdAt: savedRun?.createdAt ?? new Date().toISOString(), finishedAt: null };
       if (parentRunId === null && rootToolCallId) {
         const call = this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, rootToolCallId), eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.workspaceId, workspaceId))).get();
@@ -123,14 +157,25 @@ export class AgentCollaborationService {
       if (previous) persist();
       else this.db.insert(auditLogs).values({ id: runId, workspaceId, action: 'agent.invocation', resource: executionId, metadata: { ...run, overrides } }).run();
       try {
-        const execute = (attemptSignal: AbortSignal) => perform(id, context, ancestors, runId, overrides, (usage, cumulative = false) => {
-          run.usage = cumulative || !run.usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens } : {
+        const execute = (attemptSignal: AbortSignal) => perform(id, context, ancestors, runId, overrides, (usage, cumulative = false, commandExecutionId) => {
+          if (!usage) {
+            if (commandExecutionId && run.commandExecutionId !== commandExecutionId) { run.commandExecutionId = commandExecutionId; persist(); }
+            return;
+          }
+          if (commandExecutionId) run.commandExecutionId = commandExecutionId;
+          run.usage = cumulative || !run.usage ? {
+            inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens,
+            ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+            ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+          } : {
             inputTokens: sumUsage(run.usage.inputTokens, usage.inputTokens),
             outputTokens: sumUsage(run.usage.outputTokens, usage.outputTokens),
             totalTokens: sumUsage(run.usage.totalTokens, usage.totalTokens),
+            ...(run.usage.cacheReadTokens !== undefined || usage.cacheReadTokens !== undefined ? { cacheReadTokens: sumUsage(run.usage.cacheReadTokens ?? null, usage.cacheReadTokens ?? null) } : {}),
+            ...(run.usage.cacheCreationTokens !== undefined || usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: sumUsage(run.usage.cacheCreationTokens ?? null, usage.cacheCreationTokens ?? null) } : {}),
           };
           persist();
-        }, attemptSignal, (activity, output) => {
+        }, attemptSignal, state, saveState, (activity, output) => {
           run.currentActivity = activity;
           if (output !== undefined) run.output = output;
           persist();
@@ -163,7 +208,7 @@ export class AgentCollaborationService {
         throw error;
       } finally { run.currentActivity = null; run.finishedAt = new Date().toISOString(); persist(); }
     };
-    const perform = async (id: string, context: unknown, ancestors: string[], runId: string, overrides: DelegationOverrides, onUsage: (usage: NonNullable<AgentRunView['usage']>, cumulative?: boolean) => void, parentSignal: AbortSignal, report: (activity: AgentRunView['currentActivity'], output?: string) => void): Promise<unknown> => {
+    const perform = async (id: string, context: unknown, ancestors: string[], runId: string, overrides: DelegationOverrides, onUsage: (usage: AgentRunView['usage'], cumulative?: boolean, commandExecutionId?: string) => void, parentSignal: AbortSignal, state: InvocationState, saveState: () => unknown, report: (activity: AgentRunView['currentActivity'], output?: string) => void): Promise<unknown> => {
       const signal = overrides.timeoutMs ? AbortSignal.any([parentSignal, AbortSignal.timeout(overrides.timeoutMs)]) : parentSignal;
       signal.throwIfAborted();
       if (remainingCalls <= (ancestors.length ? finishReserve : 0) || ancestors.length >= 8 || ancestors.includes(id)) throw new BadRequestException('Agent collaboration limit reached.');
@@ -218,7 +263,10 @@ export class AgentCollaborationService {
         const launch = await this.executors.captureLaunch(agent.runtime.kind, model);
         const instance = this.instances.get(runId);
         const result = await this.executors.execute({ owner: 'agent', workspaceId, model, launch,
-          ...(instance ? { runtimeSession: { resumeId: instance.resumeId, onSession: async (sessionId: string) => { instance.resumeId = sessionId; } } } : {}), projectDirectory: workingDirectory, systemPrompt: [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [] })}`].join('\n\n'), input: instance?.resumeId ? 'Continue the interrupted task from the saved session. Inspect the current files and tool evidence before retrying any interrupted action; do not repeat uncertain external effects.' : JSON.stringify(resolve(context)), skills: invocationSkills, mcpServers: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), signal, correlation: { surface: 'agent' }, approvalPolicy: agent.runtime.approvalPolicy ?? 'auto', onTextDelta: ancestors.length === 0 ? onTextDelta : undefined, onEvent: (event) => { if (event.usage) onUsage(event.usage, true); } });
+          runtimeSession: { resumeId: instance?.resumeId ?? state.resumeId, onSession: async (sessionId: string) => { state.resumeId = sessionId; saveState(); if (instance) instance.resumeId = sessionId; } }, projectDirectory: workingDirectory, systemPrompt: [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [] })}`].join('\n\n'), input: instance?.resumeId ? 'Continue the interrupted task from the saved session. Inspect the current files and tool evidence before retrying any interrupted action; do not repeat uncertain external effects.' : JSON.stringify(resolve(context)), skills: invocationSkills, mcpServers: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), signal, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId }, approvalPolicy: agent.runtime.approvalPolicy ?? 'auto', onTextDelta: ancestors.length === 0 ? onTextDelta : undefined,
+          // Bind the command as soon as Codex starts, including failures before any
+          // usage arrives. Later cumulative snapshots replace this invocation's usage.
+          onEvent: (event) => { if (event.usage || event.commandExecutionId) onUsage(event.usage ?? null, true, event.commandExecutionId); } });
         signal.throwIfAborted();
         return validateOutput(result);
       }
@@ -227,7 +275,7 @@ export class AgentCollaborationService {
       const children = config?.subAgentIds ?? [];
       const capabilityList = config?.capabilities ?? [];
       const skillCalls: SkillScriptCallRecord[] = [];
-      const requiredSkills = await this.resources.resolveSkillIds(workspaceId, requiredSkillIds);
+      const requiredSkills = catalog ? requiredSkillIds : await this.resources.resolveSkillIds(workspaceId, requiredSkillIds);
       const privateTools = config?.privateTools ?? [];
       const tools = [...RESULT_TOOLS, ...privateTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), ...(children.length ? SUB_AGENT_TOOLS : []), ...(capabilityList.length ? [CAPABILITY_TOOL] : [])];
       if (requiredSkills.some((skillId) => !invocationSkills.some((skill) => skill.id === skillId))) throw new BadRequestException('A required Skill is not assigned to this Agent.');
@@ -239,10 +287,18 @@ export class AgentCollaborationService {
       let lastOutputAt = 0;
       const thinking = () => report({ phase: 'model' });
       try { text = await this.invocations.execute({
-        initialMessages: ancestors.length === 0 && owner.agentId === id && owner.modelMessages.length ? owner.modelMessages as GatewayAgentMessage[] : undefined,
+        onContextCheckpoint: async (checkpoint) => {
+          signal.throwIfAborted();
+          const resultRef = `acr_${randomUUID()}`;
+          this.db.insert(agentCapabilityResults).values({ id: resultRef, executionId, value: { kind: 'task-checkpoint', runId, ...checkpoint } }).run();
+          return resultRef;
+        },
+        initialMessages: ancestors.length === 0 && owner.agentId === id && owner.modelMessages.length ? owner.modelMessages as GatewayAgentMessage[] : state.messages,
         onMessages: (messages) => {
           signal.throwIfAborted();
           checkpoint = messages;
+          state.messages = messages;
+          saveState();
           if (ancestors.length === 0 && owner.agentId === id) this.db.update(agentExecutions).set({ modelMessages: messages as typeof owner.modelMessages, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
         },
         beforeToolCall: (call) => {
@@ -254,7 +310,7 @@ export class AgentCollaborationService {
         workspaceId, publicModelId: models, context: workingDirectory ? { task: resolve(context), projectDirectory: workingDirectory } : resolve(context), skills: invocationSkills,
         mcpRuntimes: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), builtinToolNames, projectDirectory: workingDirectory, signal,
         systemPrompt: [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [], allowEmptyOutputKeys: config.allowEmptyOutputKeys ?? [], requiredSkillIds: requiredSkills })}. These are the authoritative requirements for this invocation.`, privateTools.length ? 'Private tools belong only to this Agent. Capability tools accept {input: <capability arguments>, resumeCallId?: <previous callId>}; command tools receive their arguments as base64 JSON in WORKLITE_TOOL_INPUT_BASE64. Use actual tool results as evidence.' : '', children.length ? `Assigned sub-Agents: ${JSON.stringify(children.map((child) => ({ id: child, name: directory.get(child)!.agent.name, responsibility: directory.get(child)!.agent.responsibility, instructions: directory.get(child)!.agent.systemPrompt, outputFormat: directory.get(child)!.agent.collaboration?.outputFormat ?? 'text', outputContract: directory.get(child)!.agent.collaboration?.outputContract ?? [], allowEmptyOutputKeys: directory.get(child)!.agent.collaboration?.allowEmptyOutputKeys ?? [], requiredSkillIds: directory.get(child)!.agent.collaboration?.requiredSkillIds ?? [], models: directory.get(child)!.agent.collaboration?.publicModels ?? [], limits: directory.get(child)!.agent.collaboration?.limits, skills: directory.get(child)!.skills.map((skill) => ({ id: skill.id, name: skill.name })), mcpServerIds: directory.get(child)!.serverIds, builtinToolNames: directory.get(child)!.agent.collaboration?.builtinToolNames ?? [] })))}` : '', capabilityList.length ? `Available capabilities (input ports describe the tool input; saved config is applied automatically; WeChat publishing capabilities also accept input.operation list, inspect, render_image, revise, verify or publish with runId/draftId and operation-specific fields, independently of any pipeline): ${JSON.stringify(capabilityList.map((item) => ({ ...item, inputPorts: resolveWorkflowNodeCapability(item.type, item.typeVersion)?.inputs })))}` : '', 'Select each next action from actual results. A waiting_for_input result is not success: tell the user what is required, keep its callId, and resume that exact operation after the user completes it. Do not repeat a failed or uncertain publication automatically.'].filter(Boolean).join('\n\n'),
-        managedTools: tools, jsonOutput: config?.outputFormat === 'json', limits: { maxToolRounds: ancestors.length ? 20 : 40, maxToolCalls: ancestors.length ? 32 : 64, ...config.limits, budgetReminderAtRound: Math.max(1, Math.floor((config.limits.maxToolRounds ?? (ancestors.length ? 20 : 40)) * 0.7)) }, correlation: { surface: 'agent' },
+        managedTools: tools, jsonOutput: config?.outputFormat === 'json', limits: { maxToolRounds: ancestors.length ? 20 : 40, maxToolCalls: ancestors.length ? 32 : 64, ...config.limits, budgetReminderAtRound: Math.max(1, Math.floor((config.limits.maxToolRounds ?? (ancestors.length ? 20 : 40)) * 0.7)) }, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId },
         onTextDelta: async (delta) => {
           rawOutput += delta;
           if (Date.now() - lastOutputAt >= 1000) { report({ phase: 'model' }, rawOutput); lastOutputAt = Date.now(); }
@@ -336,12 +392,15 @@ export class AgentCollaborationService {
                   required(child, 'agentId');
                   if (!children.includes(child)) throw new BadRequestException('This sub-Agent is not assigned to its parent.');
                   if (request.background !== undefined && typeof request.background !== 'boolean') throw new BadRequestException('background must be a boolean.');
-                  const childRunId = `air_${randomUUID()}`;
-                  const work = invoke(child, request.task, [...ancestors, id], runId, delegationOverrides(request.overrides), signal, childRunId);
+                  const followUpRunId = request.runId === undefined ? undefined : required(request.runId, 'runId');
+                  const childRunId = followUpRunId ?? `air_${randomUUID()}`;
+                  const previousInstance = this.instances.get(childRunId);
+                  const work = invoke(child, request.task, [...ancestors, id], runId, delegationOverrides(request.overrides), signal, childRunId, followUpRunId);
                   if (request.background === true) {
                     // Controllable background instances require a resumable execution engine.
                     void work.catch(() => {});
                     if (directory.get(child)!.agent.runtime.kind === 'native') return { agentId: child, runId: childRunId, status: 'completed', result: await work };
+                    if (this.instances.get(childRunId) === previousInstance) await work;
                     return { agentId: child, runId: childRunId, status: 'running', background: true };
                   }
                   return { agentId: child, runId: childRunId, status: 'completed', result: await work }; }

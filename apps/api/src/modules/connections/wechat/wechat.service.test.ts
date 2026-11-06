@@ -561,12 +561,12 @@ describe('WechatService monitor under an upgrade freeze', () => {
       return { ok: true, status: 200, text: async () => '{"ret":0,"errcode":0,"msgs":[],"get_updates_buf":"buf-1"}' };
     };
     const updates: Array<Record<string, unknown>> = [];
-    const plugins = {
+    const configuration = {
       wechatSecret: async () => ({ wechatEnabled: true, botToken: 'tok', wechatAllowedUserId: 'user-a', wechatBaseUrl: '', wechatSyncBuf: '' }),
       updateWechat: async (patch: Record<string, unknown>) => { updates.push(patch); },
     };
     const db = { select: emptyQuery, update: emptyQuery, insert: emptyQuery };
-    const service = new WechatService(db as never, plugins as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, configuration as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
 
     try {

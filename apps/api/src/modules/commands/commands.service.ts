@@ -128,9 +128,9 @@ export class CommandsService {
     return this.completionPromises.get(commandId) ?? this.get(commandId);
   }
 
-  async output(commandId: string): Promise<string> {
+  async output(commandId: string, stream?: 'stdout' | 'stderr'): Promise<string> {
     const events = await this.events(commandId);
-    return events.filter((event) => event.type === 'stdout' || event.type === 'stderr').map((event) => event.data).join('');
+    return events.filter((event) => stream ? event.type === stream : event.type === 'stdout' || event.type === 'stderr').map((event) => event.data).join('');
   }
 
   /**

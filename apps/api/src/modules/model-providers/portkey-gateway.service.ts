@@ -1,3 +1,4 @@
+import { agentFiles } from '../agents/agent-file-store';
 import { createRequire } from 'node:module';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -8,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import type { Request, Response } from 'express';
 import type { CodexAccountUsageSnapshot, CodexAuthStatus, CodexRateLimitSnapshot, CreateModelProviderRequest, DiscoverModelProviderRequest, DiscoverModelProviderResult, GatewayAttributionFilters, GatewayRequestLogDetail, GatewayRequestLogList, GatewayRequestLogQuery, GatewayRequestLogTimeline, ModelProviderProtocol, ModelProviderTestResult, ModelProviderView, PortkeyGatewayModelList, PortkeyGatewayStats, PortkeyGatewayStatsQuery, PortkeyGatewayStatus, PortkeyGatewayView, SystemOneTestInput, SystemOneWorkflowOutput, SystemOneWorkflowRequest, TestModelProviderRequest, UpdateModelProviderModelsRequest, UpdateModelProviderModelsResult, UpdateModelProviderRequest } from '@worklite/contracts';
 import { gatewayAttributionHeaders, type GatewayCorrelation, type ModelProviderConfig } from '@worklite/model-gateway';
-import { agents, type Database } from '@worklite/db';
+import { agents, workspaces, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
@@ -19,6 +20,8 @@ function appendAttributionFilters(search: URLSearchParams, filters: GatewayAttri
   const entries: Array<[string, string | undefined]> = [
     ['surface', filters.surface],
     ['conversationId', filters.conversationId],
+    ['agentRunId', filters.agentRunId],
+    ['agentExecutionId', filters.agentExecutionId],
     ['projectTaskId', filters.projectTaskId],
     ['executor', filters.executor],
     ['coderId', filters.coderId],
@@ -173,15 +176,15 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.gatewayJson<ModelProviderView[]>('/worklite/providers');
   }
 
-  async stats(query: PortkeyGatewayStatsQuery = {}): Promise<PortkeyGatewayStats> {
-    await this.ensureGatewayForDiscovery();
+  async stats(query: PortkeyGatewayStatsQuery = {}, options?: { startGateway?: boolean; timeoutMs?: number }): Promise<PortkeyGatewayStats> {
+    if (options?.startGateway !== false) await this.ensureGatewayForDiscovery();
     const search = new URLSearchParams();
     if (query.from?.trim()) search.set('from', query.from.trim());
     if (query.to?.trim()) search.set('to', query.to.trim());
     if (query.groupBy) search.set('groupBy', query.groupBy);
     appendAttributionFilters(search, query);
     const suffix = search.size > 0 ? `?${search.toString()}` : '';
-    return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats${suffix}`);
+    return this.gatewayJson<PortkeyGatewayStats>(`/worklite/stats${suffix}`, options?.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : undefined);
   }
 
   async requestLogs(query: GatewayRequestLogQuery): Promise<GatewayRequestLogList> {
@@ -262,6 +265,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const provider = await this.gatewayJson<ModelProviderView>(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'PATCH', body: JSON.stringify(input), headers: { 'content-type': 'application/json' } });
     if (input.models !== undefined) {
       const fallbackModel = provider.models[0] ?? '';
+      for (const workspace of this.db.select().from(workspaces).all()) agentFiles(this.db)?.updateModels(workspace.id, providerId, fallbackModel, provider.models);
       const boundAgents = await this.db.select({ id: agents.id, model: agents.model }).from(agents).where(eq(agents.providerId, providerId));
       for (const agent of boundAgents) {
         if (agent.model && provider.models.includes(agent.model)) continue;
@@ -286,6 +290,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
 
   async deleteProvider(providerId: string) {
     await this.gatewayJson(`/worklite/providers/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+    for (const workspace of this.db.select().from(workspaces).all()) agentFiles(this.db)?.updateModels(workspace.id, providerId, '');
     await this.db.update(agents).set({ providerId: null, model: '', updatedAt: new Date() }).where(eq(agents.providerId, providerId));
   }
 

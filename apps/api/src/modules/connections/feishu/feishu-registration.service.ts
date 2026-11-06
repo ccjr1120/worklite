@@ -2,10 +2,11 @@ import { BadRequestException, Inject, Injectable, OnModuleDestroy, OnModuleInit 
 import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { FeishuRegistrationView } from '@worklite/contracts';
-import { feishuRegistrations, plugins, type Database } from '@worklite/db';
+import { feishuRegistrations, chatChannels, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
 import { assertRuntimeAdmission, runtimeAdmissionClosed } from '../../../infrastructure/runtime-upgrade-state';
-import { decryptSecret, encryptSecret, FEISHU_PLUGIN_ID, PluginsService } from '../plugins.service';
+import { decryptSecret, encryptSecret } from '../connection-secrets';
+import { FEISHU_CHANNEL_ID, ChatChannelConfigurationService } from '../chat-channel-configuration.service';
 import { FeishuService } from './feishu.service';
 
 // Protocol reference: larksuite/cli internal/auth/app_registration.go at
@@ -33,7 +34,7 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly configuration: PluginsService,
+    private readonly configuration: ChatChannelConfigurationService,
     private readonly feishu: FeishuService,
   ) {}
 
@@ -74,14 +75,14 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
   }
 
   async completeManualBinding(): Promise<void> {
-    const [configuration] = await this.db.select().from(plugins).where(eq(plugins.id, FEISHU_PLUGIN_ID)).limit(1);
+    const [configuration] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, FEISHU_CHANNEL_ID)).limit(1);
     if (!configuration?.feishuAllowedUserId) return;
     await this.db.update(feishuRegistrations).set({ status: 'completed', updatedAt: new Date() })
-      .where(and(eq(feishuRegistrations.pluginId, FEISHU_PLUGIN_ID), eq(feishuRegistrations.status, 'needs_user_id')));
+      .where(and(eq(feishuRegistrations.channelId, FEISHU_CHANNEL_ID), eq(feishuRegistrations.status, 'needs_user_id')));
   }
 
   private async begin(): Promise<FeishuRegistrationView> {
-    await this.configuration.get(FEISHU_PLUGIN_ID);
+    await this.configuration.get(FEISHU_CHANNEL_ID);
     const current = await this.latest();
     if (current?.status === 'pending' && current.expiresAt && current.expiresAt.getTime() > Date.now()) return view(current);
     if (current?.status === 'pending') await this.finish(current, 'expired');
@@ -95,7 +96,7 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
     if (!response.ok || data.error || !data.device_code || !data.user_code) throw new BadRequestException('飞书未返回有效的应用注册信息，请重试。');
     const now = new Date();
     const registration: Registration = {
-      pluginId: FEISHU_PLUGIN_ID, id: randomUUID(), status: 'pending',
+      channelId: FEISHU_CHANNEL_ID, id: randomUUID(), status: 'pending',
       deviceCode: encryptSecret(data.device_code),
       verificationUrl: `https://open.feishu.cn/page/cli?user_code=${data.user_code}`,
       expiresAt: new Date(now.getTime() + positive(data.expire_in, 600) * 1_000),
@@ -104,12 +105,12 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
     };
     if (this.stopped) throw new BadRequestException('服务正在关闭，请稍后重新申请。');
     await this.db.insert(feishuRegistrations).values(registration)
-      .onConflictDoUpdate({ target: feishuRegistrations.pluginId, set: registration });
+      .onConflictDoUpdate({ target: feishuRegistrations.channelId, set: registration });
     return view(registration);
   }
 
   private async latest(): Promise<Registration | undefined> {
-    const [registration] = await this.db.select().from(feishuRegistrations).where(eq(feishuRegistrations.pluginId, FEISHU_PLUGIN_ID)).limit(1);
+    const [registration] = await this.db.select().from(feishuRegistrations).where(eq(feishuRegistrations.channelId, FEISHU_CHANNEL_ID)).limit(1);
     return registration;
   }
 
@@ -154,11 +155,11 @@ export class FeishuRegistrationService implements OnModuleInit, OnModuleDestroy 
           verificationUrl: null, nextPollAt: null, error: null, updatedAt: new Date(),
         }).where(pending(registration)).run();
         if (!changed.changes) return false;
-        transaction.update(plugins).set({
+        transaction.update(chatChannels).set({
           feishuAppId: data.client_id!, feishuAppSecret: encryptSecret(data.client_secret!),
           feishuAllowedUserId: openId, feishuEnabled: Boolean(openId),
           feishuStatus: openId ? 'connecting' : 'disconnected', feishuLastError: null, updatedAt: new Date(),
-        }).where(eq(plugins.id, FEISHU_PLUGIN_ID)).run();
+        }).where(eq(chatChannels.id, FEISHU_CHANNEL_ID)).run();
         return true;
       });
       if (stored) await this.feishu.connect();

@@ -4,7 +4,7 @@ import { createDb, initializeDatabase, workflowRuns, workflowVersions, workflows
 import type { RunView } from '@worklite/contracts';
 import type { WorkspaceService } from '../teams/teams.service';
 import type { AgentExecutionsService } from '../agents/agent-executions.service';
-import type { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import type { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
 import type { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import type { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import { RunsService } from './runs.service';

@@ -131,6 +131,8 @@ app.get('/worklite/providers', async (c) => c.json(await listProviders()));
 const attributionQuery = (c: Context) => ({
   surface: c.req.query('surface'),
   conversationId: c.req.query('conversationId'),
+  agentRunId: c.req.query('agentRunId'),
+  agentExecutionId: c.req.query('agentExecutionId'),
   projectTaskId: c.req.query('projectTaskId'),
   executor: c.req.query('executor'),
   coderId: c.req.query('coderId'),

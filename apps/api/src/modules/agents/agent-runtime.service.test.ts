@@ -50,6 +50,7 @@ describe('AgentRuntimeService', () => {
       await request.runtimeSession!.onSession('native-thread-1');
       await request.onTextDelta?.('done');
       await request.onEvent?.({ phase: 'codex.item_completed', itemId: 'item-1', summary: 'not archived', text: 'not archived' });
+      await request.onEvent?.({ phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } });
       return 'done';
     });
     await expect(runtime.executeTurn(request())).resolves.toBe('done');
@@ -63,6 +64,10 @@ describe('AgentRuntimeService', () => {
     expect(db.select().from(agentRuntimeRuns).all().map((run) => run.status)).toEqual(['completed', 'completed']);
     const events = db.select().from(agentRuntimeEvents).all();
     expect(events.filter((event) => event.data.kind === 'settled')).toHaveLength(2);
+    expect(events.filter((event) => event.data.kind === 'activity' && event.data.usage).map((event) => event.data)).toEqual([
+      { kind: 'activity', phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } },
+      { kind: 'activity', phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } },
+    ]);
     expect(JSON.stringify(events)).not.toContain('not archived');
     expect(db.select().from(agentRuntimeSessions).get()?.status).toBe('idle');
   });

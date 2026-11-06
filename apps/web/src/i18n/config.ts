@@ -9,7 +9,7 @@ import zhCommon from './locales/zh-CN/common.json';
 import zhHome from './locales/zh-CN/home.json';
 import zhLogs from './locales/zh-CN/logs.json';
 import zhMcpServers from './locales/zh-CN/mcpServers.json';
-import zhPlugins from './locales/zh-CN/plugins.json';
+import zhConnections from './locales/zh-CN/connections.json';
 import zhRuns from './locales/zh-CN/runs.json';
 import zhSettings from './locales/zh-CN/settings.json';
 import zhSkills from './locales/zh-CN/skills.json';
@@ -27,7 +27,7 @@ const NAMESPACES = [
   'runs',
   'skills',
   'mcpServers',
-  'plugins',
+  'connections',
   'artifacts',
   'settings',
   'logs',
@@ -45,7 +45,7 @@ const resources = {
     runs: zhRuns,
     skills: zhSkills,
     mcpServers: zhMcpServers,
-    plugins: zhPlugins,
+    connections: zhConnections,
     artifacts: zhArtifacts,
     settings: zhSettings,
     logs: zhLogs,

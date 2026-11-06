@@ -47,18 +47,11 @@ export type WorkspaceView = {
   name: string;
 };
 
-export type PluginView = {
-  id: 'codex-cli-chat' | 'feishu-bot' | 'wechat-bot' | 'wechat-official-account';
-  name: string;
-  description: string;
-  command: string;
-  codexConfigPath?: string;
-  enabled: boolean;
-  status: 'available' | 'missing' | 'failed';
+export type ChatChannelConfigurationView = {
+  id: 'feishu' | 'wechat';
   updatedAt: string;
   feishu?: FeishuConnectionView;
   wechat?: WechatConnectionView;
-  officialAccount?: WechatOfficialAccountView;
 };
 
 export type WechatOfficialAccountStatus = 'disconnected' | 'qr_pending' | 'connected' | 'error';
@@ -107,9 +100,7 @@ export type WechatConnectionView = {
   login: WechatLoginView | null;
 };
 
-export type UpdatePluginRequest = {
-  command?: string;
-  codexConfigPath?: string;
+export type UpdateChatChannelRequest = {
   feishu?: { appId: string; appSecret?: string; allowedUserId: string };
   wechat?: { allowedUserId: string };
 };
@@ -256,11 +247,6 @@ export type UpdateChatMemoryRequest = {
   category?: ChatMemoryCategory;
 };
 
-export type PluginTestResult = {
-  enabled: boolean;
-  status: 'available' | 'missing' | 'failed';
-};
-
 // Runtime selection is independent of the model provider. Native retains WorkLite's tool loop.
 export type AgentRuntimeConfiguration =
   | { kind: 'native' }
@@ -280,6 +266,7 @@ export type AgentCollaboration = {
 };
 
 export type AgentView = {
+  subAgents?: AgentView[];
   collaboration?: AgentCollaboration | null;
   runtime?: AgentRuntimeConfiguration;
   chatConfiguration?: { revision: number; extensionPrompt: string; summarizePrompt: string; turnNotificationsEnabled: boolean; turnNotificationSound: string; skillIds: string[] };
@@ -344,7 +331,7 @@ export type AgentExecutionErrorCode =
 export type ChatProgressReport = {
   // stage/progress/updatedAt are presentation fields for the collapsible Web card; the reminder
   // text and its dedupe signature do not depend on them.
-  items: Array<{ kind: 'task' | 'coder' | 'workflow' | 'agent'; id: string; title: string; status: string; agentId?: string; runId?: string; stage?: string; progress?: string; updatedAt?: string }>;
+  items: Array<{ kind: 'task' | 'coder' | 'workflow' | 'agent'; id: string; title: string; status: string; agentId?: string; runId?: string; task?: string; stage?: string; progress?: string; updatedAt?: string }>;
 };
 
 export type AgentExecutionMessage = {
@@ -462,7 +449,7 @@ export type ChatProjectOperationDetailView = {
 };
 
 export type AgentToolCallView = {
-  agentInvocation?: { agentId: string; agentName: string; runId: string; task: string };
+  agentInvocation?: { agentId: string; agentName: string; runId: string; task: string; status?: AgentExecutionStatus | 'paused'; phase?: AgentExecutionPhase };
   shell?: { command: string; state: 'awaiting_confirmation' | 'authorized' | 'reserved' | 'uncertain' | 'settled'; authorizationId?: string; approvedAt?: string };
   projectTask?: ChatProjectTaskView;
   /** Present only for a Chat `ask_user` call: the stored question and the user's accepted answer, if any. */
@@ -494,6 +481,9 @@ export type AgentExecutionView = {
   id: string;
   agentId: string;
   status: AgentExecutionStatus;
+  /** Chat only: aggregate conversation state, including its independent background work.
+   * status remains the current turn state for scheduling, questions and message submission. */
+  conversationStatus?: AgentExecutionStatus;
   phase: AgentExecutionPhase;
   errorCode: AgentExecutionErrorCode | null;
   messages: AgentExecutionMessage[];
@@ -516,7 +506,9 @@ export type AgentRunView = {
   task: string;
   currentActivity?: { phase: 'model' | 'tool'; toolName?: string } | null;
   status: AgentExecutionStatus | 'paused';
-  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null } | null;
+  usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null } | null;
+  runtime?: 'native' | 'claude' | 'codex';
+  commandExecutionId?: string;
   output: string;
   error: string | null;
   createdAt: string;
@@ -528,12 +520,18 @@ export type AgentRunDetailView = {
   run: AgentRunView;
   invocations: AgentRunView[];
   artifacts: Array<{ id: string; name: string }>;
+  /** Gateway-only accounting for this invocation and its descendants. Never add to runtime usage. */
+  gatewayUsage?: {
+    status: 'available' | 'unavailable';
+    summary: PortkeyGatewayStats['summary'] | null;
+    groups: GatewayAttributionGroup[];
+  };
 };
 
 export type AgentExecutionEventData =
   | { kind: 'snapshot'; execution: AgentExecutionView }
   | { kind: 'message_delta'; messageId: string; delta: string; progressReport?: ChatProgressReport }
-  | { kind: 'status'; status: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
+  | { kind: 'status'; status: AgentExecutionStatus; conversationStatus?: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
   | { kind: 'tool_call'; call: AgentToolCallView };
 
 export type AgentExecutionEvent = {
@@ -706,7 +704,7 @@ export type GatewaySurface = (typeof GATEWAY_SURFACES)[number];
 // team_run groups by Coder Run; node_run by node (one Coder role task attempt or one
 // Workflow node run) and keeps the parent Run id on every row. Under node_run a Run's traffic
 // recorded before node attribution existed is one row with a null nodeRunId.
-export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run'] as const;
+export const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run', 'agent_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 
@@ -714,6 +712,10 @@ export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 export type GatewayAttributionFilters = {
   surface?: GatewaySurface;
   conversationId?: string;
+  /** One recorded Agent invocation id, or a comma-separated list (includes no descendants implicitly). */
+  agentRunId?: string;
+  /** Owning execution id; includes all its Agent invocations and executors. */
+  agentExecutionId?: string;
   projectTaskId?: string;
   executor?: string;
   coderId?: string;
@@ -730,6 +732,8 @@ export type GatewayAttributionGroup = {
   key: string;
   surface: GatewaySurface | null;
   conversationId: string | null;
+  agentRunId?: string | null;
+  agentExecutionId?: string | null;
   executor: string | null;
   coderId: string | null;
   teamRunId: string | null;
@@ -1449,6 +1453,8 @@ export type GatewayRequestLogListItem = {
   source: GatewayRequestLogSource | null;
   surface: GatewaySurface;
   conversationId: string | null;
+  agentRunId?: string | null;
+  agentExecutionId?: string | null;
   projectTaskId: string | null;
   executor: string | null;
   workflowId: string | null;

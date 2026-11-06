@@ -20,7 +20,7 @@ describe('RunNodeTable', () => {
     render(<TooltipProvider><RunNodeTable nodes={[node]} /></TooltipProvider>);
     const step = screen.getByText('read src/main.ts').closest('li')!;
     expect(within(step).queryByText(/987/)).toBeNull();
-    expect(screen.getByText('0.12k')).toBeTruthy();
+    expect(screen.getByText('0.1k')).toBeTruthy();
     const button = screen.getByRole('button');
     expect(button.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(button);

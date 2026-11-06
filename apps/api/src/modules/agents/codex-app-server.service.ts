@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { homedir } from 'node:os';
-import { basename, dirname, extname, resolve } from 'node:path';
+import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { parse as parseToml, type TomlTable } from 'smol-toml';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
@@ -18,10 +20,8 @@ type RpcMessage = {
   error?: { code: number; message: string };
 };
 
-// A native Codex default launches the `codex` command through the operator's interactive zsh login shell
-// and can point `--config-dir` at a configured directory or config.toml parent. A declared Gateway public
-// model keeps the configured command word (e.g. `cx`) and receives a per-run `model_providers.worklite`
-// override, so it does not need to exist in the operator's own catalog.
+// Codex App Server is a built-in runtime. New sessions always launch `codex` and use
+// its local configuration; Gateway models receive a per-run Responses Provider override.
 // Protocol verified against openai/codex rust-v0.163.0.
 const LOGIN_SHELL = '/bin/zsh';
 const GATEWAY_MODEL_PROVIDER = 'worklite';
@@ -32,13 +32,8 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
   readonly capabilities = { resume: true, steer: true, liveQuestions: true, approvals: true } as const;
   constructor(private readonly commands: CommandsService) {}
 
-  async captureLaunch(commandArguments: readonly string[], model: string | null, configPath?: string): Promise<CodexLaunch> {
-    if (model === null) {
-      const configDirectory = codexConfigDirectory(configPath);
-      return { executor: 'codex', commandArguments: ['codex'], model, ...(configDirectory ? { configDirectory } : {}) };
-    }
-    requireSafeCommandWord(commandArguments[0]);
-    return { executor: 'codex', commandArguments: [...commandArguments], model };
+  async captureLaunch(model: string | null): Promise<CodexLaunch> {
+    return { executor: 'codex', commandArguments: ['codex'], model };
   }
 
   async execute(request: ProjectExecutorRequest, prepared: PreparedProjectExecution): Promise<string> {
@@ -62,6 +57,7 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
       const model = request.model ?? launch.model;
       const gatewayModel = isGatewayPublicModel(model);
       const mcp = codexMcpServers(prepared, gatewayModel, attributionHeaders(request));
+      if (!gatewayModel) Object.assign(mcp.config, await nativeGatewayHeaderConfig(launch, attributionHeaders(request)));
       process = await this.commands.openStdioProcess(
         appServerArguments(launch, mcp.config, request.approvalPolicy), request.projectDirectory, mcp.env,
         (event) => {
@@ -114,11 +110,17 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
     } finally {
       request.signal.removeEventListener('abort', cancel);
       controller.abort(new Error('The Codex App Server session is closed.'));
-      if (process && !completed) {
-        await this.commands.cancel(process.executionId);
-        await process.completion;
+      try {
+        if (process && !completed) {
+          await this.commands.cancel(process.executionId);
+          await process.completion;
+        }
+      } finally {
+        // A failed/interrupted turn can arrive in the same stdout chunk as its last
+        // usage update. Persist those queued observations before the caller settles.
+        await session.flushEvents();
+        session.fail(new Error('The Codex App Server session is closed.'));
       }
-      session.fail(new Error('The Codex App Server session is closed.'));
     }
   }
 }
@@ -136,6 +138,7 @@ class CodexAppServerSession {
   private readonly pending = new Map<number | string, { method: string; resolve: (result: any) => void; reject: (error: unknown) => void }>();
   private requestQueue = Promise.resolve();
   private eventQueue = Promise.resolve();
+  private lastUsage?: string;
   private readonly finished: Promise<string>;
   private readonly failure: Promise<never>;
   private rejectFailure!: (error: unknown) => void;
@@ -150,6 +153,8 @@ class CodexAppServerSession {
   }
 
   attach(transport: CommandStdioProcess): void { this.transport = transport; }
+
+  async flushEvents(): Promise<void> { await this.eventQueue; }
 
   async call(method: string, params: unknown): Promise<any> {
     if (this.failed) throw this.failed;
@@ -234,7 +239,13 @@ class CodexAppServerSession {
       if (!pending) return;
       this.pending.delete(message.id);
       if (message.error) pending.reject(new CodexAppServerError(`Codex App Server rejected ${pending.method} (${message.error.code}): ${message.error.message}`));
-      else pending.resolve(message.result);
+      else {
+        // Notifications can follow the response in the same stdout chunk, before
+        // the awaiting execute() continuation has a chance to bind these ids.
+        if ((pending.method === 'thread/start' || pending.method === 'thread/resume') && typeof message.result?.thread?.id === 'string') this.threadId = message.result.thread.id;
+        if (pending.method === 'turn/start' && typeof message.result?.turn?.id === 'string') this.turnId = message.result.turn.id;
+        pending.resolve(message.result);
+      }
       return;
     }
     if (message.id !== undefined && message.method) {
@@ -247,13 +258,16 @@ class CodexAppServerSession {
     const params = message.params ?? {};
     if (this.threadId && params.threadId && params.threadId !== this.threadId) return;
     if (message.method === 'thread/tokenUsage/updated' && params.tokenUsage?.total) {
-      const total = params.tokenUsage.total;
-      const usage = {
-        inputTokens: typeof total.inputTokens === 'number' ? total.inputTokens : null,
-        outputTokens: typeof total.outputTokens === 'number' ? total.outputTokens : null,
-        totalTokens: typeof total.totalTokens === 'number' ? total.totalTokens : null,
-      };
-      this.eventQueue = this.eventQueue.then(() => this.request.onEvent?.({ phase: 'codex.usage', usage })).then(() => undefined).catch((error) => this.fail(error));
+      // `total` is a thread snapshot (including resumed turns), not a delta.
+      // Cache and reasoning counters are already included in input/output.
+      const usage = codexTokenUsage(params.tokenUsage.total);
+      const snapshot = JSON.stringify(usage);
+      if (usage && snapshot !== this.lastUsage) {
+        this.lastUsage = snapshot;
+        const activity: ProjectExecutorActivity = { phase: 'codex.usage', usage, commandExecutionId: this.transport!.executionId,
+          threadId: params.threadId ?? this.threadId, turnId: params.turnId ?? this.turnId };
+        this.eventQueue = this.eventQueue.then(() => this.request.onEvent?.(activity)).then(() => undefined).catch((error) => this.fail(error));
+      }
     }
     if (message.method === 'turn/started') this.turnId = params.turn?.id;
     if (message.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
@@ -321,20 +335,29 @@ class CodexAppServerSession {
   }
 }
 
+function codexTokenUsage(total: Record<string, unknown>): ProjectExecutorActivity['usage'] {
+  const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const inputTokens = count(total.inputTokens);
+  const outputTokens = count(total.outputTokens);
+  const totalTokens = count(total.totalTokens) ?? (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+  if (inputTokens === null && outputTokens === null && totalTokens === null) return undefined;
+  return { inputTokens, outputTokens, totalTokens, cacheReadTokens: count(total.cachedInputTokens), cacheCreationTokens: count(total.cacheWriteInputTokens) };
+}
+
 // Selected MCP servers join the operator's own servers; bearer tokens travel through the process environment.
 // A Gateway-selected model also adds a per-run Responses Provider pointing at the local Gateway, so Codex sends
 // the public `<provider>/<model>` id there instead of requiring it in the operator's own Codex catalog.
 /**
  * Codex only reaches the Gateway through the per-run Responses Provider below, and it
  * sends nothing WorkLite-specific of its own, so without these configured headers the
- * executor's traffic arrives unattributed. A Codex task with no declared Gateway model
- * runs on the operator's local configuration and never passes through the Gateway at
- * all; no header can make that traffic visible here.
+ * executor's traffic arrives unattributed. Native configuration is also inspected
+ * for local Gateway Providers. Direct-provider traffic is recorded only by the
+ * runtime's token events, not by Gateway statistics.
  */
 export function attributionHeaders(request: ProjectExecutorRequest): Record<string, string> {
   const correlation = request.correlation
-    ?? { surface: request.owner === 'coder' ? 'coder_project_task' as const : 'chat_project_task' as const, executor: 'codex' as const };
-  return gatewayAttributionHeaders(correlation);
+    ?? { surface: request.owner === 'agent' ? 'agent' as const : request.owner === 'coder' ? 'coder_project_task' as const : 'chat_project_task' as const };
+  return gatewayAttributionHeaders({ ...correlation, executor: 'codex' });
 }
 
 export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel: boolean, gatewayHeaders: Record<string, string> = {}): { config: Record<string, unknown>; env: Record<string, string> } {
@@ -368,13 +391,11 @@ export function codexMcpServers(prepared: PreparedProjectExecution, gatewayModel
   return { config, env };
 }
 
-// Launches the configured command word through the operator's interactive zsh so it resolves exactly like
-// typing it in a terminal (aliases, functions, PATH). The word is interpolated unquoted into the inline script
-// specifically so shell alias expansion applies (quoting it would defeat that); SAFE_COMMAND_WORD in
-// captureLaunch rejects anything containing shell syntax before it reaches here. Everything after the word is
-// forwarded as real argv elements through "$@", never interpolated into the script text.
+// Retain captured launches for existing sessions; new sessions use the built-in codex command.
+// Validate historical command words before interpolating them into the login shell script.
 function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unknown>, approvalPolicy?: 'auto' | 'ask'): string[] {
   const [word, ...fixedArguments] = launch.commandArguments;
+  requireSafeCommandWord(word);
   const config: Record<string, unknown> = {
     ...mcpServers,
     approval_policy: approvalPolicy === 'ask' ? 'on-request' : 'never',
@@ -385,16 +406,31 @@ function appServerArguments(launch: CodexLaunch, mcpServers: Record<string, unkn
   return [LOGIN_SHELL, '-ic', `${word} "$@"`, '--', ...trailingArguments];
 }
 
-function codexConfigDirectory(configPath: string | undefined): string | undefined {
-  const value = configPath?.trim();
-  if (!value) return undefined;
-  const expanded = value === '~' ? homedir() : value.startsWith('~/') ? `${homedir()}/${value.slice(2)}` : value;
-  const absolutePath = resolve(expanded);
-  if (extname(absolutePath).toLowerCase() === '.toml') {
-    if (basename(absolutePath) !== 'config.toml') throw new BadRequestException('Codex CLI only reads config.toml; configure its containing directory.');
-    return dirname(absolutePath);
+// Native Codex configuration can itself point at WorkLite. Add only attribution
+// keys as per-process overrides; never copy credentials into the command or edit config.toml.
+async function nativeGatewayHeaderConfig(launch: CodexLaunch, headers: Record<string, string>): Promise<Record<string, string>> {
+  const directory = launch.configDirectory ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  let content: string;
+  try { content = await readFile(join(directory, 'config.toml'), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}; throw new BadRequestException('Cannot read the native Codex configuration for Gateway attribution.'); }
+  let config: TomlTable;
+  try { config = parseToml(content); }
+  catch { throw new BadRequestException('Cannot parse the native Codex configuration for Gateway attribution.'); }
+  const providers = config.model_providers;
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return {};
+  const result: Record<string, string> = {};
+  for (const [id, value] of Object.entries(providers)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const base = (value as Record<string, unknown>).base_url;
+    if (typeof base !== 'string') continue;
+    let url: URL;
+    try { url = new URL(base); } catch { continue; }
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || ![23390, 23391, Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392)].includes(Number(url.port))) continue;
+    // Codex's -c key paths use dot-separated map keys, not quoted TOML paths.
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new BadRequestException('Native Gateway Provider attribution requires a provider id containing only letters, digits, underscores or hyphens.');
+    for (const [name, header] of Object.entries(headers)) result[`model_providers.${id}.http_headers.${name}`] = header;
   }
-  return absolutePath;
+  return result;
 }
 
 function tomlValue(value: unknown): string {

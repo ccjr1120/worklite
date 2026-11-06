@@ -10,7 +10,7 @@ import type { NodeExecutionRequest, NodeExecutionResult, PendingNodeExecutionRes
 import { wechatOfficialAccounts, agentPublications as wechatPublications, agentPendingActions as workflowPendingActions, type Database } from '@worklite/db';
 import type { WechatOfficialAccountView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
-import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './plugins.service';
+import { decryptSecret, encryptSecret, WECHAT_OFFICIAL_ACCOUNT_ID } from './connection-secrets';
 import { applyInlineImageUrls, findInlineImageReferences, INLINE_IMAGE_PLACEHOLDER, planInlineImageUploads, validateGeneratedInlineImages, type GeneratedInlineImage } from './wechat-article-images';
 import { inspectQrPng } from './qr-png';
 
@@ -270,7 +270,7 @@ export class WechatOfficialAccountService {
     if (!publication.draftId) throw new DraftRevisionError('failed', 'The publication has no saved draft id.');
     const actionId = `wechat_revision_${input.revisionId}`;
     const account = await this.getAccountRow(publication.accountId);
-    if (!account.encryptedStorageState) throw new DraftRevisionError('failed', 'The WeChat Official Account is not signed in. Sign in from the plugin settings first.');
+    if (!account.encryptedStorageState) throw new DraftRevisionError('failed', 'The WeChat Official Account is not signed in. Sign in from the publishing Agent configuration first.');
     this.assertAccountAvailable(actionId);
     const session = await this.createSession(account.encryptedStorageState);
     this.sessions.set(actionId, session);
@@ -291,7 +291,7 @@ export class WechatOfficialAccountService {
     };
     try {
       await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-      if (isLoginPage(page)) throw new DraftRevisionError('failed', 'The WeChat Official Account sign-in has expired. Sign in again from the plugin settings first.');
+      if (isLoginPage(page)) throw new DraftRevisionError('failed', 'The WeChat Official Account sign-in has expired. Sign in again from the publishing Agent configuration first.');
       const token = new URL(page.url()).searchParams.get('token');
       if (!token) throw new DraftRevisionError('failed', 'The WeChat Official Account session did not provide an editor token. Sign in again first.');
       await page.goto(`https://mp.weixin.qq.com/cgi-bin/appmsg?t=media/appmsg_edit&action=edit&type=10&appmsgid=${encodeURIComponent(publication.draftId)}&token=${encodeURIComponent(token)}&lang=en_US`, { waitUntil: 'domcontentloaded' });

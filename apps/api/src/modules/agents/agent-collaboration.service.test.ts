@@ -25,11 +25,135 @@ async function setup() {
   const executors = { captureLaunch: async () => ({ executor: 'codex', model: 'provider/model', commandArguments: [] }), execute: executeEngine } as unknown as ProjectExecutorService;
   const builtinTools = { start: vi.fn(async () => ({ id: 'command-private' })), wait: vi.fn(async () => ({ execution: { exitCode: 0 }, output: 'Saved' })), cancel: vi.fn(async () => ({})) };
   const executeAssignedTool = vi.fn<IsolatedAgentInvocationService['executeAssignedTool']>(async () => ({ type: 'text', value: 'Existing evidence' }));
-  const service = new AgentCollaborationService(db, resources, { execute, executeAssignedTool } as unknown as IsolatedAgentInvocationService, { execute: capability } as unknown as AgentCapabilitiesService, executors, builtinTools as unknown as BuiltinAgentToolsService);
-  return { service, execute, capability, executeEngine, builtinTools, executeAssignedTool };
+  const newService = () => new AgentCollaborationService(db, resources, { execute, executeAssignedTool } as unknown as IsolatedAgentInvocationService, { execute: capability } as unknown as AgentCapabilitiesService, executors, builtinTools as unknown as BuiltinAgentToolsService);
+  return { service: newService(), newService, execute, capability, executeEngine, builtinTools, executeAssignedTool };
 }
 
 describe('Agent-selected collaboration', () => {
+  it('attributes empty-model Codex snapshots to the exact invocation and replaces usage when that session continues', async () => {
+    const { service, newService, execute, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() }, providerId: null, model: '', collaboration: { subAgentIds: [], capabilities: [], publicModels: [] } }).where(eq(agents.id, 'researcher')).run();
+    let childRunId = '';
+    executeEngine.mockImplementationOnce(async (request) => {
+      expect(request.model).toBeNull();
+      expect(request.correlation).toMatchObject({ agentExecutionId: 'execution', agentRunId: expect.stringMatching(/^air_/) });
+      childRunId = request.correlation!.agentRunId!;
+      await request.runtimeSession!.onSession('codex-thread');
+      await request.onEvent?.({ phase: 'codex.started', commandExecutionId: 'command-first' });
+      for (const totalTokens of [35, 120, 120]) await request.onEvent?.({ phase: 'codex.usage', commandExecutionId: 'command-first', usage: { inputTokens: totalTokens - 20, outputTokens: 20, totalTokens, cacheReadTokens: 10, cacheCreationTokens: null } });
+      throw new Error('Interrupted after usage');
+    });
+    execute.mockImplementationOnce(async (request) => {
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', task: 'Implement' })) as string);
+      expect(receipt.result.status).toBe('failed');
+      return 'Failure reported';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Implement', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    expect(db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()?.metadata).toMatchObject({ parentRunId: 'air_lead', status: 'failed', commandExecutionId: 'command-first', usage: { totalTokens: 120, cacheReadTokens: 10, cacheCreationTokens: null } });
+    executeEngine.mockImplementationOnce(async (request) => {
+      expect(request.runtimeSession?.resumeId).toBe('codex-thread');
+      await request.onEvent?.({ phase: 'codex.usage', commandExecutionId: 'command-resumed', usage: { inputTokens: 150, outputTokens: 30, totalTokens: 180 } });
+      return 'Finished';
+    });
+    execute.mockImplementationOnce(async (request) => {
+      await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', runId: childRunId, task: 'Continue' }));
+      return 'Done';
+    });
+    await newService().run('workspace_personal', 'execution', 'lead', 'Continue', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    expect(db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()?.metadata).toMatchObject({ status: 'completed', commandExecutionId: 'command-resumed', usage: { totalTokens: 180 } });
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'agent.invocation')).all()).toHaveLength(2);
+  });
+
+  it('keeps the Codex command attribution and unknown usage if startup fails before any token report', async () => {
+    const { service, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() } }).where(eq(agents.id, 'lead')).run();
+    executeEngine.mockImplementationOnce(async (request) => {
+      await request.onEvent?.({ phase: 'codex.started', commandExecutionId: 'command-startup' });
+      throw new Error('No usage reported');
+    });
+    await expect(service.run('workspace_personal', 'execution', 'lead', 'Goal', new AbortController().signal)).rejects.toThrow('No usage reported');
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'agent.invocation')).get()?.metadata).toMatchObject({ status: 'failed', commandExecutionId: 'command-startup', usage: null });
+  });
+
+  it('asks the original native specialist with saved evidence across lead continuations', async () => {
+    const { service, execute } = await setup();
+    let childRunId = '';
+    execute.mockImplementation(async (request) => {
+      if (request.systemPrompt.startsWith('researcher')) {
+        await request.onMessages?.([{ role: 'user', content: 'Original task' }, { role: 'assistant', content: [{ type: 'text', text: 'Implemented with evidence' }] }]);
+        return 'Implemented with evidence';
+      }
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', task: 'Implement' })) as string);
+      childRunId = receipt.result.runId;
+      return 'Done';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Implement', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    execute.mockImplementation(async (request) => {
+      if (request.systemPrompt.startsWith('researcher')) {
+        expect(request.initialMessages).toEqual([{ role: 'user', content: 'Original task' }, { role: 'assistant', content: [{ type: 'text', text: 'Implemented with evidence' }] }, { role: 'user', content: '"Explain the change"' }]);
+        return 'Explanation from saved context';
+      }
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', runId: childRunId, task: 'Explain the change' })) as string);
+      expect(receipt.result).toMatchObject({ runId: childRunId, status: 'completed', result: 'Explanation from saved context' });
+      return 'Explained';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Explain', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'agent.invocation')).all()).toHaveLength(2);
+  });
+
+  it.each(['codex', 'claude'] as const)('persists and continues the original %s session after the lead ends', async (kind) => {
+    const { service, newService, execute, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind, projectDirectory: process.cwd() } }).where(eq(agents.id, 'researcher')).run();
+    let childRunId = '';
+    executeEngine.mockImplementationOnce(async (request) => {
+      await request.runtimeSession!.onSession('saved-engine-session');
+      return 'Implemented';
+    });
+    execute.mockImplementationOnce(async (request) => {
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', task: 'Implement' })) as string);
+      childRunId = receipt.result.runId;
+      return 'Done';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Implement', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    executeEngine.mockImplementationOnce(async (request) => {
+      expect(request.runtimeSession!.resumeId).toBe('saved-engine-session');
+      expect(request.input).toBe('"Explain the change"');
+      return 'Explained';
+    });
+    execute.mockImplementationOnce(async (request) => {
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', runId: childRunId, task: 'Explain the change', background: true })) as string);
+      expect(receipt.result.runId).toBe(childRunId);
+      const result = JSON.parse(await request.executeManagedTool!(tool('wait_sub_agent', { runId: childRunId })) as string);
+      expect(result.result.result).toBe('Explained');
+      return 'Done';
+    });
+    await newService().run('workspace_personal', 'execution', 'lead', 'Explain', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    expect(executeEngine).toHaveBeenCalledTimes(2);
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'agent.invocation')).all()).toHaveLength(2);
+  });
+
+  it('rejects foreign, unsettled and legacy invocations without launching replacement work', async () => {
+    const { service, execute, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() } }).where(eq(agents.id, 'writer')).run();
+    const base = { id: 'air_old', agentId: 'researcher', parentRunId: 'air_lead', status: 'completed' };
+    db.insert(auditLogs).values({ id: base.id, workspaceId: 'workspace_personal', action: 'agent.invocation', resource: 'execution', metadata: base }).run();
+    execute.mockImplementationOnce(async (request) => {
+      for (const patch of [{ agentId: 'writer' }, { parentRunId: 'another-parent' }, { status: 'running' }, { status: 'completed' }]) {
+        db.update(auditLogs).set({ metadata: { ...base, ...patch } }).where(eq(auditLogs.id, base.id)).run();
+        const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', runId: base.id, task: 'Explain' })) as string);
+        expect(receipt.result.status).toBe('failed');
+      }
+      const receipt = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', runId: 'air_missing', task: 'Explain' })) as string);
+      expect(receipt.result.status).toBe('failed');
+      const background = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'writer', runId: 'air_missing', task: 'Explain', background: true })) as string);
+      expect(background.result.status).toBe('failed');
+      return 'Unavailable';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Explain', new AbortController().signal, undefined, undefined, undefined, 'air_lead');
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(executeEngine).not.toHaveBeenCalled();
+  });
+
   it('saves successful research before the lead completes, without saving failed output', async () => {
     const { service, execute } = await setup();
     execute.mockImplementation(async (request) => {

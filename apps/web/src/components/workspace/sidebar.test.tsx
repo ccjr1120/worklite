@@ -85,10 +85,10 @@ describe('Sidebar', () => {
     expect(reloadPage).toHaveBeenCalledTimes(1);
   });
 
-  it('shows plugins, skills, and MCP servers as first-level destinations', () => {
+  it('shows skills and MCP servers without a plugins destination', () => {
     renderSidebar(false);
 
-    expect(screen.getByRole('link', { name: '插件' })).toHaveAttribute('href', '/plugins');
+    expect(screen.queryByRole('link', { name: '插件' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '技能' })).toHaveAttribute('href', '/skills');
     expect(screen.getByRole('link', { name: 'MCP 服务器' })).toHaveAttribute('href', '/mcp-servers');
     expect(screen.queryByRole('link', { name: '全部资源' })).not.toBeInTheDocument();
@@ -99,7 +99,7 @@ describe('Sidebar', () => {
     renderSidebar(false);
 
     expect(screen.getByRole('link', { name: 'MCP 服务器' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '插件' })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('link', { name: '插件' })).not.toBeInTheDocument();
   });
 
   it('toggles the sidebar from the labeled control at the top', () => {
@@ -126,9 +126,9 @@ describe('Sidebar', () => {
     const onNavigate = vi.fn();
     renderSidebar(true, vi.fn(), onNavigate);
 
-    const plugins = screen.getByRole('link', { name: '插件' });
-    expect(plugins).toHaveAttribute('href', '/plugins');
-    fireEvent.click(plugins);
+    const skills = screen.getByRole('link', { name: '技能' });
+    expect(skills).toHaveAttribute('href', '/skills');
+    fireEvent.click(skills);
 
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });

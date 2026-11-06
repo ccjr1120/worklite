@@ -4,7 +4,7 @@ import type { Request } from 'express';
 import { agentPendingActions, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
-import { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
 
 @Controller('agent-actions')
 export class AgentActionsController {

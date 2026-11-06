@@ -15,7 +15,8 @@ import { ArtifactStorageService } from '../../artifacts/artifact-storage.service
 import { readArtifactImageContent } from '../../artifacts/artifact-image-content';
 import { inspectWechatImage, splitWechatReplyImages, wechatImageFailureText, type WechatReplyImage } from '../../artifacts/wechat-reply-images';
 import { UpgradesService } from '../../upgrades/upgrades.service';
-import { encryptSecret, PluginsService } from '../plugins.service';
+import { encryptSecret } from '../connection-secrets';
+import { ChatChannelConfigurationService } from '../chat-channel-configuration.service';
 import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
 
 type Json = Record<string, unknown>;
@@ -108,7 +109,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly plugins: PluginsService,
+    private readonly configuration: ChatChannelConfigurationService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
     private readonly upgrades: UpgradesService,
@@ -230,8 +231,8 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       session.error = '微信登录确认缺少凭据，请重新扫码。';
       return;
     }
-    const config = await this.plugins.wechatSecret().catch(() => null);
-    await this.plugins.updateWechat({
+    const config = await this.configuration.wechatSecret().catch(() => null);
+    await this.configuration.updateWechat({
       wechatBotId: result.botId,
       wechatBotToken: encryptSecret(result.botToken),
       wechatBaseUrl: result.baseUrl || ILINK_DEFAULT_BASE_URL,
@@ -239,7 +240,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       ...(result.userId ? { wechatAllowedUserId: result.userId } : {}),
       wechatEnabled: true, wechatStatus: 'connecting', wechatLastError: null, wechatSyncBuf: '',
     });
-    if (!result.userId && !config?.wechatAllowedUserId) await this.plugins.updateWechat({ wechatLastError: '登录成功，但未获得用户标识；请在渠道设置中手动填写允许的用户。' });
+    if (!result.userId && !config?.wechatAllowedUserId) await this.configuration.updateWechat({ wechatLastError: '登录成功，但未获得用户标识；请在渠道设置中手动填写允许的用户。' });
     session.status = 'confirmed';
     void this.connect();
   }
@@ -249,10 +250,10 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     this.monitorAbort?.abort();
     this.monitorAbort = undefined;
     if (this.timer) clearInterval(this.timer);
-    const config = await this.plugins.wechatSecret();
+    const config = await this.configuration.wechatSecret();
     if (!config.wechatEnabled || !config.botToken) {
       this.token = '';
-      await this.plugins.updateWechat({ wechatStatus: 'disconnected', wechatLastError: null });
+      await this.configuration.updateWechat({ wechatStatus: 'disconnected', wechatLastError: null });
       return;
     }
     this.stopped = false;
@@ -261,7 +262,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     this.token = config.botToken;
     this.baseUrl = config.wechatBaseUrl || ILINK_DEFAULT_BASE_URL;
     const state = async (status: 'connecting' | 'connected' | 'error', reason: string | null = null) => {
-      if (generation === this.generation && !this.stopped) await this.plugins.updateWechat({ wechatStatus: status, wechatLastError: reason });
+      if (generation === this.generation && !this.stopped) await this.configuration.updateWechat({ wechatStatus: status, wechatLastError: reason });
     };
     await state('connecting');
     this.timer = setInterval(() => { void this.work(); }, 2_000);
@@ -274,7 +275,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     this.monitorAbort = undefined;
     this.token = '';
     if (this.timer) clearInterval(this.timer);
-    return this.plugins.updateWechat({ wechatEnabled: false, wechatStatus: 'disconnected', wechatLastError: null });
+    return this.configuration.updateWechat({ wechatEnabled: false, wechatStatus: 'disconnected', wechatLastError: null });
   }
 
   async freezeForUpgrade(): Promise<void> {
@@ -322,7 +323,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         for (const raw of updates.msgs) await this.receiveMessage(raw);
         if (updates.getUpdatesBuf !== syncBuf) {
           syncBuf = updates.getUpdatesBuf;
-          await this.plugins.updateWechat({ wechatSyncBuf: syncBuf });
+          await this.configuration.updateWechat({ wechatSyncBuf: syncBuf });
         }
         await state('connected');
         void this.work();
@@ -466,7 +467,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
           const [placeholder] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, event.id)).limit(1);
           if (placeholder && !placeholder.reference && !placeholder.error) {
             try { await this.deliver(placeholder); }
-            catch { await this.plugins.updateWechat({ wechatLastError: '微信消息投递失败，恢复后自动继续投递。' }); }
+            catch { await this.configuration.updateWechat({ wechatLastError: '微信消息投递失败，恢复后自动继续投递。' }); }
           }
         }
         try {
@@ -493,10 +494,10 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         const [owner] = await this.db.select({ userId: externalChats.userId, channel: externalChats.channel }).from(externalChats).where(eq(externalChats.id, submission.chatId)).limit(1);
         if (owner?.channel !== 'wechat' || owner.userId !== this.allowedUserId) continue;
         try { await this.deliver(submission); }
-        catch { await this.plugins.updateWechat({ wechatLastError: '微信消息投递失败，恢复后自动继续投递。' }); }
+        catch { await this.configuration.updateWechat({ wechatLastError: '微信消息投递失败，恢复后自动继续投递。' }); }
       }
     } catch {
-      await this.plugins.updateWechat({ wechatLastError: '微信消息处理暂时失败，已接收的消息会在恢复后继续处理。' }).catch(() => undefined);
+      await this.configuration.updateWechat({ wechatLastError: '微信消息处理暂时失败，已接收的消息会在恢复后继续处理。' }).catch(() => undefined);
     } finally { this.busy = false; }
   }
 
@@ -672,7 +673,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       const reason = error instanceof ILinkApiError ? error.message : '微信消息发送暂时失败，恢复后将继续投递。';
       await this.recordDelivery(chatId, key, 'failed', { operation: 'message.send', clientId, text }, reason);
       if (error instanceof ILinkApiError && (error.errcode === ILINK_STALE_TOKEN_ERRCODE || error.ret === ILINK_STALE_TOKEN_ERRCODE)) {
-        await this.plugins.updateWechat({ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' });
+        await this.configuration.updateWechat({ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' });
       }
       throw error;
     }

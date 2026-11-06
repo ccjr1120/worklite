@@ -6,7 +6,6 @@ import {
   MessageSquareText,
   PanelLeftClose,
   PanelLeftOpen,
-  Puzzle,
   ScrollText,
   Server,
   Settings,
@@ -37,7 +36,6 @@ const navigationGroups = [
     id: 'resources',
     labelKey: 'nav.resourceManagement',
     items: [
-      { id: 'plugins', labelKey: 'nav.plugins', to: '/plugins', icon: Puzzle },
       { id: 'skills', labelKey: 'nav.skills', to: '/skills', icon: Blocks },
       { id: 'mcpServers', labelKey: 'nav.mcpServers', to: '/mcp-servers', icon: Server },
       { id: 'artifacts', labelKey: 'nav.artifacts', to: '/artifacts', icon: FileText },

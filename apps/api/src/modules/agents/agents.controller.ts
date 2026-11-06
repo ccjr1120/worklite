@@ -16,6 +16,11 @@ export class AgentsController {
   @Post()
   create(@Req() request: Request, @Body() body: CreateAgentRequest) { return this.agents.create(request, 'personal', body); }
 
+  @Get('run-usage/:runId')
+  runUsage(@Req() request: Request, @Param('runId') runId: string) {
+    return this.history.usage(request, runId);
+  }
+
   @Post(':agentId/executions/:executionId/steer')
   steer(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: ContinueAgentExecutionRequest) {
     return this.executions.steerRuntimeSession(request, 'personal', agentId, executionId, body);
@@ -36,6 +41,21 @@ export class AgentsController {
   getHistory(@Req() request: Request, @Param('agentId') agentId: string, @Param('runId') runId: string) {
     return this.history.detail(request, agentId, runId);
   }
+
+  @Get(':agentId/sub-agents')
+  children(@Req() request: Request, @Param('agentId') agentId: string) { return this.agents.children(request, 'personal', agentId); }
+
+  @Post(':agentId/sub-agents')
+  createChild(@Req() request: Request, @Param('agentId') agentId: string, @Body() body: CreateAgentRequest) { return this.agents.create(request, 'personal', { ...body, parentAgentId: agentId }); }
+
+  @Get(':agentId/sub-agents/:childId')
+  child(@Req() request: Request, @Param('agentId') agentId: string, @Param('childId') childId: string) { return this.agents.get(request, 'personal', childId, agentId); }
+
+  @Patch(':agentId/sub-agents/:childId')
+  updateChild(@Req() request: Request, @Param('agentId') agentId: string, @Param('childId') childId: string, @Body() body: UpdateAgentRequest) { return this.agents.update(request, 'personal', childId, { ...body, parentAgentId: agentId }); }
+
+  @Delete(':agentId/sub-agents/:childId')
+  deleteChild(@Req() request: Request, @Param('agentId') agentId: string, @Param('childId') childId: string) { return this.agents.delete(request, 'personal', childId, agentId); }
 
   @Get(':agentId')
   get(@Req() request: Request, @Param('agentId') agentId: string) {
@@ -118,6 +138,11 @@ export class AgentsController {
       cleanup();
       response.end();
     }
+  }
+
+  @Get(':agentId/executions/:executionId/history-archives/:resultRef')
+  historyArchive(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('resultRef') resultRef: string, @Query('offset') offset?: string, @Query('maxChars') maxChars?: string) {
+    return this.executions.readHistoryArchive(request, 'personal', agentId, executionId, resultRef, offset === undefined ? 0 : Number(offset), maxChars === undefined ? 12000 : Number(maxChars));
   }
 
   @Post(':agentId/executions/:executionId/messages')

@@ -77,7 +77,7 @@ export const Route = createFileRoute('/logs')({
       provider: optionalSearchText(search.provider),
       model: optionalSearchText(search.model),
       statusClass: tab === 'requests' && REQUEST_LOG_STATUS_CLASSES.includes(search.statusClass as GatewayRequestLogStatusClass) ? search.statusClass as GatewayRequestLogStatusClass : undefined,
-      groupBy: tab === 'usage' && GATEWAY_STATS_GROUP_BYS.filter((group) => !['coder', 'workflow', 'team_run', 'node_run'].includes(group)).includes(search.groupBy as GatewayStatsGroupBy) ? search.groupBy as GatewayStatsGroupBy : undefined,
+      groupBy: tab === 'usage' && GATEWAY_STATS_GROUP_BYS.filter((group) => !['coder', 'workflow', 'team_run', 'node_run', 'agent_run'].includes(group)).includes(search.groupBy as GatewayStatsGroupBy) ? search.groupBy as GatewayStatsGroupBy : undefined,
       // Attribution filters belong to the request list; the usage view has its own
       // grouping and would otherwise inherit a filter the reader cannot see there.
       surface: tab === 'requests' && GATEWAY_SURFACES.includes(search.surface as GatewaySurface) ? search.surface as GatewaySurface : undefined,

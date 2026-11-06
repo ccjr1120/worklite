@@ -39,7 +39,7 @@ async function setup(execute: (request: ProjectExecutorRequest) => Promise<strin
   const adapter = { captureLaunch: async (executor: string, model: string | null) => ({ executor, model, commandArguments: [] }), execute: vi.fn(execute) };
   runtime = new AgentRuntimeService(db, adapter as never);
   const unused = {} as never;
-  executions = new AgentExecutionsService(db, workspaces, resources as never, unused, unused, unused, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never, runtime);
+  executions = new AgentExecutionsService(db, workspaces, resources as never, unused, unused, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never, runtime);
   const agent = await agents.create(request, 'personal', { name: 'Runtime Agent', responsibility: '', systemPrompt: 'Original instructions', runtime: { kind: 'codex', projectDirectory: root }, providerId: null, model: '', skillIds: [], mcpServerIds: [] });
   return { agents, agent, adapter };
 }

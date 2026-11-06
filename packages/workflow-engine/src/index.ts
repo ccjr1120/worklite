@@ -198,6 +198,17 @@ const WORKFLOW_NODE_CAPABILITIES: WorkflowNodeCapability[] = [
     },
   },
   {
+    id: 'worklite/local-project-search',
+    version: '1',
+    name: 'Local Project Search',
+    purpose: 'Resolve local project names through the metadata-only index and verify candidate directories. No match means not indexed, never proof of nonexistence.',
+    inputs: [{ name: 'query', required: true, dataType: 'string', multiple: false }],
+    outputs: [{ name: 'output', required: false, dataType: 'json', multiple: false }],
+    inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 200 }, limit: { type: 'integer', minimum: 1, maximum: 50 }, refresh: { type: 'boolean' } }, additionalProperties: false },
+    outputSchema: { type: 'object' },
+    configSchema: { type: 'object', additionalProperties: false },
+  },
+  {
     id: 'worklite/artifact-query',
     version: '1',
     name: 'Artifact Query',

@@ -63,7 +63,7 @@ export class SkillScriptRunnerService {
 
   async wait(commandId: string) {
     const execution = await this.commands.waitForCompletion(commandId);
-    return { execution, output: await this.commands.output(commandId) };
+    return { execution, output: await this.commands.output(commandId), stdout: await this.commands.output(commandId, 'stdout') };
   }
 
   cancel(commandId: string): Promise<CommandExecutionView> {

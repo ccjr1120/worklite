@@ -1,15 +1,16 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type { Request } from 'express';
 import { CHAT_AGENT_ID, type AgentExecutionEventData, type AgentExecutionView, type ChatChannelView, type ChatConversationList, type ChatConversationRecords, type ChatConversationSummary, type ChatConversationView, type ChatSubmissionView } from '@worklite/contracts';
-import { agentExecutionEvents, agentExecutions, coderRuns, agentToolCalls, agents, chatConfigurations, chatProjectTasks, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, plugins, wechatEvents, workflowRuns, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { agentExecutionEvents, agentExecutions, agentToolCalls, agents, chatConfigurations, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, chatChannels, wechatEvents, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 import { createModelGateway } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceService } from '../teams/teams.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { AgentExecutionsService } from './agent-executions.service';
+import { activeChatBackgroundExecutionIds, chatConversationStatus } from './chat-conversation-status';
 
 // The default summarize prompt gives a fresh conversation everything a reader who never saw the
 // original transcript needs to continue it; the goal is stated, the shape is the model's choice.
@@ -74,17 +75,12 @@ export class ChatConversationsService {
     const boundChatIds = [...new Set(rows.map((row) => row.chatId).filter((id): id is string => Boolean(id)))];
     const boundChats = boundChatIds.length ? await this.db.select({ id: externalChats.id, channel: externalChats.channel }).from(externalChats).where(inArray(externalChats.id, boundChatIds)) : [];
     const channelByChat = new Map(boundChats.map((chat) => [chat.id, chat.channel]));
+    const activeBackground = await activeChatBackgroundExecutionIds(this.db, workspace.id, rows.map((row) => row.id));
     const items: ChatConversationSummary[] = rows.map((row) => ({
       id: row.id, executionId: row.id, title: row.title, channel: row.chatId ? channelByChat.get(row.chatId) ?? 'feishu' : 'web',
-      channelConversationId: row.chatId, status: row.status,
+      channelConversationId: row.chatId, status: chatConversationStatus(row.status, activeBackground.has(row.id)),
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     }));
-    // A conversation with active background work (a project task, or a dispatched Coder
-    // Run / Workflow Run that has not settled) reads as in progress even though its turn settled.
-    const activeBackground = await this.activeBackgroundExecutionIds(workspace.id);
-    for (const item of items) {
-      if (item.executionId && activeBackground.has(item.executionId) && item.status !== 'running' && item.status !== 'waiting_for_input') item.status = 'running';
-    }
     // Standalone tasks are always web conversations.
     const tasks = !channel || channel === 'web' ? await pageWindow(window, chatSubmissions.updatedAt, !search, (bound, limit) => {
       const statement = this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id), isNull(chatSubmissions.executionId), isNull(chatSubmissions.chatId), sql`${chatSubmissions.reference} is not null`, bound))
@@ -167,21 +163,19 @@ export class ChatConversationsService {
       id, executionId: execution?.id ?? null,
       title: execution?.messages.find((message) => message.role === 'user')?.content ?? standalone?.message ?? pendingReceipts[0]?.text ?? '',
       channel: chat ? chat.channel : 'web', channelConversationId: chat?.id ?? null,
-      status: execution?.status ?? (standalone ? standalone.error ? 'failed' : 'task' : pendingReceipts.some((receipt) => receipt.status === 'failed') ? 'failed' : 'queued'),
+      status: execution?.conversationStatus ?? execution?.status ?? (standalone ? standalone.error ? 'failed' : 'task' : pendingReceipts.some((receipt) => receipt.status === 'failed') ? 'failed' : 'queued'),
       createdAt: execution?.createdAt ?? (standalone?.createdAt ?? chat!.updatedAt).toISOString(), updatedAt: execution?.updatedAt ?? (standalone?.updatedAt ?? chat!.updatedAt).toISOString(),
     };
-    if (execution && conversation.status !== 'running' && conversation.status !== 'waiting_for_input'
-      && (await this.activeBackgroundExecutionIds(workspace.id)).has(execution.id)) conversation.status = 'running';
     const submissions = await this.db.select().from(chatSubmissions).where(and(eq(chatSubmissions.workspaceId, workspace.id),
       standalone ? eq(chatSubmissions.id, standalone.id) : or(execution ? eq(chatSubmissions.executionId, execution.id) : undefined, chat ? eq(chatSubmissions.chatId, chat.id) : undefined),
     )).orderBy(chatSubmissions.createdAt);
     const ingressIds = new Set(chat && events ? (await this.db.select({ id: events.id }).from(events).where(and(eq(events.chatId, chat.id), notOutboundEvent(events), sql`json_extract(${events.payload}, '$.direction') is null`))).map((event) => event.id) : []);
     let channelDelivery: ChatConversationView['channelDelivery'] = 'web';
     if (chat?.channel === 'feishu') {
-      const [binding] = await this.db.select({ userId: plugins.feishuAllowedUserId, enabled: plugins.feishuEnabled, status: plugins.feishuStatus }).from(plugins).where(and(eq(plugins.workspaceId, workspace.id), eq(plugins.id, 'feishu-bot'))).limit(1);
+      const [binding] = await this.db.select({ userId: chatChannels.feishuAllowedUserId, enabled: chatChannels.feishuEnabled, status: chatChannels.feishuStatus }).from(chatChannels).where(and(eq(chatChannels.workspaceId, workspace.id), eq(chatChannels.id, 'feishu'))).limit(1);
       channelDelivery = binding?.userId !== chat.userId ? 'unbound' : binding.enabled && binding.status === 'connected' ? 'connected' : 'disconnected';
     } else if (chat?.channel === 'wechat') {
-      const [binding] = await this.db.select({ userId: plugins.wechatAllowedUserId, enabled: plugins.wechatEnabled, status: plugins.wechatStatus }).from(plugins).where(and(eq(plugins.workspaceId, workspace.id), eq(plugins.id, 'wechat-bot'))).limit(1);
+      const [binding] = await this.db.select({ userId: chatChannels.wechatAllowedUserId, enabled: chatChannels.wechatEnabled, status: chatChannels.wechatStatus }).from(chatChannels).where(and(eq(chatChannels.workspaceId, workspace.id), eq(chatChannels.id, 'wechat'))).limit(1);
       channelDelivery = binding?.userId !== chat.userId ? 'unbound' : binding.enabled && binding.status === 'connected' ? 'connected' : 'disconnected';
     }
     return { conversation, execution, pendingReceipts, submissions: submissions.map((submission) => toSubmission(submission,
@@ -256,22 +250,6 @@ export class ChatConversationsService {
     if (updated.changes === 0) throw new ConflictException('This conversation changed while it was being summarized. Try again.');
     await this.executions.publishSnapshotForExecution(workspace.id, execution.id);
     return this.executions.get(request, 'personal', CHAT_AGENT_ID, execution.id);
-  }
-
-  // Execution ids whose conversation owns background work that is still active: a running
-  // or waiting project task, or a dispatched Coder Run / Workflow Run that has not settled.
-  private async activeBackgroundExecutionIds(workspaceId: string): Promise<Set<string>> {
-    const tasks = await this.db.select({ executionId: chatProjectTasks.executionId }).from(chatProjectTasks)
-      .where(and(eq(chatProjectTasks.workspaceId, workspaceId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])));
-    const teamRuns = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
-      .innerJoin(coderRuns, sql`${coderRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-      .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),
-        notInArray(coderRuns.status, ['succeeded', 'failed', 'cancelled'])));
-    const workflows = await this.db.select({ executionId: chatSubmissions.executionId }).from(chatSubmissions)
-      .innerJoin(workflowRuns, sql`${workflowRuns.id} = json_extract(${chatSubmissions.reference}, '$.runId')`)
-      .where(and(eq(chatSubmissions.workspaceId, workspaceId), isNotNull(chatSubmissions.executionId),
-        notInArray(workflowRuns.status, ['succeeded', 'failed', 'cancelled', 'timed_out'])));
-    return new Set([...tasks, ...teamRuns, ...workflows].map((row) => row.executionId).filter((id): id is string => typeof id === 'string'));
   }
 }
 

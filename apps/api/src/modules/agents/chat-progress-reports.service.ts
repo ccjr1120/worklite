@@ -15,7 +15,7 @@ const TITLE_LIMIT = 80;
 const PROGRESS_TEXT_LIMIT = 160;
 
 export type ActiveWorkItem =
-  | { kind: 'agent'; id: string; agentId: string; runId: string; agentName: string; status: string; details: string; updatedAt?: string }
+  | { kind: 'agent'; id: string; agentId: string; runId: string; agentName: string; task?: string; status: string; details: string; updatedAt?: string }
   | { kind: 'task'; id: string; goal: string; stage: string; activityCount: number; progressText: string; updatedAt?: string }
   | { kind: 'coder'; id: string; intent: string; status: string; progress: AgentTeamRunProgress | null; details?: string; updatedAt?: string }
   | { kind: 'workflow'; id: string; workflowName: string; status: string; currentNodeId: string | null; currentStep?: string; updatedAt?: string };
@@ -27,7 +27,7 @@ const truncate = (value: string, limit: number) => value.length > limit ? `${val
 // The visible-change signature: a tick whose summary matches the last reported one is skipped,
 // so a quiet interval never produces a duplicate report while genuinely new progress does.
 export function activeWorkSignature(items: ActiveWorkItem[]): string {
-  return JSON.stringify(items.map((item) => item.kind === 'agent' ? [item.kind, item.id, item.status, item.details] : item.kind === 'task'
+  return JSON.stringify(items.map((item) => item.kind === 'agent' ? [item.kind, item.id, item.task, item.status, item.details] : item.kind === 'task'
     ? [item.kind, item.id, item.stage, item.activityCount, item.progressText]
     : item.kind === 'coder'
       ? [item.kind, item.id, item.status, item.progress, item.details]
@@ -144,7 +144,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
           ? truncate(item.progressText, PROGRESS_TEXT_LIMIT) || undefined
           : item.kind === 'agent' || item.kind === 'coder' ? item.details : item.currentStep,
         updatedAt: item.updatedAt,
-        ...(item.kind === 'agent' ? { agentId: item.agentId, runId: item.runId } : {}),
+        ...(item.kind === 'agent' ? { agentId: item.agentId, runId: item.runId, task: item.task } : {}),
       })),
     });
     // busy leaves the marker unset so the next tick retries; reported and unavailable (the
@@ -222,7 +222,8 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
       const childProgress = [...latestAttempts.values()].map(({ metadata }) => `${metadata.agentName}：${labels[metadata.status as string]}`).join('；');
       const latest = [...row.messages].reverse().find((message) => message.role === 'assistant' && message.content.trim())?.content;
       const details = truncate(childProgress || latest || ({ model: '正在分析与处理任务', skill: '正在执行工具', recovery: '正在恢复执行' }[row.phase] ?? '任务执行中'), PROGRESS_TEXT_LIMIT);
-      items.push({ kind: 'agent', id: row.id, agentId: row.agentId, agentName: row.agentName, runId: row.runId, status: row.status, details, updatedAt: row.updatedAt.toISOString() });
+      const task = [...row.messages].reverse().find((message) => message.role === 'user' && message.content.trim())?.content;
+      items.push({ kind: 'agent', id: row.id, agentId: row.agentId, agentName: row.agentName, runId: row.runId, task, status: row.status, details, updatedAt: row.updatedAt.toISOString() });
     }
     return items;
   }

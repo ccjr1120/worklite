@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AgentTeamOperationRecoveryDecision, AgentTeamRoleId } from '@worklite/contracts';
 import {
   createModelGateway,
+  type ContextCheckpointWriter,
   type GatewayToolDefinition,
   type GatewayAgentMessage,
   type GatewayCorrelation,
@@ -94,6 +95,7 @@ type IsolatedAgentInvocationRequest = {
   context: unknown;
   initialMessages?: readonly GatewayAgentMessage[];
   onMessages?: (messages: GatewayAgentMessage[]) => void | Promise<void>;
+  onContextCheckpoint?: ContextCheckpointWriter;
   skills: readonly AgentInvocationSkill[];
   mcpRuntimes: readonly AgentMcpRuntime[];
   builtinToolNames?: readonly string[];
@@ -243,6 +245,7 @@ export class IsolatedAgentInvocationService {
       initialUserContent: contextText?.trim() ? contextText : 'No input was provided.',
       initialMessages: request.initialMessages,
       onMessages: request.onMessages,
+      onContextCheckpoint: request.onContextCheckpoint,
       jsonOutput: request.jsonOutput,
       correlation: request.correlation,
       skillScripts: availableSkillScripts,

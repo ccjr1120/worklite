@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CanUseTool, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeCodeError, ClaudeCodeService } from './claude-code.service';
-import type { PreparedProjectExecution, ProjectExecutorRequest } from './project-executor.types';
+import type { PreparedProjectExecution, ProjectExecutorActivity, ProjectExecutorRequest } from './project-executor.types';
 
 // The Agent SDK's query() is mocked at the module boundary: these tests drive the executor through
 // the same SDKMessage shapes the real SDK emits (confirmed against @anthropic-ai/claude-agent-sdk
@@ -204,6 +204,19 @@ describe('ClaudeCodeService', () => {
     expect(settingsEnv.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(settingsEnv.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(settingsEnv.ANTHROPIC_CUSTOM_HEADERS).toBeTruthy();
+  });
+
+  it('carries the exact Agent run through the default Claude model and retains cache usage', async () => {
+    const result = { ...resultSuccess('ok'), usage: { input_tokens: 10, cache_read_input_tokens: 20, cache_creation_input_tokens: 30, output_tokens: 4 } } as SDKMessage;
+    fakeQuery.impl = () => new FakeQuery([systemInit(), result]);
+    const events: ProjectExecutorActivity[] = [];
+    const { request, prepared } = buildRequest({ model: null, correlation: { surface: 'agent', agentRunId: 'air_one', agentExecutionId: 'aex_owner' }, onEvent: (event) => { events.push(event); } });
+    await service().execute(request, prepared);
+    const headers = (captured.lastOptions!.settings as { env: Record<string, string> }).env.ANTHROPIC_CUSTOM_HEADERS;
+    expect(headers).toContain('x-worklite-agent-run-id: air_one');
+    expect(headers).toContain('x-worklite-agent-execution-id: aex_owner');
+    expect(headers).toContain('x-worklite-executor: claude');
+    expect(events).toContainEqual(expect.objectContaining({ usage: { inputTokens: 60, outputTokens: 4, totalTokens: 64, cacheReadTokens: 20, cacheCreationTokens: 30 } }));
   });
 
   it('answers AskUserQuestion through the live onQuestion channel and keeps the same session', async () => {

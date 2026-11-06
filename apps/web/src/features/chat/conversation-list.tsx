@@ -1,5 +1,4 @@
-import { useMemo } from 'react';
-import { MessageSquarePlus } from 'lucide-react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatConversationSummary } from '@worklite/contracts';
 import { useChatChannelsQuery, useChatConversationsQuery } from '@/api/queries';
@@ -33,21 +32,31 @@ function rowStatusKey(status: ChatConversationSummary['status']) {
   return status === 'task' ? 'idle' : toStatusKey(status);
 }
 
-export function ConversationList({ selectedId, onSelect, onNew }: { selectedId: string | null; onSelect: (id: string) => void; onNew: () => void }) {
+export function ConversationList({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string) => void }) {
   const { t } = useTranslation('assistant');
   const { locale } = useLocale();
   const channels = useChatChannelsQuery();
   const query = useChatConversationsQuery();
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { listRef.current?.focus(); }, []);
   const items = useMemo(() => [...new Map((query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item])).values()], [query.data]);
   const groups = useMemo(() => groupConversations(items), [items]);
   const channelName = (id: string) => channels.data?.find((entry) => entry.id === id)?.name ?? id;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="p-3">
-        <Button variant="secondary" className="w-full justify-start" onClick={onNew}><MessageSquarePlus className="size-4" />{t('history.new')}</Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+    <div ref={listRef} tabIndex={-1} className="flex h-full min-h-0 w-full flex-col pt-2 outline-none" onKeyDown={(event) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      if (!buttons.length) return;
+      event.preventDefault();
+      const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : current < 0 ? (event.key === 'ArrowDown' ? 0 : buttons.length - 1) : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    }}>
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3" onScroll={(event) => {
+        const list = event.currentTarget;
+        if (list.scrollHeight - list.scrollTop - list.clientHeight < 80 && query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+      }}>
         {query.isLoading ? (
           <div className="space-y-1.5 px-1" role="status" aria-label={t('history.loading')}>{[0, 1, 2, 3, 4].map((id) => <Skeleton key={id} className="h-[58px] w-full rounded-md" />)}</div>
         ) : query.isError && !query.data ? (

@@ -19,16 +19,25 @@ function request(mcpServers: ProjectExecutorRequest['mcpServers']): ProjectExecu
   };
 }
 
+describe('ProjectExecutorService.captureLaunch', () => {
+  it('captures Codex through the built-in adapter without plugin configuration', async () => {
+    const launch = { executor: 'codex', commandArguments: ['codex'], model: 'provider/model' };
+    const codex = { captureLaunch: async (model: string | null) => { expect(model).toBe('provider/model'); return launch; } };
+    const service = new ProjectExecutorService(codex as never, {} as never, {} as never);
+    expect(await service.captureLaunch('codex', 'provider/model')).toBe(launch);
+  });
+});
+
 describe('ProjectExecutorService.requireModel', () => {
   it('never calls the Gateway for Codex: it is not required to use a Gateway model', async () => {
     const resources = { publicModelRuntime: () => { throw new Error('must not be called for codex'); } };
-    const service = new ProjectExecutorService({} as never, {} as never, {} as never, resources as never);
+    const service = new ProjectExecutorService({} as never, {} as never, resources as never);
     await expect(service.requireModel('ws', 'codex', 'gpt-6-luna')).resolves.toBeUndefined();
   });
 
   it('still validates Claude Code against the Gateway protocol', async () => {
     const resources = { publicModelRuntime: async () => ({ protocol: 'openai/chat' }) };
-    const service = new ProjectExecutorService({} as never, {} as never, {} as never, resources as never);
+    const service = new ProjectExecutorService({} as never, {} as never, resources as never);
     await expect(service.requireModel('ws', 'claude', 'some/model')).rejects.toThrow('Claude Code 需要');
   });
 });
@@ -45,7 +54,7 @@ describe('ProjectExecutorService temporary directory', () => {
         return 'done';
       },
     };
-    const service = new ProjectExecutorService({} as never, claude as never, {} as never, {} as never);
+    const service = new ProjectExecutorService({} as never, claude as never, {} as never);
     const output = await service.execute(request([{ id: 'mcp.abc.123', name: 'Code Search', endpoint: 'https://mcp.example.com/search', authToken: 'secret-token', allowedTools: [] }]));
     expect(output).toBe('done');
     expect(directory).toContain('worklite-executor-chat-');
@@ -60,7 +69,7 @@ describe('ProjectExecutorService temporary directory', () => {
         throw new Error('executor failed');
       },
     };
-    const service = new ProjectExecutorService({} as never, claude as never, {} as never, {} as never);
+    const service = new ProjectExecutorService({} as never, claude as never, {} as never);
     await expect(service.execute(request([]))).rejects.toThrow('executor failed');
     await expect(stat(directory)).rejects.toMatchObject({ code: 'ENOENT' });
   });

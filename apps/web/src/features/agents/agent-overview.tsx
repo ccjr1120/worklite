@@ -3,7 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import type { AgentRunView, AgentView } from '@worklite/contracts';
+import type { AgentRunDetailView, AgentRunView, AgentView } from '@worklite/contracts';
 import { api } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { PageHeading } from '@/components/page-heading';
@@ -31,16 +31,35 @@ function CurrentActivity({ run }: { run: AgentRunView }) {
   return <p className="text-sm text-muted-foreground">{run.status === 'waiting_for_input' ? t('statusLabels.waiting_for_input') : run.currentActivity?.phase === 'tool' ? t('currentTool', { tool: run.currentActivity.toolName }) : t('currentModel')}</p>;
 }
 
+function TokenUsage({ detail }: { detail: AgentRunDetailView }) {
+  const { t } = useTranslation('agents');
+  const { locale } = useLocale();
+  const tokens = (value: number | null | undefined) => value == null ? t('unrecorded') : formatTokenCount(value, locale);
+  const columns = ['inputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'outputTokens', 'totalTokens'] as const;
+  const total = (key: typeof columns[number]) => {
+    const values = detail.invocations.map((run) => run.usage?.[key]);
+    return values.length && values.every((value): value is number => value != null) ? values.reduce((sum, value) => sum + value, 0) : null;
+  };
+  const gateway = detail.gatewayUsage;
+  return <div className="space-y-3">
+    <p className="text-xs text-muted-foreground">{t('runtimeUsageNote')}</p>
+    <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full text-left text-xs"><thead className="bg-surface-subtle text-muted-foreground"><tr><th className="px-3 py-3 font-medium">Agent</th>{columns.map((key) => <th key={key} className="whitespace-nowrap px-3 py-3 text-right font-medium">{t(key)}</th>)}</tr></thead><tbody className="divide-y divide-border">{detail.invocations.map((run) => <tr key={run.id}><th scope="row" className="max-w-40 px-3 py-3 font-medium [overflow-wrap:anywhere]">{run.agentName}{run.runtime ? ` · ${run.runtime === 'native' ? t('modelLoop') : run.runtime}` : ''}</th>{columns.map((key) => <td key={key} className="px-3 py-3 text-right tabular-nums">{tokens(run.usage?.[key])}</td>)}</tr>)}</tbody><tfoot className="border-t border-border"><tr><th scope="row" className="px-3 py-3 font-medium">{t('runtimeTotal')}</th>{columns.map((key) => <td key={key} className="px-3 py-3 text-right tabular-nums">{tokens(total(key))}</td>)}</tr></tfoot></table></div>
+    <p className="text-xs text-muted-foreground">{t('gatewayUsageNote')}</p>
+    {!gateway || gateway.status === 'unavailable' ? <p className="text-xs text-muted-foreground">{t('gatewayUsageUnavailable')}</p> : !gateway.groups.length ? <p className="text-xs text-muted-foreground">{t('gatewayUsageUnrecorded')}</p> : <>
+      {gateway.summary && gateway.summary.usageRequests < gateway.summary.requests ? <p className="text-xs text-muted-foreground">{t('gatewayUsagePartial')}</p> : null}
+      <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full text-left text-xs"><thead className="bg-surface-subtle text-muted-foreground"><tr><th className="px-3 py-3 font-medium">Agent</th>{(['freshInputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'outputTokens', 'totalTokens'] as const).map((key) => <th key={key} className="whitespace-nowrap px-3 py-3 text-right font-medium">{t(key)}</th>)}</tr></thead><tbody className="divide-y divide-border">{gateway.groups.map((group) => <tr key={group.key}><th scope="row" className="max-w-40 px-3 py-3 font-medium [overflow-wrap:anywhere]">{detail.invocations.find((run) => run.id === group.agentRunId)?.agentName ?? group.agentRunId} · {group.executor ?? t('modelLoop')}</th>{[group.promptTokens, group.cacheReadTokens, group.cacheCreationTokens, group.completionTokens, group.totalTokens].map((value, index) => <td key={index} className="px-3 py-3 text-right tabular-nums">{tokens(value)}</td>)}</tr>)}</tbody></table></div>
+    </>}
+  </div>;
+}
+
 export function AgentOverview({ agent, initialRunId, onConfigure }: { agent: AgentView; initialRunId?: string; onConfigure: () => void }) {
   const { t, i18n } = useTranslation('agents');
-  const { locale } = useLocale();
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(initialRunId ?? null);
   const history = useQuery({ queryKey: ['agent-history', agent.id, offset], queryFn: () => api.agentHistory(agent.id, offset), refetchInterval: 5000 });
   const runId = selectedId ?? history.data?.items[0]?.id;
   const detail = useQuery({ queryKey: ['agent-run', agent.id, runId], queryFn: () => api.agentRun(agent.id, runId!), enabled: !!runId, refetchInterval: 2000 });
   const date = (value: string) => new Date(value).toLocaleString(i18n.language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const tokens = (value: number | null | undefined) => value == null ? t('unrecorded') : formatTokenCount(value, locale);
   return <div className="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[1200px] flex-col overflow-hidden px-4 py-6 md:px-6">
     <WorkspaceChrome crumbs={[{ label: t('title'), to: '/agents' }, { label: agent.name }]} />
     <div className="shrink-0"><PageHeading title={agent.name} description={agent.responsibility?.trim() || t('noResponsibility')} actions={<Button variant="secondary" size="compact" onClick={onConfigure}>{t('configure')}</Button>} /></div>
@@ -62,7 +81,7 @@ export function AgentOverview({ agent, initialRunId, onConfigure }: { agent: Age
               <section aria-labelledby="agent-invocations-heading"><h3 id="agent-invocations-heading" className="mb-3 text-sm font-medium">{t('invocations')}</h3><div className="divide-y divide-border rounded-lg border border-border">{detail.data.invocations.map((run) => <details key={run.id} open={['running', 'waiting_for_input'].includes(run.status) || undefined} className="group px-3 py-3"><summary className="cursor-pointer text-[13px]"><span className="ml-2 inline-flex max-w-full flex-wrap items-center gap-3 font-medium [overflow-wrap:anywhere]">{run.agentName}<RunStatus status={run.status} /><time className="text-xs font-normal text-muted-foreground" dateTime={run.createdAt}>{date(run.createdAt)}</time></span></summary><div className="mt-4 min-w-0 space-y-3 overflow-hidden [overflow-wrap:anywhere]"><CurrentActivity run={run} /><p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-6">{run.task}</p>{run.error ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm text-danger">{run.error}</p> : null}</div></details>)}</div></section>
               <section aria-labelledby="agent-outputs-heading"><h3 id="agent-outputs-heading" className="mb-3 text-sm font-medium">{t('outputs')}</h3>{detail.data.artifacts.length ? <ul className="mb-4 space-y-2">{detail.data.artifacts.map((artifact) => <li key={artifact.id}><a href={`/api/artifact-previews/${encodeURIComponent(artifact.id)}/open`} target="_blank" rel="noopener noreferrer" className="text-sm text-brand hover:underline">{artifact.name}</a></li>)}</ul> : null}{!detail.data.artifacts.length ? <p className="text-[13px] text-muted-foreground">{t('noOutputs')}</p> : null}</section>
               <section aria-labelledby="agent-usage-heading"><h3 id="agent-usage-heading" className="mb-3 text-sm font-medium">{t('usage')}</h3>
-                <div className="overflow-x-auto rounded-lg border border-border"><table className="w-full text-left text-xs"><thead className="bg-surface-subtle text-muted-foreground"><tr><th className="px-3 py-3 font-medium">Agent</th>{(['inputTokens', 'outputTokens', 'totalTokens'] as const).map((key) => <th key={key} className="whitespace-nowrap px-3 py-3 text-right font-medium">{t(key)}</th>)}</tr></thead><tbody className="divide-y divide-border">{detail.data.invocations.map((run) => <tr key={run.id}><th scope="row" className="max-w-40 px-3 py-3 font-medium [overflow-wrap:anywhere]">{run.agentName}</th><td className="px-3 py-3 text-right tabular-nums">{tokens(run.usage?.inputTokens)}</td><td className="px-3 py-3 text-right tabular-nums">{tokens(run.usage?.outputTokens)}</td><td className="px-3 py-3 text-right tabular-nums">{tokens(run.usage?.totalTokens)}</td></tr>)}</tbody></table></div>
+                <TokenUsage detail={detail.data} />
               </section>
             </div>}
           </div>

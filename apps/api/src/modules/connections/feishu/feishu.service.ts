@@ -10,7 +10,7 @@ import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.s
 import { AgentTeamDocumentsService } from '../../coders/coder-documents.service';
 import { CodersService } from '../../coders/coders.service';
 import { RunsService } from '../../runs/runs.service';
-import { PluginsService } from '../plugins.service';
+import { ChatChannelConfigurationService } from '../chat-channel-configuration.service';
 import { renderCard, renderTaskCard, statusText, teamRoleName, teamRunMeta, type CardButton, type CardState, type CardTransport, type CardUpdate, type FeishuAction, type FeishuCard, type SavedCard } from './feishu-cards';
 import { runtimeAdmissionClosed, runtimeWritesFrozen } from '../../../infrastructure/runtime-upgrade-state';
 import { UpgradesService } from '../../upgrades/upgrades.service';
@@ -43,7 +43,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    private readonly plugins: PluginsService,
+    private readonly configuration: ChatChannelConfigurationService,
     private readonly dispatches: ChatDispatchService,
     private readonly executions: AgentExecutionsService,
     private readonly documents: AgentTeamDocumentsService,
@@ -79,9 +79,9 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     this.socket = undefined;
     this.client = undefined;
     if (this.timer) clearInterval(this.timer);
-    const config = await this.plugins.feishuSecret();
+    const config = await this.configuration.feishuSecret();
     if (!config.feishuEnabled || !config.appSecret) {
-      await this.plugins.updateFeishu({ feishuStatus: 'disconnected', feishuLastError: null });
+      await this.configuration.updateFeishu({ feishuStatus: 'disconnected', feishuLastError: null });
       return;
     }
     this.stopped = false;
@@ -89,7 +89,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     this.client = new Client(credentials);
     this.allowedUserId = config.feishuAllowedUserId;
     const state = async (status: 'connecting' | 'connected' | 'error', reason: string | null = null) => {
-      if (generation === this.generation && !this.stopped) await this.plugins.updateFeishu({ feishuStatus: status, feishuLastError: reason });
+      if (generation === this.generation && !this.stopped) await this.configuration.updateFeishu({ feishuStatus: status, feishuLastError: reason });
     };
     this.socket = new WSClient({ ...credentials, autoReconnect: true,
       onReady: () => { void state('connected'); void this.work(); },
@@ -121,7 +121,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
     this.socket = undefined;
     this.client = undefined;
     if (this.timer) clearInterval(this.timer);
-    return this.plugins.updateFeishu({ feishuEnabled: false, feishuStatus: 'disconnected', feishuLastError: null });
+    return this.configuration.updateFeishu({ feishuEnabled: false, feishuStatus: 'disconnected', feishuLastError: null });
   }
 
   async freezeForUpgrade(): Promise<void> {
@@ -240,7 +240,7 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
           const [placeholder] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, event.id)).limit(1);
           if (placeholder && !placeholder.reference && !placeholder.error) {
             try { await this.deliver(placeholder); }
-            catch { await this.plugins.updateFeishu({ feishuLastError: '飞书消息投递失败，请检查机器人消息、文件与卡片权限；恢复后自动继续投递。' }); }
+            catch { await this.configuration.updateFeishu({ feishuLastError: '飞书消息投递失败，请检查机器人消息、文件与卡片权限；恢复后自动继续投递。' }); }
           }
         }
         try {
@@ -267,10 +267,10 @@ export class FeishuService implements OnModuleInit, OnModuleDestroy {
         const [owner] = await this.db.select({ userId: externalChats.userId, channel: externalChats.channel }).from(externalChats).where(eq(externalChats.id, submission.chatId)).limit(1);
         if (owner?.channel !== 'feishu' || owner.userId !== this.allowedUserId) continue;
         try { await this.deliver(submission); }
-        catch { await this.plugins.updateFeishu({ feishuLastError: '飞书消息投递失败，请检查机器人消息、文件与卡片权限；恢复后自动继续投递。' }); }
+        catch { await this.configuration.updateFeishu({ feishuLastError: '飞书消息投递失败，请检查机器人消息、文件与卡片权限；恢复后自动继续投递。' }); }
       }
     } catch {
-      await this.plugins.updateFeishu({ feishuLastError: '飞书消息处理暂时失败，已接收的消息会在恢复后继续处理。' }).catch(() => undefined);
+      await this.configuration.updateFeishu({ feishuLastError: '飞书消息处理暂时失败，已接收的消息会在恢复后继续处理。' }).catch(() => undefined);
     } finally { this.busy = false; }
   }
 

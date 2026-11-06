@@ -24,6 +24,8 @@ export type GatewayAttribution = {
   surface: GatewaySurface;
   source: string | null;
   conversationId: string | null;
+  agentRunId?: string | null;
+  agentExecutionId?: string | null;
   projectTaskId: string | null;
   executor: string | null;
   workflowId: string | null;
@@ -69,6 +71,8 @@ export function readAttribution(header: HeaderReader): GatewayAttribution {
     surface: isSurface(declared) ? declared : surfaceForSource(source) ?? UNATTRIBUTED_SURFACE,
     source,
     conversationId: header('x-worklite-conversation-id'),
+    agentRunId: header('x-worklite-agent-run-id'),
+    agentExecutionId: header('x-worklite-agent-execution-id'),
     projectTaskId: header('x-worklite-project-task-id'),
     executor: header('x-worklite-executor'),
     workflowId: header('x-worklite-workflow-id'),
@@ -83,7 +87,7 @@ export function readAttribution(header: HeaderReader): GatewayAttribution {
 }
 
 /** The dimensions `requestStats` can group its attribution breakdown by. */
-const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run'] as const;
+const GATEWAY_STATS_GROUP_BYS = ['surface', 'conversation', 'executor', 'coder', 'workflow', 'team_run', 'node_run', 'agent_run'] as const;
 
 export type GatewayStatsGroupBy = (typeof GATEWAY_STATS_GROUP_BYS)[number];
 

@@ -31,9 +31,9 @@ export function formatNumber(value: number, locale: AppLocale): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-/** Token usage always uses k; three decimals preserve individual whole tokens. */
+/** Token usage always uses k with one decimal place. */
 export function formatTokenCount(value: number, locale: AppLocale): string {
-  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(value / 1_000)}k`;
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value / 1_000)}k`;
 }
 
 export function formatCurrency(value: number, locale: AppLocale, currency = 'USD'): string {

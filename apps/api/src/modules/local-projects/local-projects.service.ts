@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   DEFAULT_SCAN_OPTIONS,
   scanLocalProjects,
@@ -65,6 +65,35 @@ export class LocalProjectsService {
   private aliasWriteQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly config: ConfigService) {}
+
+  /** Agent-private lookup uses the same index as Chat, plus filesystem metadata checks only. */
+  async searchForAgent(input: unknown) {
+    const args = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+    if (typeof args.query !== 'string' || !args.query.trim() || args.query.trim().length > 200) throw new BadRequestException('query must be a non-empty string of at most 200 characters.');
+    if (args.limit !== undefined && (typeof args.limit !== 'number' || !Number.isInteger(args.limit) || args.limit < 1 || args.limit > 50)) throw new BadRequestException('limit must be an integer from 1 to 50.');
+    if (args.refresh !== undefined && typeof args.refresh !== 'boolean') throw new BadRequestException('refresh must be a boolean.');
+    const query = args.query.trim();
+    const checkDirectory = async (absolutePath: string) => {
+      try {
+        return { absolutePath, directoryStatus: (await stat(absolutePath)).isDirectory() ? 'exists' as const : 'not_directory' as const };
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return { absolutePath, directoryStatus: code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' as const : 'unknown' as const, errorCode: code ?? 'UNKNOWN' };
+      }
+    };
+    const result = await this.search(query, { limit: args.limit as number | undefined, refresh: args.refresh as boolean | undefined });
+    const verify = async (candidate: LocalProjectSearchResponse['results'][number]) => ({ ...candidate, ...await checkDirectory(candidate.absolutePath) });
+    const [results, approximate, requestedDirectory] = await Promise.all([
+      Promise.all(result.results.map(verify)),
+      Promise.all(result.approximate.map(verify)),
+      isAbsolute(query) ? checkDirectory(query) : Promise.resolve(null),
+    ]);
+    return {
+      ...result, results, approximate, requestedDirectory,
+      lookupStatus: results.length ? 'matched' : 'not_indexed',
+      note: [result.note, 'No index match does not prove a project does not exist. Use only directories with directoryStatus=exists; approximate candidates are suggestions, not matches. missing applies only to the checked path; unknown means the path could not be checked.'].filter(Boolean).join(' '),
+    };
+  }
 
   async search(query: string, options: { limit?: number; refresh?: boolean } = {}): Promise<LocalProjectSearchResponse> {
     const trimmed = query.trim();

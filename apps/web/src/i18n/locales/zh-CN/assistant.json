@@ -1,5 +1,14 @@
 {
   "title": "Chat",
+  "agentTask": {
+    "running": "进行中",
+    "unknown": "状态未知",
+    "phase": {
+      "model": "正在分析与处理任务",
+      "skill": "正在执行工具",
+      "recovery": "正在恢复执行"
+    }
+  },
   "composer": {
     "label": "向 Chat 发送消息",
     "placeholder": "询问 WorkLite，或输入 @ 运行Agent…",

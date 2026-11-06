@@ -6,6 +6,8 @@ import { readAttribution, type GatewayAttribution } from './attribution';
 import {
   prepareGatewayDatabase,
   recordRequestStat,
+  recordRequestLog,
+  requestLogs,
   requestStats,
 } from './provider-registry';
 
@@ -166,5 +168,28 @@ describe('gateway usage attribution', () => {
 
     const oneNode = requestStats({ from, to, nodeRunId: 'atatt_b,atatt_c' });
     expect(oneNode.summary.totalTokens).toBe(50);
+  });
+
+  it('retains Agent invocation and execution attribution across statistics and request details', () => {
+    const base = { 'x-worklite-surface': 'agent', 'x-worklite-agent-execution-id': 'aex_agent_usage' };
+    stat({ ...base, 'x-worklite-agent-run-id': 'air_lead' }, 12);
+    const executor = attribution({ ...base, 'x-worklite-agent-run-id': 'air_child', 'x-worklite-executor': 'claude' });
+    recordRequestStat({ provider: 'test', model: 'executor', endpoint: '/v1/messages', status: 200, durationMs: 5,
+      promptTokens: 10, inputTokenSemantics: 'fresh', cacheReadTokens: 20, cacheCreationTokens: 30, completionTokens: 4, totalTokens: 64, attribution: executor });
+    recordRequestLog({ id: 'glog_agent_usage', provider: 'test', model: 'executor', endpoint: '/v1/messages', status: 200, durationMs: 5, streaming: false,
+      promptTokens: 10, inputTokenSemantics: 'fresh', cacheReadTokens: 20, cacheCreationTokens: 30, completionTokens: 4, totalTokens: 64, attribution: executor,
+      request: {}, response: { kind: 'json', body: {} } });
+    const result = requestStats({ from, to, agentExecutionId: 'aex_agent_usage', groupBy: 'agent_run' });
+    expect(result.summary.totalTokens).toBe(76);
+    expect(result.attribution.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentRunId: 'air_lead', agentExecutionId: 'aex_agent_usage', executor: null, totalTokens: 12 }),
+      expect.objectContaining({ agentRunId: 'air_child', executor: 'claude', promptTokens: 10, cacheReadTokens: 20, cacheCreationTokens: 30, totalTokens: 64 }),
+    ]));
+    expect(requestStats({ from, to, agentRunId: 'air_child' }).summary.totalTokens).toBe(64);
+    expect(requestStats({ from, to, agentRunId: 'air_lead,air_child' }).summary.totalTokens).toBe(76);
+    expect(requestStats({ from, to, agentRunId: 'historical_untagged' }).summary.totalTokens).toBeNull();
+    expect(requestLogs({ from, to, agentRunId: 'air_child', agentExecutionId: 'aex_agent_usage' }).items).toEqual([
+      expect.objectContaining({ id: 'glog_agent_usage', agentRunId: 'air_child', agentExecutionId: 'aex_agent_usage', executor: 'claude', cacheReadTokens: 20, cacheCreationTokens: 30 }),
+    ]);
   });
 });

@@ -39,6 +39,8 @@ export type GatewayTimeRangeQuery = {
 export type GatewayAttributionQuery = {
   surface?: string;
   conversationId?: string;
+  agentRunId?: string;
+  agentExecutionId?: string;
   projectTaskId?: string;
   executor?: string;
   coderId?: string;
@@ -72,6 +74,8 @@ export type GatewayAttributionGroup = GatewayUsageTotals & {
   key: string;
   surface: GatewaySurface | null;
   conversationId: string | null;
+  agentRunId: string | null;
+  agentExecutionId: string | null;
   executor: string | null;
   coderId: string | null;
   teamRunId: string | null;
@@ -251,6 +255,9 @@ function getDatabase(): BetterSqlite3.Database {
 const ATTRIBUTION_COLUMNS: Array<[string, string]> = [
   ['surface', 'TEXT'],
   ['conversation_id', 'TEXT'],
+  // Historical rows stay NULL: time-window overlap is not run attribution.
+  ['agent_run_id', 'TEXT'],
+  ['agent_execution_id', 'TEXT'],
   ['project_task_id', 'TEXT'],
   ['executor', 'TEXT'],
   ['workflow_id', 'TEXT'],
@@ -318,6 +325,8 @@ function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
     DROP INDEX IF EXISTS gateway_request_stats_executor_category_idx;
     CREATE INDEX IF NOT EXISTS gateway_request_stats_surface_idx ON gateway_request_stats(surface, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_conversation_idx ON gateway_request_stats(conversation_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_agent_run_idx ON gateway_request_stats(agent_run_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_stats_agent_execution_idx ON gateway_request_stats(agent_execution_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_coder_idx ON gateway_request_stats(coder_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_workflow_idx ON gateway_request_stats(workflow_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_stats_team_run_idx ON gateway_request_stats(team_run_id, occurred_at);
@@ -344,6 +353,8 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_surface_idx ON gateway_request_logs(surface, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_conversation_idx ON gateway_request_logs(conversation_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_agent_run_idx ON gateway_request_logs(agent_run_id, occurred_at);
+    CREATE INDEX IF NOT EXISTS gateway_request_logs_agent_execution_idx ON gateway_request_logs(agent_execution_id, occurred_at);
     CREATE INDEX IF NOT EXISTS gateway_request_logs_node_run_idx ON gateway_request_logs(node_run_id);
   `);
 }
@@ -749,7 +760,7 @@ export function recordRequestStat(input: {
   attribution?: GatewayAttribution;
 }): void {
   const attribution = input.attribution;
-  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, coder_id, team_run_id, team_role, node_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  getDatabase().prepare(`INSERT INTO gateway_request_stats (occurred_at, provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, coder_id, team_run_id, team_role, node_run_id, agent_run_id, agent_execution_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     Date.now(),
     input.provider || 'Unknown',
     input.model || 'Unknown',
@@ -772,6 +783,8 @@ export function recordRequestStat(input: {
     attribution?.teamRunId ?? null,
     attribution?.teamRole ?? null,
     attribution?.nodeRunId ?? null,
+    attribution?.agentRunId ?? null,
+    attribution?.agentExecutionId ?? null,
   );
 }
 
@@ -796,6 +809,7 @@ const GROUP_BY_FIELDS: Record<GatewayStatsGroupBy, Array<keyof typeof GROUP_FIEL
   // A conversation's executor traffic is charged to the same conversation, so the
   // surface stays in the key: one row for its model loop, one for its project tasks.
   conversation: ['surface', 'conversationId'],
+  agent_run: ['surface', 'agentExecutionId', 'agentRunId', 'executor'],
   executor: ['surface', 'executor'],
   coder: ['coderId', 'teamRunId'],
   workflow: ['workflowId', 'workflowRunId'],
@@ -808,6 +822,8 @@ const GROUP_BY_FIELDS: Record<GatewayStatsGroupBy, Array<keyof typeof GROUP_FIEL
 const GROUP_FIELD_SQL = {
   surface: { column: SURFACE_SQL, alias: 'surface' },
   conversationId: { column: 'conversation_id', alias: 'conversation_id' },
+  agentRunId: { column: 'agent_run_id', alias: 'agent_run_id' },
+  agentExecutionId: { column: 'agent_execution_id', alias: 'agent_execution_id' },
   executor: { column: 'executor', alias: 'executor' },
   coderId: { column: 'coder_id', alias: 'coder_id' },
   teamRunId: { column: 'team_run_id', alias: 'team_run_id' },
@@ -825,6 +841,7 @@ const GROUP_FIELD_SQL = {
 const GROUP_BY_SCOPE: Record<GatewayStatsGroupBy, string | null> = {
   surface: null,
   conversation: 'conversation_id IS NOT NULL',
+  agent_run: '(agent_run_id IS NOT NULL OR agent_execution_id IS NOT NULL)',
   executor: 'executor IS NOT NULL',
   coder: 'coder_id IS NOT NULL',
   workflow: 'workflow_id IS NOT NULL',
@@ -838,6 +855,8 @@ const GROUP_BY_SCOPE: Record<GatewayStatsGroupBy, string | null> = {
 type AttributionGroupRow = {
   surface: string | null;
   conversation_id: string | null;
+  agent_run_id: string | null;
+  agent_execution_id: string | null;
   executor: string | null;
   coder_id: string | null;
   team_run_id: string | null;
@@ -881,6 +900,7 @@ function attributionConditions(query: GatewayAttributionQuery): { conditions: st
   }
   const columns: Array<[string, string | undefined]> = [
     ['conversation_id', query.conversationId],
+    ['agent_execution_id', query.agentExecutionId],
     ['project_task_id', query.projectTaskId],
     ['executor', query.executor],
     ['coder_id', query.coderId],
@@ -896,6 +916,7 @@ function attributionConditions(query: GatewayAttributionQuery): { conditions: st
   // Run and node ids accept a comma-separated list, so a page of Runs or the nodes of
   // several Runs are answered by one query instead of one query per id.
   const listColumns: Array<[string, string | undefined]> = [
+    ['agent_run_id', query.agentRunId],
     ['team_run_id', query.teamRunId],
     ['node_run_id', query.nodeRunId],
   ];
@@ -947,6 +968,8 @@ function attributionGroups(
   const fieldValue = (row: AttributionGroupRow, field: keyof typeof GROUP_FIELD_SQL): string | null => {
     if (field === 'surface') return row.surface;
     if (field === 'conversationId') return row.conversation_id;
+    if (field === 'agentRunId') return row.agent_run_id;
+    if (field === 'agentExecutionId') return row.agent_execution_id;
     if (field === 'executor') return row.executor;
     if (field === 'coderId') return row.coder_id;
     if (field === 'teamRunId') return row.team_run_id;
@@ -958,6 +981,8 @@ function attributionGroups(
     key: fields.map((field) => fieldValue(row, field) ?? '').join('\u0000'),
     surface: row.surface as GatewaySurface | null,
     conversationId: row.conversation_id,
+    agentRunId: row.agent_run_id,
+    agentExecutionId: row.agent_execution_id,
     executor: row.executor,
     coderId: row.coder_id,
     teamRunId: row.team_run_id,
@@ -1060,6 +1085,8 @@ type GatewayRequestLogRow = {
   source: string | null;
   surface: string | null;
   conversation_id: string | null;
+  agent_run_id: string | null;
+  agent_execution_id: string | null;
   project_task_id: string | null;
   executor: string | null;
   workflow_id: string | null;
@@ -1085,7 +1112,7 @@ type GatewayRequestLogListRow = Omit<GatewayRequestLogRow, 'request_body' | 'res
 
 // The list view never reads the captured bodies: selecting them pulled ~25 MB from
 // disk per page. Only the single-log detail query fetches them.
-const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, coder_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, response_kind';
+const REQUEST_LOG_LIST_COLUMNS = 'id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, agent_run_id, agent_execution_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, coder_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, response_kind';
 
 export function recordRequestLog(input: {
   id?: string | null;
@@ -1108,7 +1135,7 @@ export function recordRequestLog(input: {
   const database = getDatabase();
   const id = input.id?.trim() || `glog_${randomUUID()}`;
   const attribution = input.attribution;
-  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, coder_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  database.prepare(`INSERT INTO gateway_request_logs (id, occurred_at, provider_name, model, endpoint, status, duration_ms, streaming, source, surface, conversation_id, project_task_id, executor, workflow_id, workflow_run_id, node_run_id, coder_id, team_run_id, team_role, team_task_attempt_id, team_operation_key, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens, request_body, response_kind, response_body, agent_run_id, agent_execution_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     Date.now(),
     input.provider || 'Unknown',
@@ -1139,6 +1166,8 @@ export function recordRequestLog(input: {
     safeJsonText(input.request),
     input.response.kind,
     responseBodyText(input.response),
+    attribution?.agentRunId ?? null,
+    attribution?.agentExecutionId ?? null,
   );
   pruneRequestLogs(database);
   return id;
@@ -1194,6 +1223,8 @@ function requestLogListItem(row: GatewayRequestLogListRow) {
     // 'unattributed' rather than guessed from their other identifiers.
     surface: (row.surface ?? UNATTRIBUTED_SURFACE) as GatewaySurface,
     conversationId: row.conversation_id,
+    agentRunId: row.agent_run_id,
+    agentExecutionId: row.agent_execution_id,
     projectTaskId: row.project_task_id,
     executor: row.executor,
     workflowId: row.workflow_id,

@@ -4,7 +4,7 @@ import type { GatewayCorrelation } from '@worklite/model-gateway';
 
 export type ProjectExecutorActivity = {
   phase: string;
-  usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+  usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null };
   // Codex activities carry the backing CommandExecution id. Claude Agent SDK activities have no
   // process-level command record of their own and carry `sessionId` instead.
   commandExecutionId?: string;
@@ -109,14 +109,13 @@ export function localGatewayBaseUrl(): string {
   return `http://127.0.0.1:${Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392)}`;
 }
 
-// Codex's Gateway-model command word is interpolated unquoted into an inline zsh script so shell alias
-// expansion (e.g. cxo, cx) applies the same way it would in an interactive terminal; this restricts it to a
-// bare alias/executable name or path so no shell metacharacter can be injected through plugin configuration.
+// Historical Codex launch words still support shell alias expansion. Accept only a
+// bare alias/executable name or path so saved snapshots cannot inject shell syntax.
 const SAFE_COMMAND_WORD = /^[\w./-]+$/;
 
 export function requireSafeCommandWord(word: string | undefined): string {
   const trimmed = word?.trim();
-  if (!trimmed) throw new BadRequestException('A Codex command is required; configure the Codex plugin command.');
+  if (!trimmed) throw new BadRequestException('The saved Codex launch has no command. Start a new session.');
   if (!SAFE_COMMAND_WORD.test(trimmed)) throw new BadRequestException('The Codex command must be a single alias, executable name or path without shell syntax.');
   return trimmed;
 }

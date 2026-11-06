@@ -36,6 +36,10 @@ export type GatewayCorrelation = {
   surface: GatewaySurface;
   /** Chat conversation (Agent execution) id, for chat and chat_project_task. */
   conversationId?: string;
+  /** Recorded Agent invocation (air_..., or aex_... for a direct execution). */
+  agentRunId?: string;
+  /** Owning Agent execution; shared by its invocation tree. */
+  agentExecutionId?: string;
   /** Chat project task id, for chat_project_task. */
   projectTaskId?: string;
   /** Project executor that issued the request, for the two *_project_task surfaces. */
@@ -70,6 +74,8 @@ export function gatewayAttributionHeaders(correlation: GatewayCorrelation | unde
   if (!correlation) return {};
   const optional: Array<[string, string | undefined]> = [
     ['x-worklite-conversation-id', correlation.conversationId],
+    ['x-worklite-agent-run-id', correlation.agentRunId],
+    ['x-worklite-agent-execution-id', correlation.agentExecutionId],
     ['x-worklite-project-task-id', correlation.projectTaskId],
     ['x-worklite-executor', correlation.executor],
     ['x-worklite-workflow-id', correlation.workflowId],

@@ -1,3 +1,4 @@
+import { agentFiles, type AgentFileTransaction } from './agent-file-store';
 import { validatePrivateTools } from './agent-private-tools';
 import { resolveWorkflowNodeCapability } from '@worklite/workflow-engine';
 import type { AgentCollaboration } from '@worklite/contracts';
@@ -15,7 +16,7 @@ import { WorkspaceService } from '../teams/teams.service';
 import { validateAgentRuntime } from './agent-runtime.configuration';
 
 const CHAT_AGENT_ID = 'agt_system_helper_chat';
-const CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
+const RETIRED_CODEX_CLI_AGENT_ID = 'agt_codex_cli_chat';
 const GATEWAY_PORT = Number(process.env.PORTKEY_GATEWAY_PORT ?? 23392);
 const GATEWAY_PROVIDER_URL = `http://127.0.0.1:${GATEWAY_PORT}/worklite/providers`;
 
@@ -39,7 +40,11 @@ export class AgentsService {
   async list(request: Request, workspaceSlug: string): Promise<AgentView[]> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.resources.reconcileWorkspaceSkills(team.id);
-    const rows = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.workspaceId, team.id), eq(agents.kind, 'custom')));
+    agentFiles(this.db)?.refresh(team.id);
+    const all = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.workspaceId, team.id), eq(agents.kind, 'custom')));
+    const children = new Set(all.flatMap(({ agent }) => agent.collaboration?.subAgentIds ?? []));
+    const catalog = agentFiles(this.db);
+    const rows = all.filter(({ agent }) => catalog ? catalog.get(agent.id)?.parentId === null : !children.has(agent.id));
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
     return rows
@@ -47,12 +52,16 @@ export class AgentsService {
       .map(({ agent }) => this.toView(agent, workspaceSlug, agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null, assignments));
   }
 
-  async get(request: Request, workspaceSlug: string, agentId: string): Promise<AgentView> {
-    if (agentId === CODEX_CLI_AGENT_ID) throw new NotFoundException('Agent not found');
+  async get(request: Request, workspaceSlug: string, agentId: string, parentAgentId?: string): Promise<AgentView> {
+    if (agentId === RETIRED_CODEX_CLI_AGENT_ID) throw new NotFoundException('Agent not found');
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.resources.reconcileWorkspaceSkills(team.id);
+    // System configuration lives in SQL and must not depend on custom Agent files.
+    const target = this.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).get();
+    if (target?.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
     const [row] = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');
+    if (row.agent.kind === 'custom') this.requireScope(team.id, agentId, parentAgentId);
     const gatewayNames = await this.gatewayProviderNames();
     const assignments = await this.loadAssignments(team.id, [row.agent.id]);
     const view = this.toView(row.agent, workspaceSlug, row.agent.providerId ? gatewayNames.get(row.agent.providerId) ?? null : null, assignments);
@@ -60,12 +69,16 @@ export class AgentsService {
       const [configuration] = await this.db.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
       if (configuration) view.chatConfiguration = { revision: configuration.revision, extensionPrompt: configuration.extensionPrompt, summarizePrompt: configuration.summarizePrompt, turnNotificationsEnabled: configuration.turnNotificationsEnabled, turnNotificationSound: configuration.turnNotificationSound, skillIds: configuration.skillIds };
     }
+    if (row.agent.kind === 'custom' && row.agent.collaboration?.subAgentIds.length) {
+      view.subAgents = await Promise.all(row.agent.collaboration.subAgentIds.map((id) => this.get(request, workspaceSlug, id, row.agent.id)));
+    }
     return view;
   }
 
   async create(request: Request, workspaceSlug: string, input: CreateAgentRequest): Promise<AgentView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.resources.reconcileWorkspaceSkills(team.id);
+    agentFiles(this.db)?.refresh(team.id);
     const name = input.name?.trim();
     if (!name) throw new BadRequestException('Agent name is required.');
     const responsibility = input.responsibility?.trim() ?? '';
@@ -80,7 +93,7 @@ export class AgentsService {
     const skillIds = validatedAssignments.skillIds ?? [];
     const mcpServerIds = validatedAssignments.mcpServerIds ?? [];
     const id = `agt_${randomUUID()}`;
-    await this.db.transaction((transaction) => {
+    this.mutate(team.id, (transaction) => {
       const parent = input.parentAgentId ? transaction.select().from(agents).where(and(eq(agents.id, input.parentAgentId), eq(agents.workspaceId, team.id), eq(agents.kind, 'custom'))).get() : undefined;
       if (input.parentAgentId && (!parent || parent.runtime.kind !== 'native')) throw new BadRequestException('The parent must be an available native Agent.');
       const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, runtime, collaboration }).returning({ id: agents.id }).all();
@@ -88,15 +101,19 @@ export class AgentsService {
       if (skillIds.length > 0) transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId }))).run();
       if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId }))).run();
       if (parent) transaction.update(agents).set({ collaboration: { ...parent.collaboration, subAgentIds: [...(parent.collaboration?.subAgentIds ?? []), id], capabilities: parent.collaboration?.capabilities ?? [] }, updatedAt: new Date() }).where(eq(agents.id, parent.id)).run();
-    });
-    return this.get(request, workspaceSlug, id);
+    }, new Map([[id, skillIds]]));
+    return this.get(request, workspaceSlug, id, input.parentAgentId);
   }
 
   async update(request: Request, workspaceSlug: string, agentId: string, input: UpdateAgentRequest): Promise<AgentView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     await this.resources.reconcileWorkspaceSkills(team.id);
+    // System configuration lives in SQL and must not depend on custom Agent files.
+    const target = this.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).get();
+    if (target?.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
+    if (existing.kind === 'custom') this.requireScope(team.id, agentId, input.parentAgentId);
 
     if (existing.kind === 'system') {
 
@@ -148,9 +165,11 @@ export class AgentsService {
     const runtime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
     if (runtime.kind !== 'native' && ((collaboration?.subAgentIds.length ?? 0) > 0 || (collaboration?.capabilities.length ?? 0) > 0 || (collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate sub-Agents and capability tools.');
     if ((!collaboration?.publicModels?.length && runtime.kind === 'native') || nextProviderId) await this.validateModel(team.id, nextProviderId, model);
-    const assignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds, true);
+    const ownedSkillIds = new Set(agentFiles(this.db)?.get(agentId)?.skills.map((skill) => skill.id) ?? []);
+    const assignments = await this.validateAssignments(team.id, input.skillIds?.filter((id) => !ownedSkillIds.has(id)), input.mcpServerIds, true);
+    if (input.skillIds) assignments.skillIds = input.skillIds.filter((id) => !ownedSkillIds.has(id));
 
-    await this.db.transaction((transaction) => {
+    this.mutate(team.id, (transaction) => {
       const [row] = transaction.update(agents).set({
         name,
         runtime,
@@ -170,20 +189,29 @@ export class AgentsService {
         transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
         if (assignments.mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(assignments.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
       }
-    });
-    return this.get(request, workspaceSlug, agentId);
+    }, input.skillIds === undefined ? undefined : new Map([[agentId, input.skillIds]]));
+    return this.get(request, workspaceSlug, agentId, input.parentAgentId);
   }
 
-  async delete(request: Request, workspaceSlug: string, agentId: string): Promise<void> {
+  async delete(request: Request, workspaceSlug: string, agentId: string, parentAgentId?: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
+    agentFiles(this.db)?.refresh(team.id);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
     if (existing.kind === 'system') throw new BadRequestException('The Chat entry point cannot be deleted.');
+    this.requireScope(team.id, agentId, parentAgentId);
     const parents = await this.db.select().from(agents).where(eq(agents.workspaceId, team.id));
-    if (parents.some((parent) => parent.collaboration?.subAgentIds.includes(agentId))) throw new ConflictException('Remove this sub-Agent from its parent before deleting it.');
+    if (parents.some((parent) => parent.collaboration?.subAgentIds.includes(agentId)) && !parentAgentId) throw new ConflictException('Manage this sub-Agent through its owning Agent.');
+    if (existing.collaboration?.subAgentIds.length) throw new ConflictException('Remove owned sub-Agents through the parent before deleting this Agent.');
     const active = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).limit(1);
     if (active.length) throw new ConflictException('Cancel the active Agent execution before deleting it.');
-    await this.db.transaction((transaction) => {
+    const catalog = agentFiles(this.db);
+    if (catalog) { catalog.remove(team.id, agentId, parentAgentId); return; }
+    this.mutate(team.id, (transaction) => {
+      if (parentAgentId) {
+        const parent = transaction.select().from(agents).where(eq(agents.id, parentAgentId)).get()!;
+        transaction.update(agents).set({ collaboration: { ...parent.collaboration!, subAgentIds: parent.collaboration!.subAgentIds.filter((id) => id !== agentId) } }).where(eq(agents.id, parentAgentId)).run();
+      }
       transaction.delete(scheduledAgentTasks).where(and(eq(scheduledAgentTasks.agentId, agentId), eq(scheduledAgentTasks.workspaceId, team.id))).run();
       transaction.delete(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, team.id))).run();
       transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
@@ -191,6 +219,28 @@ export class AgentsService {
       transaction.delete(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).run();
       transaction.delete(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).run();
     });
+  }
+
+  private mutate<T>(workspaceId: string, change: (tx: AgentFileTransaction) => T, selections?: Map<string, string[]>) {
+    const catalog = agentFiles(this.db);
+    return catalog ? catalog.mutate(workspaceId, change, selections) : this.db.transaction(change);
+  }
+
+  private requireScope(workspaceId: string, agentId: string, parentAgentId?: string) {
+    const catalog = agentFiles(this.db);
+    if (catalog) {
+      const entry = catalog.get(agentId);
+      if (!entry || entry.agent.workspaceId !== workspaceId || entry.parentId !== (parentAgentId ?? null)) throw new NotFoundException('Agent not found in this scope.');
+    } else {
+      const rows = this.db.select().from(agents).where(eq(agents.workspaceId, workspaceId)).all();
+      const parent = rows.find((row) => row.collaboration?.subAgentIds.includes(agentId));
+      if ((parent?.id ?? null) !== (parentAgentId ?? null)) throw new NotFoundException('Agent not found in this scope.');
+    }
+  }
+
+  async children(request: Request, workspaceSlug: string, agentId: string) {
+    const parent = await this.get(request, workspaceSlug, agentId);
+    return parent.subAgents ?? [];
   }
 
   private async validateCollaboration(workspaceId: string, value: unknown, agentId?: string): Promise<AgentCollaboration | null> {
@@ -297,6 +347,10 @@ export class AgentsService {
         .where(and(eq(mcpServers.workspaceId, workspaceId), inArray(agentMcpServers.agentId, agentIds))),
     ]);
     for (const { agentId, ...skill } of skillRows) skillsByAgent.set(agentId, [...(skillsByAgent.get(agentId) ?? []), skill]);
+    for (const id of agentIds) {
+      const entry = agentFiles(this.db)?.get(id);
+      if (entry) skillsByAgent.set(id, entry.skills.map(({ id, name, version, validation }) => ({ id, name, version, validation })));
+    }
     for (const { agentId, ...server } of mcpRows) mcpServersByAgent.set(agentId, [...(mcpServersByAgent.get(agentId) ?? []), server]);
     return { skillsByAgent, mcpServersByAgent };
   }

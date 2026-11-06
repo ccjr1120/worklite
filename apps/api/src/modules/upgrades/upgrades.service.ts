@@ -11,7 +11,7 @@ import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from '../agents/agent-executions.service';
 import { CommandsService } from '../commands/commands.service';
-import type { WechatService } from '../plugins/wechat/wechat.service';
+import type { WechatService } from '../connections/wechat/wechat.service';
 import type { Request } from 'express';
 import { WORKLITE_PLATFORM_SKILL_NAME } from '@worklite/contracts';
 

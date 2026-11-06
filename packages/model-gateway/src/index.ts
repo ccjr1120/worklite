@@ -1,22 +1,16 @@
+import { isContextOverflow, withContextRecovery, type ContextCheckpointWriter } from './context-recovery.ts';
+export type { ContextCheckpoint, ContextCheckpointWriter } from './context-recovery.ts';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, RetryError, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
 import { gatewayAttributionHeaders, type GatewayCorrelation } from './attribution.ts';
 
-// The Anthropic protocol requires max_tokens and the AI SDK defaults it to 4096
-// when unset, which silently truncates long Agent outputs (for example a
-// Planner's JSON plan) mid-response. Give Agent loops a larger default budget;
-// callers can still override through maxOutputTokens.
-const DEFAULT_AGENT_MAX_OUTPUT_TOKENS = 32_768;
-// Current Claude models think on every turn (Opus 5.5 cannot disable it) and the thinking
-// tokens count against max_tokens. A long JSON deliverable such as a whole article spent
-// most of 32K on thinking and was cut off before the closing brace, so the Anthropic
-// protocol gets a streaming-sized default. OpenAI-compatible providers keep 32K because
-// several of them reject a larger completion budget.
+// Anthropic requires max_tokens, so retain a protocol default unless explicitly
+// configured. OpenAI/Codex requests omit an artificial local output ceiling.
 const DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS = 64_000;
 
-function defaultMaxOutputTokens(provider: ModelProviderConfig): number {
-  return provider.adapter === 'anthropic' ? DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS : DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
+function defaultMaxOutputTokens(provider: ModelProviderConfig): number | undefined {
+  return provider.adapter === 'anthropic' ? DEFAULT_ANTHROPIC_MAX_OUTPUT_TOKENS : undefined;
 }
 
 export type ModelProviderConfig =
@@ -90,6 +84,8 @@ export type GenerateAgentStepRequest = {
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
+  onContextCheckpoint?: ContextCheckpointWriter;
+  onMessages?: (messages: GatewayAgentMessage[]) => void | Promise<void>;
 };
 
 export type GatewayToolDefinition = {
@@ -101,7 +97,7 @@ export type GatewayToolDefinition = {
 export type AgentStepResult = {
   text: string;
   responseMessages: GatewayAgentMessage[];
-  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string }>;
+  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string; normalizationFailure?: string }>;
   finishReason: string | null;
   contextDropped: number;
 };
@@ -130,6 +126,7 @@ export type WorkflowAgentRound = {
 };
 
 export type RunWorkflowAgentRequest = {
+  onContextCheckpoint?: ContextCheckpointWriter;
   candidates: readonly ModelCandidate[];
   systemPrompt: string;
   initialUserContent: string;
@@ -219,10 +216,10 @@ export class AgentJsonOutputError extends Error {
 // same request reproduces it, so callers report it instead of re-running unchanged.
 export class AgentOutputTruncatedError extends Error {
   readonly model: string;
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens: number | undefined;
 
-  constructor(model: string, maxOutputTokens: number) {
-    super(`模型 ${model} 的输出达到单次上限 ${maxOutputTokens} tokens（finishReason=length，思考 token 也计入此上限），JSON 结果被截断。请提高节点的 maxOutputTokens，或缩短要求一次输出的内容。`);
+  constructor(model: string, maxOutputTokens: number | undefined) {
+    super(`模型 ${model} 的输出达到单次上限 ${maxOutputTokens ?? '模型自身限制'} tokens（finishReason=length，思考 token 也计入此上限），JSON 结果被截断。请提高节点的 maxOutputTokens，或缩短要求一次输出的内容。`);
     this.name = 'AgentOutputTruncatedError';
     this.model = model;
     this.maxOutputTokens = maxOutputTokens;
@@ -269,7 +266,11 @@ export class AiSdkModelGateway implements ModelGateway {
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens);
 
     return withModelFallback(request.candidates, async (candidate) => {
-      const model = resolveModel(candidate.provider, candidate.model, request.correlation);
+      const model = withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation), {
+        getMessages: () => context.messages,
+        setMessages: async (messages) => { context.messages = messages; await request.onMessages?.(messages); },
+        archive: request.onContextCheckpoint, signal: request.abortSignal,
+      });
       const useResponses = isResponsesProvider(candidate.provider);
       const skillScript = tool({
         description: 'Run one script from an assigned Skill package immediately on the WorkLite host. Select only an exact Skill id and script path from the assigned script list. arguments must be a command-line string array: use [] for a script with no input; for a JSON-input script use one serialized JSON string, never a nested object or array.',
@@ -353,7 +354,11 @@ export class AiSdkModelGateway implements ModelGateway {
 
   private async runWorkflowAgentAttempt(request: RunWorkflowAgentRequest, candidate: ModelCandidate): Promise<WorkflowAgentLoopResult> {
     const model = withWorkflowAgentStreamTransport(
-      resolveModel(candidate.provider, candidate.model, request.correlation),
+      withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation), {
+        getMessages: () => preparedMessages,
+        setMessages: async (messages) => { checkpointBoundary = sdkHistoryBoundary; checkpointPrefix = messages; preparedMessages = messages; await request.onMessages?.(messages); },
+        archive: request.onContextCheckpoint, signal: request.abortSignal,
+      }),
       request.abortSignal,
     );
     const useResponses = isResponsesProvider(candidate.provider);
@@ -371,6 +376,9 @@ export class AiSdkModelGateway implements ModelGateway {
 
     const initialMessages = request.initialMessages?.length ? [...request.initialMessages] : [{ role: 'user' as const, content: request.initialUserContent }];
     let preparedMessages = initialMessages;
+    let checkpointPrefix: GatewayAgentMessage[] | undefined;
+    let checkpointBoundary = 0;
+    let sdkHistoryBoundary = 0;
     let modelResponse: GatewayAgentMessage | undefined;
     let modelToolCalls: WorkflowAgentToolCall[] = [];
     const checkpointResults = new Map<string, WorkflowAgentToolResult>();
@@ -478,11 +486,13 @@ export class AiSdkModelGateway implements ModelGateway {
       maxRetries: 0,
       stopWhen: isStepCount(maxToolRounds + 1),
       prepareStep: async ({ stepNumber, messages }: Parameters<PrepareStepFunction<ToolSet>>[0]) => {
+        sdkHistoryBoundary = messages.length;
         modelResponse = undefined;
         modelToolCalls = [];
         checkpointResults.clear();
         currentRound = stepNumber;
-        const reminded = withBudgetReminder(messages as readonly GatewayAgentMessage[], stepNumber, maxToolRounds, reminderRound, reminderIndex);
+        const activeMessages = checkpointPrefix ? [...checkpointPrefix, ...messages.slice(checkpointBoundary) as GatewayAgentMessage[]] : messages as GatewayAgentMessage[];
+        const reminded = withBudgetReminder(activeMessages, stepNumber, maxToolRounds, reminderRound, reminderIndex);
         reminderIndex = reminded.reminderIndex;
         const context = trimAgentMessages(request.systemPrompt, reminded.messages, request.maxContextTokens);
         contextDropped = context.dropped;
@@ -595,6 +605,7 @@ function withWorkflowAgentStreamTransport(model: LanguageModel, signal?: AbortSi
               let preamble: unknown[] = [];
               let failure: unknown;
               for (let retryAttempt = attempt; retryAttempt < maxAttempts; retryAttempt += 1) {
+                failure = undefined;
                 const reader = (retryAttempt === attempt ? initial : await doStream()).stream.getReader();
                 preamble = emitted ? [] : [];
                 try {
@@ -622,7 +633,10 @@ function withWorkflowAgentStreamTransport(model: LanguageModel, signal?: AbortSi
                     if (!emitted) preamble.push(part);
                     else controller.enqueue(part);
                   }
-                  if (emitted) return;
+                  if (emitted) {
+                    if (failure) throw failure;
+                    return;
+                  }
                   failure ??= new NoOutputGeneratedError({ message: 'The provider returned no usable model output.' });
                   if (retryAttempt + 1 < maxAttempts && signal?.aborted !== true && isRetryableGatewayError(failure)) {
                     await abortableDelay(Math.min(250 * 2 ** retryAttempt, 2_000), signal);
@@ -634,6 +648,7 @@ function withWorkflowAgentStreamTransport(model: LanguageModel, signal?: AbortSi
                   return;
                 } catch (error) {
                   failure = error;
+                  if (emitted) throw modelFailure(error, error);
                   if (retryAttempt + 1 < maxAttempts && !signal?.aborted && isRetryableGatewayError(error)) {
                     await abortableDelay(Math.min(250 * 2 ** retryAttempt, 2_000), signal);
                     continue;
@@ -766,8 +781,8 @@ export function extractJsonText(text: string): string {
 }
 
 function modelFailure(error: unknown, streamCause: unknown): Error {
-  if ([error, streamCause].some((value) => value instanceof Error && /context_length_exceeded|Prompt exceeds max length|maximum context length/i.test(value.message))) {
-    return new ModelGatewayError('INVALID_REQUEST', 'The model context limit was exceeded. Inspect focused diagnostic records or start a new conversation; complete evidence remains in the execution records.');
+  if ([error, streamCause].some(isContextOverflow)) {
+    return new ModelGatewayError('INVALID_REQUEST', '模型服务拒绝了超出上下文容量的请求，自动整理未能完成。完整执行记录已保留；请检查当前输入或历史记录后继续，原样重试不会解决问题。');
   }
   // The AI SDK's own retries wrap the provider error in a RetryError; the status lives on its last error.
   const unwrap = (value: unknown) => RetryError.isInstance(value) ? value.lastError : value;
@@ -855,8 +870,8 @@ function toAgentStepResult(
   contextDropped: number,
   jsonOutput: boolean,
 ): AgentStepResult {
-  const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
-  if (invalidToolRequest) throw invalidToolRequest;
+  // Keep invalid calls in the turn: admission records and settles each one, rather
+  // than dropping the whole batch (including otherwise valid calls).
   const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts) : []);
   return {
     text: jsonOutput && toolCalls.length === 0 ? extractJsonText(result.text) : result.text,
@@ -974,7 +989,9 @@ function toModelMessages(messages: readonly GatewayMessage[]): ModelMessage[] {
 }
 
 function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; input: unknown }, tools: Record<string, unknown>, typedScripts: ReadonlyMap<string, { skillId: string; path: string }>): AgentStepResult['toolCalls'] {
-  if (!tools[call.toolName]) return [];
+  const invalid = classifyInvalidToolRequest([call]);
+  if (invalid) return [{ ...call, normalizationFailure: invalid.code }];
+  if (!tools[call.toolName]) return [{ ...call, normalizationFailure: 'TOOL_UNKNOWN' }];
   // A typed script tool runs as the same skill_script invocation, with its JSON object as the single argument.
   const typedScript = typedScripts.get(call.toolName);
   if (typedScript) {
@@ -986,7 +1003,7 @@ function normalizeAgentToolCall(call: { toolCallId: string; toolName: string; in
   const scriptPath = requiredString(input?.scriptPath, 240);
   const argumentsValue = argumentArray(input?.arguments);
   if (!skillId || !scriptPath || !argumentsValue) {
-    throw new ModelGatewayError('INVALID_TOOL_REQUEST', 'The model returned an invalid Skill request. Skill arguments must be scalar command-line values.');
+    return [{ ...call, normalizationFailure: 'INVALID_TOOL_REQUEST' }];
   }
   return [{ toolCallId: call.toolCallId, toolName: 'skill_script', input: call.input, skillId, scriptPath, arguments: argumentsValue }];
 }

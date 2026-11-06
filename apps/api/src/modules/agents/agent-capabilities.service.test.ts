@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { artifacts, createDb, initializeDatabase, type Database } from '@worklite/db';
-import type { WechatOfficialAccountService } from '../plugins/wechat-official-account.service';
+import type { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
 import type { PortkeyGatewayService } from '../model-providers/portkey-gateway.service';
 import type { ArtifactStorageService } from '../artifacts/artifact-storage.service';
 import { AgentCapabilitiesService } from './agent-capabilities.service';
@@ -20,7 +20,7 @@ describe('standalone Agent capability tools', () => {
     const output = await service.execute('workspace_personal', 'execution', 'call', { id: 'illustration', type: 'worklite/image', typeVersion: '1', config: { model: 'codex/gpt-image-2', n: 1, background: 'opaque', quality: 'high', size: '1024x1024' } }, { prompt: 'An illustration' }, signal);
     expect(output).toMatchObject({ data: [{ b64Json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1cAAAAASUVORK5CYII=' }] });
     expect(db.select().from(artifacts).all()).toMatchObject([{ format: 'image', width: 1, height: 1 }]);
-    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'An illustration', correlation: { surface: 'agent' }, signal }));
+    expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'An illustration', correlation: { surface: 'agent', agentRunId: 'execution', agentExecutionId: 'execution' }, signal }));
     expect(db.$client.prepare('SELECT count(*) AS count FROM workflow_runs').get()).toEqual({ count: 0 });
   });
   it('stores an Agent-selected text artifact without any legacy run or workflow foreign key', async () => {

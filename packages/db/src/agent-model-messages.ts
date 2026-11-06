@@ -34,6 +34,16 @@ export function insertAgentToolResults(messages: readonly StoredAgentModelMessag
 }
 
 export function normalizeAgentModelMessages(messages: readonly StoredAgentModelMessage[]): StoredAgentModelMessage[] {
+  // Remove the server-generated recovery snapshots, including copies merged into user
+  // part arrays by the SDK. Original evidence remains in tool records/history archives.
+  messages = messages.flatMap((message): StoredAgentModelMessage[] => {
+    if (message.role !== 'user') return [message];
+    const legacy = (text: string) => text.startsWith('[Saved instance tool evidence] ') && text.includes('Continue this instance with the saved results and resultRef references.');
+    if (typeof message.content === 'string') return legacy(message.content) ? [] : [message];
+    const parts = message.content as unknown as Array<{ type: string; text?: string }>;
+    const content = parts.filter((part) => part.type !== 'text' || !legacy(part.text ?? ''));
+    return content.length ? [{ ...message, content } as unknown as StoredAgentModelMessage] : [];
+  });
   const calls = new Map<string, { index: number; toolName: string; result?: StoredAgentToolResult }>();
   messages.forEach((message, index) => {
     if (message.role !== 'assistant') return;

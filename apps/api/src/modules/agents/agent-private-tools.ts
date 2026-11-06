@@ -3,7 +3,7 @@ import type { AgentCollaboration } from '@worklite/contracts';
 import { stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 
-const reserved = new Set(['use_sub_agent_tool', 'read_result', 'store_result', 'run_sub_agent', 'run_sub_agents', 'use_capability', 'skill_script', 'mcp', 'bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document', 'update_plan', 'ask_user']);
+const reserved = new Set(['pause_sub_agent', 'resume_sub_agent', 'wait_sub_agent', 'control_agent_instance', 'use_sub_agent_tool', 'read_result', 'store_result', 'run_sub_agent', 'run_sub_agents', 'use_capability', 'skill_script', 'mcp', 'bash', 'read', 'write', 'glob', 'grep', 'process_reference', 'read_coder_document', 'update_plan', 'ask_user']);
 
 export async function validatePrivateTools(config: AgentCollaboration): Promise<void> {
   if (config.privateTools === undefined) return;

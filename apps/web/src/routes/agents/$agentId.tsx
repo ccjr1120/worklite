@@ -1,4 +1,5 @@
 import { AgentOverview } from '@/features/agents/agent-overview';
+import { WechatOfficialAccountConfiguration } from '@/features/agents/wechat-official-account-configuration';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
@@ -19,13 +20,13 @@ export const Route = createFileRoute('/agents/$agentId')({ validateSearch: (sear
 function AgentPage() {
   const { agentId } = Route.useParams();
   const { t } = useTranslation('agents');
-  const { runId } = Route.useSearch();
+  const { runId, parentId } = Route.useSearch();
   const isNew = agentId === 'new';
   const [editing, setEditing] = useState(false);
-  const query = useQuery({ queryKey: ['agent', agentId], queryFn: () => api.agent('personal', agentId), enabled: !isNew });
+  const query = useQuery({ queryKey: ['agent', agentId, parentId], queryFn: () => parentId ? api.subAgent(parentId, agentId) : api.agent('personal', agentId), enabled: !isNew });
   if (!isNew && query.isError) return <ErrorState title={t('title')} description={t('loadFailed')} onAction={() => void query.refetch()} />;
   if (!isNew && !query.data) return <p className="p-6 text-sm">{t('loading')}</p>;
-  if (!isNew && query.data && !editing) return <AgentOverview key={agentId} agent={query.data} initialRunId={runId} onConfigure={() => setEditing(true)} />;
+  if (!isNew && query.data && !editing && !parentId) return <AgentOverview key={agentId} agent={query.data} initialRunId={runId} onConfigure={() => setEditing(true)} />;
   return <><AgentEditor key={agentId} agent={query.data} onSaved={() => setEditing(false)} onBack={!isNew ? () => setEditing(false) : undefined} /></>;
 }
 function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: () => void; onBack?: () => void }) {
@@ -56,17 +57,17 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
       const publicModels = models.split('\n').map((model) => model.trim()).filter(Boolean);
       const collaboration: AgentCollaboration = { ...agent?.collaboration, builtinToolNames, subAgentIds, privateTools: JSON.parse(privateTools) as AgentCollaboration['privateTools'], capabilities: JSON.parse(capabilities) as AgentCollaboration['capabilities'], publicModels };
       const runtime: AgentRuntimeConfiguration = runtimeKind === 'native' ? { kind: 'native' } : { ...(agent?.runtime && agent.runtime.kind !== 'native' ? agent.runtime : {}), kind: runtimeKind, projectDirectory };
-      const input: CreateAgentRequest = { parentAgentId: !agent ? parentId : undefined, runtime, name, responsibility, systemPrompt: prompt, providerId: agent?.providerId ?? null, model: agent?.providerId ? agent.model : publicModels[0] ?? '', skillIds, mcpServerIds, collaboration };
-      const saved = agent ? await api.updateAgent('personal', agent.id, input) : await api.createAgent(input);
+      const input: CreateAgentRequest = { parentAgentId: parentId, runtime, name, responsibility, systemPrompt: prompt, providerId: agent?.providerId ?? null, model: agent?.providerId ? agent.model : publicModels[0] ?? '', skillIds, mcpServerIds, collaboration };
+      const saved = agent ? parentId ? await api.updateSubAgent(parentId, agent.id, input) : await api.updateAgent('personal', agent.id, input) : await api.createAgent(input);
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['agents'] }), queryClient.invalidateQueries({ queryKey: ['agent', saved.id] })]);
       onSaved();
-      void navigate({ to: '/agents/$agentId', params: { agentId: saved.id } });
+      void navigate({ to: '/agents/$agentId', params: { agentId: saved.id }, search: { parentId } });
     } catch (cause) { setError(cause instanceof Error ? cause.message : t('saveFailed')); }
     finally { setBusy(false); }
   }
   async function remove() {
     if (!agent) return; setBusy(true); setError('');
-    try { await api.deleteAgent(agent.id); await queryClient.invalidateQueries({ queryKey: ['agents'] }); void navigate({ to: '/agents' }); }
+    try { if (parentId) await api.deleteSubAgent(parentId, agent.id); else await api.deleteAgent(agent.id); await queryClient.invalidateQueries({ queryKey: ['agents'] }); void navigate({ to: '/agents' }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : t('deleteFailed')); }
     finally { setBusy(false); }
   }
@@ -80,12 +81,13 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
       <Field label={t('runtime')} htmlFor="agent-runtime"><select id="agent-runtime" className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm" value={runtimeKind} onChange={(event) => setRuntimeKind(event.target.value as 'native' | 'codex' | 'claude')}><option value="native">{t('native')}</option><option value="codex" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Codex</option><option value="claude" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Claude Code</option></select></Field>
       {runtimeKind !== 'native' ? <Field label={t('projectDirectory')} htmlFor="agent-directory"><Input id="agent-directory" value={projectDirectory} onChange={(event) => setProjectDirectory(event.target.value)} placeholder={t('directoryPlaceholder')} /></Field> : null}
       <Field label={t('models')} htmlFor="agent-models"><Textarea id="agent-models" value={models} onChange={(event) => setModels(event.target.value)} placeholder="provider/model" /></Field>
-      {runtimeKind === 'native' ? <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('subAgents')}</legend>{(directory.data ?? []).filter((item) => item.kind === 'custom' && item.id !== agent?.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subAgentIds.includes(item.id)} onChange={() => toggle(item.id, subAgentIds, setSubAgentIds)} />{item.name}</label>)}{agent ? <Button asChild variant="secondary" size="compact"><Link to="/agents/$agentId" params={{ agentId: 'new' }} search={{ parentId: agent.id }}>{t('createSubAgent')}</Link></Button> : null}</fieldset> : null}
+      {runtimeKind === 'native' ? <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('subAgents')}</legend>{[...(directory.data ?? []), ...(agent?.subAgents ?? [])].filter((item) => item.kind === 'custom' && item.id !== agent?.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subAgentIds.includes(item.id)} onChange={() => toggle(item.id, subAgentIds, setSubAgentIds)} />{item.name}{agent?.subAgents?.some((child) => child.id === item.id) ? <Link to="/agents/$agentId" params={{ agentId: item.id }} search={{ parentId: agent.id }} className="text-brand hover:underline">{t('configure')}</Link> : null}</label>)}{agent ? <Button asChild variant="secondary" size="compact"><Link to="/agents/$agentId" params={{ agentId: 'new' }} search={{ parentId: agent.id }}>{t('createSubAgent')}</Link></Button> : null}</fieldset> : null}
       {runtimeKind === 'native' ? <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('builtinTools')}</legend>{(['bash', 'read', 'write', 'glob', 'grep'] as const).map((tool) => <label key={tool} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={builtinToolNames.includes(tool)} onChange={() => toggle(tool, builtinToolNames, setBuiltinToolNames)} />{t(`tools.${tool}`)}</label>)}</fieldset> : null}
-      <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('skills')}</legend>{(skills.data ?? []).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={skillIds.includes(item.id)} onChange={() => toggle(item.id, skillIds, setSkillIds)} />{item.name}</label>)}</fieldset>
+      <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('skills')}</legend>{[...(skills.data ?? []), ...(agent?.skills ?? []).filter((skill) => !(skills.data ?? []).some((item) => item.id === skill.id))].map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={skillIds.includes(item.id)} onChange={() => toggle(item.id, skillIds, setSkillIds)} />{item.name}</label>)}</fieldset>
       <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('mcpServers')}</legend>{(servers.data ?? []).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={mcpServerIds.includes(item.id)} onChange={() => toggle(item.id, mcpServerIds, setMcpServerIds)} />{item.name}</label>)}</fieldset>
       {runtimeKind === 'native' ? <Field label={t('capabilities')} htmlFor="agent-capabilities"><Textarea id="agent-capabilities" className="min-h-40 font-mono text-xs" value={capabilities} onChange={(event) => setCapabilities(event.target.value)} /></Field> : null}
       {runtimeKind === 'native' ? <Field label={t('privateTools')} htmlFor="agent-private-tools"><Textarea id="agent-private-tools" className="min-h-40 font-mono text-xs" value={privateTools} onChange={(event) => setPrivateTools(event.target.value)} /></Field> : null}
+      {agent?.collaboration?.capabilities.some((capability) => capability.type === 'wechat-official-account/publish') ? <WechatOfficialAccountConfiguration agentId={agent.id} parentId={parentId} /> : null}
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       <div className="flex items-center gap-2"><Button type="submit" disabled={busy}>{t('save')}</Button>{agent ? <Button type="button" variant="secondary" disabled={busy} onClick={() => void remove()}>{t('delete')}</Button> : null}</div>
     </form>

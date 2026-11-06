@@ -162,8 +162,8 @@ export async function resolveClaudeMcpServers(
  */
 function correlationHeaders(request: ProjectExecutorRequest): string {
   const correlation = request.correlation
-    ?? { surface: request.owner === 'coder' ? 'coder_project_task' as const : 'chat_project_task' as const, executor: 'claude' as const };
-  return Object.entries(gatewayAttributionHeaders(correlation)).map(([name, value]) => `${name}: ${value}`).join('\n');
+    ?? { surface: request.owner === 'agent' ? 'agent' as const : request.owner === 'coder' ? 'coder_project_task' as const : 'chat_project_task' as const };
+  return Object.entries(gatewayAttributionHeaders({ ...correlation, executor: 'claude' })).map(([name, value]) => `${name}: ${value}`).join('\n');
 }
 
 /**
@@ -374,7 +374,8 @@ class ClaudeCodeSession {
       if (typeof message.usage?.input_tokens === 'number' && typeof message.usage?.output_tokens === 'number') {
         const inputTokens = message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0);
         const outputTokens = message.usage.output_tokens;
-        this.queueActivity('claude.usage', { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens } });
+        this.queueActivity('claude.usage', { usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens,
+          cacheReadTokens: message.usage.cache_read_input_tokens ?? null, cacheCreationTokens: message.usage.cache_creation_input_tokens ?? null } });
       }
       if (this.questionOutput) this.finish(this.questionOutput);
       else if (message.subtype === 'success' && !message.is_error) this.finish(message.result.trim() ? message.result : this.text);

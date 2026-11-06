@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
 import type { StoredProjectExecutor, StoredProjectExecutorLaunch } from '@worklite/db';
-import { CODEX_CLI_PLUGIN_ID, PluginsService } from '../plugins/plugins.service';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { ClaudeCodeService } from './claude-code.service';
 import { CodexAppServerService } from './codex-app-server.service';
@@ -16,15 +15,12 @@ export class ProjectExecutorService {
   constructor(
     private readonly codex: CodexAppServerService,
     private readonly claude: ClaudeCodeService,
-    private readonly plugins: PluginsService,
     private readonly resources: WorkspaceResourcesService,
   ) {}
 
   async captureLaunch(executor: StoredProjectExecutor, model: string | null): Promise<StoredProjectExecutorLaunch> {
     if (executor === 'codex') {
-      const commandArguments = model === null ? [] : await this.plugins.commandArguments(CODEX_CLI_PLUGIN_ID);
-      const configPath = model === null ? await this.plugins.codexConfigPath() : undefined;
-      return this.codex.captureLaunch(commandArguments, model, configPath);
+      return this.codex.captureLaunch(model);
     }
     return this.claude.captureLaunch(model);
   }
@@ -47,6 +43,16 @@ export class ProjectExecutorService {
   }
 
   async execute(request: ProjectExecutorRequest): Promise<string> {
+    // The adapter must receive the owning invocation as well as its engine, even
+    // when the selected model comes from local configuration rather than a Provider.
+    request = {
+      ...request,
+      correlation: {
+        ...request.correlation,
+        surface: request.correlation?.surface ?? (request.owner === 'agent' ? 'agent' : request.owner === 'coder' ? 'coder_project_task' : 'chat_project_task'),
+        executor: request.launch.executor,
+      },
+    };
     const directory = request.resourceDirectory ?? await mkdtemp(join(tmpdir(), `worklite-executor-${request.owner}-`));
     await mkdir(directory, { recursive: true, mode: 0o700 });
     try {

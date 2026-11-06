@@ -1,0 +1,26 @@
+name: search_local_projects
+description: Search the platform metadata-only local project index and check candidate directories. Returns multiple matches and approximate candidates, index freshness/completeness, and directoryStatus. No match means not indexed, never proof of nonexistence. Only dispatch to directoryStatus=exists; ask about ambiguous matches.
+inputSchema:
+  type: object
+  required: [input]
+  additionalProperties: false
+  properties:
+    input:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+        refresh:
+          type: boolean
+handler:
+  kind: command
+  command: node search-local-projects.mjs
+  workingDirectory: /REPLACE_WITH_AGENT_DIRECTORY/tools

@@ -1,3 +1,4 @@
+import { initializeAgentFiles } from '../modules/agents/agent-file-store';
 import { Global, Inject, Injectable, Logger, Module, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { catchUpMaintenanceSettings, createDb, databaseMaintenanceSettings, initializeDatabase, runDatabaseMaintenance, type Database, type DatabaseMaintenanceSettings } from '@worklite/db';
@@ -80,6 +81,7 @@ export class DatabaseMaintenanceService implements OnModuleInit, OnModuleDestroy
       useFactory: async (config: ConfigService): Promise<Database> => {
         const db = createDb(config.get<string>('SQLITE_PATH') ?? '../../.data/deployment/worklite.db');
         await initializeDatabase(db);
+        if (process.env.WORKLITE_PREFLIGHT !== '1') initializeAgentFiles(db);
         return db;
       },
     },

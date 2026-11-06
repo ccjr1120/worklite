@@ -20,6 +20,33 @@ function mount() {
   return { onConfigure, client };
 }
 describe('Agent run overview', () => {
+  it.each(['available', 'unavailable'] as const)('includes direct Codex usage in the task total when Gateway is %s', async (status) => {
+    const root = { ...run('root', '项目 Agent'), usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 0, cacheCreationTokens: 0 } };
+    const codex = { ...run('codex', 'im-codex'), parentRunId: root.id, runtime: 'codex' as const,
+      usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } };
+    vi.mocked(api.agentHistory).mockResolvedValue({ items: [root], hasMore: false });
+    vi.mocked(api.agentRun).mockResolvedValue({ run: root, invocations: [root, codex], artifacts: [], gatewayUsage: { status, summary: null, groups: [] } });
+    const { client } = mount();
+    await screen.findByText('暂无产物');
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('row', { name: 'im-codex · codex 0.1k 0.1k 未记录 0.0k 0.1k' })).toBeInTheDocument();
+    expect(within(table).getByRole('row', { name: '任务合计 0.1k 0.1k 未记录 0.0k 0.1k' })).toBeInTheDocument();
+    client.clear();
+  });
+
+  it('keeps a missing invocation unknown in task totals and preserves reported zeros', async () => {
+    const root = { ...run('root', '项目 Agent'), usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 } };
+    const child = { ...run('child', 'im-codex'), parentRunId: root.id };
+    vi.mocked(api.agentHistory).mockResolvedValue({ items: [root], hasMore: false });
+    vi.mocked(api.agentRun).mockResolvedValue({ run: root, invocations: [root, child], artifacts: [] });
+    const { client } = mount();
+    await screen.findByText('暂无产物');
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('row', { name: '项目 Agent 0.0k 0.0k 0.0k 0.0k 0.0k' })).toBeInTheDocument();
+    expect(within(table).getByRole('row', { name: '任务合计 未记录 未记录 未记录 未记录 未记录' })).toBeInTheDocument();
+    client.clear();
+  });
+
   it('opens run details, separates child token usage, links artifacts and switches records', async () => {
     const first = run('first', '项目 Agent'); const second = run('second', '项目 Agent');
     vi.mocked(api.agentHistory).mockResolvedValue({ items: [first, second], hasMore: false });
@@ -30,8 +57,8 @@ describe('Agent run overview', () => {
     expect(screen.getByText('协调开发与验证')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '在 Chat 中继续' })).toHaveAttribute('href', '/chat?view=conversation&agentId=lead&agentRunId=first&agentExecutionId=execution');
     const table = screen.getByRole('table');
-    expect(within(table).getByRole('row', { name: /开发 Agent 0.1k 0.02k 0.12k/ })).toBeInTheDocument();
-    expect(within(table).getAllByText('未记录')).toHaveLength(3);
+    expect(within(table).getByRole('row', { name: '开发 Agent 0.1k 未记录 未记录 0.0k 0.1k' })).toBeInTheDocument();
+    expect(within(table).getAllByText('未记录')).toHaveLength(12);
     expect(screen.getByRole('link', { name: '项目报告' })).toHaveAttribute('href', '/api/artifact-previews/document/open');
     expect(screen.getByRole('link', { name: '项目报告' })).toHaveAttribute('target', '_blank');
     const taskDetails = screen.getByText('任务', { selector: 'summary' }).closest('details')!;

@@ -12,7 +12,7 @@ import { ModelProvidersModule } from './modules/model-providers/model-providers.
 import { UsageModule } from './modules/usage/usage.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CommandsModule } from './modules/commands/commands.module';
-import { PluginsModule } from './modules/plugins/plugins.module';
+import { ConnectionsModule } from './modules/connections/connections.module';
 import { UpgradesModule } from './modules/upgrades/upgrades.module';
 import { LocalProjectsModule } from './modules/local-projects/local-projects.module';
 import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-logs.module';
@@ -26,7 +26,7 @@ import { ApiRequestLogsModule } from './modules/api-request-logs/api-request-log
     ApiRequestLogsModule,
     UpgradesModule,
     CommandsModule,
-    PluginsModule,
+    ConnectionsModule,
     LocalProjectsModule,
     WorkspaceModule,
     AgentsModule,
