@@ -581,6 +581,15 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       const statuses: Record<string, string> = { proposed: '等待重新部署指令', authorized: '部署已启动', preflighting: '正在预检', draining: '正在交接任务', frozen: '即将切换', switching: '正在切换', recovering: '正在恢复旧版本', succeeded: '部署完成', rolled_back: '已恢复旧版本', failed: '部署未完成' };
       text = `【WorkLite 部署】${statuses[job.phase] ?? job.phase}\n版本：${job.releaseHash.slice(0, 12)}${job.error ? `\n${job.error}` : ''}`;
       terminal = ['proposed', 'succeeded', 'rolled_back', 'failed'].includes(job.phase);
+    } else if (reference?.kind === 'conversation' && reference.dispatchNotice !== undefined) {
+      // This closed window is committed with the launch, independent of the Chat turn's
+      // state or later replies. It uses the ordinary receipts/retry path below.
+      if (typeof reference.dispatchNotice !== 'string' || !reference.dispatchNotice.trim()) {
+        await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
+        return;
+      }
+      text = reference.dispatchNotice;
+      terminal = true;
     } else if (reference?.kind === 'conversation') {
       const execution = await this.executions.get(request, 'personal', CHAT_AGENT_ID, reference.executionId);
       const start = reference.afterMessageId ? execution.messages.findIndex((message) => message.id === reference.afterMessageId) + 1 : 0;
@@ -622,7 +631,9 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     // Send prose and every media reference in source order; text limits must never discard later media.
-    const parts = formatWechatReply(text);
+    const parts = reference?.kind === 'conversation' && reference.dispatchNotice !== undefined
+      ? [{ kind: 'text' as const, text }]
+      : formatWechatReply(text);
     const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', parts, terminal }));
     if (fingerprint === submission.deliveryFingerprint) {
       if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));

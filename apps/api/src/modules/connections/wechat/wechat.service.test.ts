@@ -61,6 +61,96 @@ describe('monitorFailureState', () => {
   });
 });
 
+describe('WeChat Agent dispatch notice delivery', () => {
+  let db: Database;
+  let instance: WechatService;
+  let attempts: Array<{ msg: { client_id: string; context_token: string; item_list: Array<{ type: number; text_item: { text: string } }> } }>;
+  let failureCode: number;
+  let networkFailure: boolean;
+  let updates: unknown[];
+
+  const restart = () => {
+    const executions = { get: async () => { throw new Error('Launch notices must not read the live Chat turn'); } };
+    const configuration = { updateWechat: async (update: unknown) => { updates.push(update); } };
+    const service = new WechatService(db, configuration as never, {} as never, executions as never, {} as never, {} as never, {} as never);
+    const fetchImpl: FetchLike = async (input, init) => {
+      if (String(input).endsWith('/sendmessage')) {
+        attempts.push(JSON.parse(init!.body as string));
+        if (networkFailure) throw new Error('Temporary network failure');
+        if (failureCode) return { ok: true, status: 200, text: async () => JSON.stringify({ ret: failureCode, errcode: failureCode }) };
+        return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"launch-message"}' };
+      }
+      return { ok: true, status: 200, text: async () => '{"ret":0}' };
+    };
+    Object.assign(service, { fetchImpl, baseUrl: 'https://ilink.example', token: 'tok', allowedUserId: 'user', stopped: false });
+    return service;
+  };
+  const work = () => (instance as unknown as { work(): Promise<void> }).work();
+
+  beforeEach(async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    attempts = []; updates = []; failureCode = 0; networkFailure = false;
+    db.insert(agentExecutions).values({ id: 'chat-launch', workspaceId: 'workspace_personal', agentId: 'agt_system_helper_chat', status: 'running' }).run();
+    db.insert(externalChats).values({ id: 'wechat:launch', workspaceId: 'workspace_personal', channel: 'wechat', externalId: 'user', userId: 'user', executionId: 'chat-launch', contextToken: 'ctx-launch' }).run();
+    db.insert(chatSubmissions).values({ id: 'dispatch_call', workspaceId: 'workspace_personal', chatId: 'wechat:launch', executionId: 'chat-launch', message: '', target: { kind: 'conversation' }, reference: { kind: 'conversation', executionId: 'chat-launch', afterMessageId: null, afterSequence: 0, completionStatus: 'completed', dispatchNotice: '已派 @codex：修复问题，正在执行' } }).run();
+    instance = restart();
+  });
+  afterEach(() => db.$client.close());
+
+  it('delivers a text-only closed window while Chat runs and stays settled after restart', async () => {
+    await work();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].msg).toMatchObject({ context_token: 'ctx-launch', item_list: [{ type: 1, text_item: { text: '已派 @codex：修复问题，正在执行' } }] });
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+    instance = restart();
+    await work();
+    expect(attempts).toHaveLength(1);
+  });
+
+  it.each(['network', 'stale-login'] as const)('retries %s failures after restart with the same client id', async (failure) => {
+    networkFailure = failure === 'network'; failureCode = failure === 'stale-login' ? -14 : 0;
+    await work();
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(false);
+    if (failure === 'stale-login') expect(updates).toContainEqual({ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' });
+    expect(db.select().from(wechatEvents).all().some((event) => event.status === 'failed')).toBe(true);
+    networkFailure = false; failureCode = 0;
+    instance = restart();
+    await work();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0].msg.client_id).toBe(attempts[1].msg.client_id);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+  });
+
+  it('uses the persisted part receipt after interruption before the window settled', async () => {
+    await work();
+    db.update(chatSubmissions).set({ settled: false, deliveryFingerprint: null }).run();
+    instance = restart();
+    await work();
+    expect(attempts).toHaveLength(1);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+  });
+
+  it('does not interpret a notice as an attachment or replay later assistant messages', async () => {
+    const row = db.select().from(chatSubmissions).get()!;
+    if (row.reference?.kind !== 'conversation') throw new Error('Missing notice');
+    const dispatchNotice = '已派 @codex：读取 [报告](/api/artifacts/art_report/content?download=true)，正在执行';
+    db.update(chatSubmissions).set({ reference: { ...row.reference, dispatchNotice } }).run();
+    await work();
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].msg.item_list).toEqual([{ type: 1, text_item: { text: dispatchNotice } }]);
+  });
+
+  it('settles an empty notice quietly without sending broken content', async () => {
+    const row = db.select().from(chatSubmissions).get()!;
+    if (row.reference?.kind !== 'conversation') throw new Error('Missing notice');
+    db.update(chatSubmissions).set({ reference: { ...row.reference, dispatchNotice: '' } }).run();
+    await work();
+    expect(attempts).toEqual([]);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+  });
+});
+
 // Receipt lookups must stay empty; only externalChats returns the configured conversation.
 function selectFrom(rows: unknown[]): unknown {
   return () => ({

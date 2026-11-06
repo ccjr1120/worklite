@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { agentCapabilityResults, agentExecutions, agents, agentToolCalls, auditLogs, workspaces, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { agentCapabilityResults, agentExecutions, agents, agentToolCalls, auditLogs, chatSubmissions, externalChats, workspaces, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { CHAT_AGENT_ID, type AgentExecutionStatus } from '@worklite/contracts';
 import type { AgentCollaborationService } from './agent-collaboration.service';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -34,11 +34,83 @@ async function setup() {
 }
 
 describe('background Agent dispatch from Chat', () => {
+  function bindChannel(channel: 'wechat' | 'feishu', workspaceId = 'workspace_personal') {
+    db.insert(externalChats).values({ id: 'bound-chat', workspaceId, channel, externalId: 'user', userId: 'user', executionId: 'chat' }).run();
+  }
+
+  it('atomically queues one short WeChat launch notice without adding a Web reply', async () => {
+    const { internal } = await setup();
+    vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    bindChannel('wechat');
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    const [notice] = db.select().from(chatSubmissions).all();
+    expect(notice).toMatchObject({ id: 'dispatch_dispatch', chatId: 'bound-chat', settled: false, reference: { kind: 'conversation', completionStatus: 'completed', dispatchNotice: '已派 @qcoder：Investigate，正在执行' } });
+    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()!).toMatchObject({ status: 'completed', displayMessages: [] });
+    expect(gateway.generateAgentStep).not.toHaveBeenCalled();
+
+    // Simulate interruption after the acceptance transaction, before saving the tool result.
+    // Only durable state is used to recover the existing launch and delivery window.
+    db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, notice!.id)).run();
+    db.update(agentToolCalls).set({ status: 'running', output: '' }).where(eq(agentToolCalls.id, 'dispatch')).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select().from(chatSubmissions).all()).toEqual([{ ...notice, settled: true }]);
+  });
+
+  it.each(['web', 'feishu', 'foreign-workspace'] as const)('does not enqueue a WeChat notice for %s', async (channel) => {
+    const { internal } = await setup();
+    vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    if (channel === 'foreign-workspace') {
+      db.insert(workspaces).values({ id: 'foreign', slug: 'foreign', name: 'Foreign' }).run();
+      bindChannel('wechat', 'foreign');
+    } else if (channel === 'feishu') bindChannel(channel);
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    expect(db.select().from(chatSubmissions).all()).toEqual([]);
+    expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('completed');
+  });
+
+  it('bounds and flattens the task summary without media or Markdown decoration', async () => {
+    const { internal } = await setup();
+    vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    bindChannel('wechat');
+    db.update(agentToolCalls).set({ input: { agentId: 'lead', mode: 'new', task: '**修复**\n![报告](/api/artifacts/art_report/content?download=true) <问题> ' + '😀'.repeat(150) } }).where(eq(agentToolCalls.id, 'dispatch')).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    const reference = db.select().from(chatSubmissions).get()!.reference;
+    expect(reference?.kind).toBe('conversation');
+    if (reference?.kind !== 'conversation') throw new Error('Missing launch notice');
+    expect(reference.dispatchNotice).toMatch(/^已派 @qcoder：修复 报告 ＜问题＞ 😀+…，正在执行$/u);
+    expect(Array.from(reference.dispatchNotice!)).toHaveLength(Array.from('已派 @qcoder：，正在执行').length + 121);
+  });
+
+  it('does not invent a notice when the task has no usable summary', async () => {
+    const { internal } = await setup();
+    vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    bindChannel('wechat');
+    db.update(agentToolCalls).set({ input: { agentId: 'lead', mode: 'new', task: '***' } }).where(eq(agentToolCalls.id, 'dispatch')).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    expect(db.select().from(chatSubmissions).all()).toEqual([]);
+    expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('completed');
+  });
+
+  it('rolls back both the launch and notice when the acceptance transaction fails', async () => {
+    const { internal } = await setup();
+    const schedule = vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    bindChannel('wechat');
+    db.$client.exec("CREATE TRIGGER reject_notice BEFORE INSERT ON chat_submissions BEGIN SELECT RAISE(ABORT, 'notice storage failed'); END");
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+    expect(db.select().from(chatSubmissions).all()).toEqual([]);
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).all()).toEqual([]);
+    expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('failed');
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   it.each([
     { projectDirectory: '', message: 'runtime.projectDirectory is required' },
     { projectDirectory: '/worklite-missing-project-directory', message: 'runtime.projectDirectory must be an existing directory' },
   ])('preserves the startup validation reason without accepting a launch: $projectDirectory', async ({ projectDirectory, message }) => {
     const { internal } = await setup();
+    bindChannel('wechat');
     db.update(agents).set({ runtime: { kind: 'codex', projectDirectory } }).where(eq(agents.id, 'lead')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
     const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
@@ -46,6 +118,7 @@ describe('background Agent dispatch from Chat', () => {
     expect(JSON.parse(call.output)).toMatchObject({ failure: { stage: 'start', code: 'PLATFORM_START_FAILED', effect: 'not_started', evidence: { exceptionType: 'BadRequestException', message: expect.stringContaining(message) } } });
     expect(db.select().from(agentExecutions).all()).toHaveLength(1);
     expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).all()).toEqual([]);
+    expect(db.select().from(chatSubmissions).all()).toEqual([]);
     expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'platform.tool_failure')).get()!.metadata).toMatchObject({ failure: { evidence: { message: expect.stringContaining(message) } } });
   });
 
@@ -87,6 +160,19 @@ describe('background Agent dispatch from Chat', () => {
     db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue writing', mode: 'continue', continuationReason: 'Revise the same article', resumeCancelled: true, executionId: 'saved' } }).where(eq(agentToolCalls.id, 'dispatch')).run();
     return context;
   }
+
+  it('notifies once for each accepted continuation of the same Agent instance', async () => {
+    const { internal } = await savedInstance();
+    bindChannel('wechat');
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    expect(db.select().from(chatSubmissions).get()!.reference).toMatchObject({ dispatchNotice: '已派 @qcoder：Continue writing，正在执行' });
+    const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
+    db.update(agentExecutions).set({ status: 'completed' }).where(eq(agentExecutions.id, 'saved')).run();
+    db.insert(agentToolCalls).values({ ...call, id: 'dispatch-next', toolCallId: 'model-next', status: 'running', resultAppended: false }).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch-next');
+    expect(db.select().from(chatSubmissions).all().map((row) => row.id)).toEqual(['dispatch_dispatch', 'dispatch_dispatch-next']);
+    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+  });
 
   it.each(['running', 'waiting_for_input', 'completed', 'failed', 'cancelled'] as const)('uses the live %s Agent state consistently across conversation reads and events', async (status) => {
     const { internal } = await savedInstance(status);

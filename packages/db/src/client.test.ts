@@ -46,6 +46,8 @@ describe('initializeDatabase restart recovery', () => {
       expect(text).toContain('10 MB each and 40 MB total');
       expect(text).toContain('never invent URLs');
       expect(text).toContain('WeChat output: WorkLite uses Tencent iLink private chat');
+      expect(text).toContain('platform immediately queues one short plain-text launch notice');
+      expect(text).toContain('Do not generate another launch acknowledgement');
       expect(text).toContain('3500 UTF-8 bytes');
       expect(text).toContain('not an officially confirmed server limit');
       expect(text).toContain('Apply these restrictions to WeChat only');

@@ -53,7 +53,7 @@ export type StoredChatTarget =
   | { kind: 'coder'; coderId: string; projectDirectory: string; role?: string }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
-  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null }
+  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null; dispatchNotice?: string }
   | { kind: 'coder'; coderId: string; runId: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
