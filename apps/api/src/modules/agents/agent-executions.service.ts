@@ -1,4 +1,5 @@
 import { agentInvocationDisplays } from './agent-invocation-display';
+import { localImageToolOutput } from './local-image-tool-result';
 import { AgentCollaborationService, CHAT_AGENT_TOOLS } from './agent-collaboration.service';
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
@@ -875,13 +876,18 @@ export class AgentExecutionsService implements OnModuleInit {
           return;
         }
         const completed = await this.skillScripts.wait(started.id);
+        const imageOutput = completed.execution.status === 'succeeded' && isProtectedPlatformSkillId(workspaceId, call.skillId) && call.scriptPath === 'scripts/upload-local-images.mjs'
+          ? localImageToolOutput('stdout' in completed && typeof completed.stdout === 'string' ? completed.stdout : completed.output)
+          : null;
         const parsedResult = completed.execution.status === 'succeeded' && isProtectedPlatformSkillId(workspaceId, call.skillId)
-          ? parseWorkliteScriptResult(completed.output)
+          ? call.scriptPath === 'scripts/upload-local-images.mjs'
+            ? imageOutput === null ? null : { type: 'snapshot' as const }
+            : parseWorkliteScriptResult(completed.output)
           : null;
         const succeeded = completed.execution.status === 'succeeded' && (!isProtectedPlatformSkillId(workspaceId, call.skillId) || parsedResult !== null);
         result = {
           status: completed.execution.status === 'cancelled' ? 'cancelled' : succeeded ? 'completed' : 'failed',
-          output: completed.output,
+          output: imageOutput ?? completed.output,
           result: parsedResult,
           exitCode: completed.execution.exitCode,
           commandExecutionId: completed.execution.id,
