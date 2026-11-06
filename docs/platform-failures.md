@@ -8,7 +8,7 @@
 
 `GET /audit-logs` 支持 action、resource、executionId、commandExecutionId、contractHash、code、stage、effect、from、to、limit（1–500，筛选时默认 100）和 offset。结果仍为原有数组，按时间及 id 倒序。无 query 时保持原接口行为。Chat 可通过 `query_platform` 的 query 对象传入过滤条件。翻页需显式增加 offset；活动写入期间 offset 分页不是一致性快照。
 
-`contractHash` 是调用捕获的整个技能包 SHA-256，定位当次 tools.json、lib 和脚本版本。API 请求证据按请求顺序记录 method、路径哈希、状态、响应阶段、受限格式的 API 错误码和响应 request id（上游未返回时为空）。不复制参数值、响应正文、凭据或异常堆栈。原有 Command 事件和调用输入仍适用原存储策略，新增诊断记录不会复制这些原文。
+`contractHash` 是调用捕获的整个技能包 SHA-256，定位当次 tools.json、lib 和脚本版本。API 请求证据按请求顺序记录 method、路径哈希、状态、响应阶段、受限格式的 API 错误码和响应 request id（上游未返回时为空）。400/404/409/422 的领域错误额外保留 `message`（最多 1000 字符），便于定位字段校验或归属冲突；不复制完整响应正文、请求参数或异常堆栈。启动阶段的 BadRequest/Conflict/NotFound 也保留服务返回的错误消息，未知内部异常只记录异常类型及系统错误码。原有 Command 事件和调用输入仍适用原存储策略。
 
 ## 分类及效果
 

@@ -278,6 +278,18 @@ describe('initializeDatabase restart recovery', () => {
     expect(platformFile('scripts/update-agent.mjs').content).toContain("method: 'PATCH'");
   });
 
+  it('synchronizes ownership routes and cascade deletion rules into Chat and its tools', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const chat = db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).get()!;
+    expect(chat.systemPrompt).toContain('only top-level user-managed Agents');
+    expect(chat.systemPrompt).toContain('GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId');
+    expect(chat.systemPrompt).toContain('Deleting an Agent cascades through all its descendants');
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    expect(tools['scripts/delete-agent.mjs'].description).toContain('all owned descendants are deleted in the same operation');
+    expect(tools['scripts/delete-agent.mjs'].description).not.toContain('owned children removed first');
+  });
+
   it('does not package graph editing, publishing or Workflow execution tools', () => {
     const files = platformSkillPackageFiles();
     expect(files.some((file) => file.path.includes('workflow'))).toBe(false);

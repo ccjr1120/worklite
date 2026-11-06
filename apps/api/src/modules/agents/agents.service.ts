@@ -49,7 +49,7 @@ export class AgentsService {
     const assignments = await this.loadAssignments(team.id, rows.map(({ agent }) => agent.id));
     return rows
       .sort((left, right) => left.agent.name.localeCompare(right.agent.name))
-      .map(({ agent }) => this.toView(agent, workspaceSlug, agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null, assignments));
+      .map(({ agent }) => this.toView({ ...agent, collaboration: agent.collaboration ? { ...agent.collaboration, subAgentIds: [] } : null }, workspaceSlug, agent.providerId ? gatewayNames.get(agent.providerId) ?? null : null, assignments));
   }
 
   async get(request: Request, workspaceSlug: string, agentId: string, parentAgentId?: string): Promise<AgentView> {
@@ -58,7 +58,7 @@ export class AgentsService {
     await this.resources.reconcileWorkspaceSkills(team.id);
     // System configuration lives in SQL and must not depend on custom Agent files.
     const target = this.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).get();
-    if (target?.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
+    if (!target || target.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
     const [row] = await this.db.select({ agent: agents }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!row) throw new NotFoundException('Agent not found');
     if (row.agent.kind === 'custom') this.requireScope(team.id, agentId, parentAgentId);
@@ -110,7 +110,7 @@ export class AgentsService {
     await this.resources.reconcileWorkspaceSkills(team.id);
     // System configuration lives in SQL and must not depend on custom Agent files.
     const target = this.db.select({ kind: agents.kind }).from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).get();
-    if (target?.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
+    if (!target || target.kind === 'custom') agentFiles(this.db)?.refresh(team.id);
     const [existing] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).limit(1);
     if (!existing) throw new NotFoundException('Agent not found');
     if (existing.kind === 'custom') this.requireScope(team.id, agentId, input.parentAgentId);
@@ -200,10 +200,16 @@ export class AgentsService {
     if (!existing) throw new NotFoundException('Agent not found');
     if (existing.kind === 'system') throw new BadRequestException('The Chat entry point cannot be deleted.');
     this.requireScope(team.id, agentId, parentAgentId);
-    const parents = await this.db.select().from(agents).where(eq(agents.workspaceId, team.id));
-    if (parents.some((parent) => parent.collaboration?.subAgentIds.includes(agentId)) && !parentAgentId) throw new ConflictException('Manage this sub-Agent through its owning Agent.');
-    if (existing.collaboration?.subAgentIds.length) throw new ConflictException('Remove owned sub-Agents through the parent before deleting this Agent.');
-    const active = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).limit(1);
+    const directory = await this.db.select().from(agents).where(eq(agents.workspaceId, team.id));
+    const byId = new Map(directory.map((row) => [row.id, row]));
+    const ids = new Set<string>();
+    const collect = (id: string) => {
+      if (ids.has(id)) return;
+      ids.add(id);
+      for (const child of byId.get(id)?.collaboration?.subAgentIds ?? []) collect(child);
+    };
+    collect(agentId);
+    const active = await this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(inArray(agentExecutions.agentId, [...ids]), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).limit(1);
     if (active.length) throw new ConflictException('Cancel the active Agent execution before deleting it.');
     const catalog = agentFiles(this.db);
     if (catalog) { catalog.remove(team.id, agentId, parentAgentId); return; }
@@ -212,12 +218,14 @@ export class AgentsService {
         const parent = transaction.select().from(agents).where(eq(agents.id, parentAgentId)).get()!;
         transaction.update(agents).set({ collaboration: { ...parent.collaboration!, subAgentIds: parent.collaboration!.subAgentIds.filter((id) => id !== agentId) } }).where(eq(agents.id, parentAgentId)).run();
       }
-      transaction.delete(scheduledAgentTasks).where(and(eq(scheduledAgentTasks.agentId, agentId), eq(scheduledAgentTasks.workspaceId, team.id))).run();
-      transaction.delete(agentExecutions).where(and(eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, team.id))).run();
-      transaction.delete(agentSkills).where(eq(agentSkills.agentId, agentId)).run();
-      transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
-      transaction.delete(agentVersions).where(and(eq(agentVersions.agentId, agentId), eq(agentVersions.workspaceId, team.id))).run();
-      transaction.delete(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).run();
+      for (const id of [...ids].reverse()) {
+        transaction.delete(scheduledAgentTasks).where(and(eq(scheduledAgentTasks.agentId, id), eq(scheduledAgentTasks.workspaceId, team.id))).run();
+        transaction.delete(agentExecutions).where(and(eq(agentExecutions.agentId, id), eq(agentExecutions.workspaceId, team.id))).run();
+        transaction.delete(agentSkills).where(eq(agentSkills.agentId, id)).run();
+        transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, id)).run();
+        transaction.delete(agentVersions).where(and(eq(agentVersions.agentId, id), eq(agentVersions.workspaceId, team.id))).run();
+        transaction.delete(agents).where(and(eq(agents.id, id), eq(agents.workspaceId, team.id))).run();
+      }
     });
   }
 

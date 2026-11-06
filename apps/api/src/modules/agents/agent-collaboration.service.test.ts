@@ -30,6 +30,26 @@ async function setup() {
 }
 
 describe('Agent-selected collaboration', () => {
+  it('binds specialist tool schemas to owned stable ids and recovers from a display-name request', async () => {
+    const { service, execute } = await setup();
+    db.update(agents).set({ name: 'im-codex' }).where(eq(agents.id, 'writer')).run();
+    execute.mockImplementation(async (request) => {
+      if (!request.systemPrompt.startsWith('lead')) return 'Implemented';
+      const one = request.managedTools!.find((item) => item.name === 'run_sub_agent')!;
+      const batch = request.managedTools!.find((item) => item.name === 'run_sub_agents')!;
+      const takeover = request.managedTools!.find((item) => item.name === 'use_sub_agent_tool')!;
+      expect(one.inputSchema).toMatchObject({ properties: { agentId: { enum: ['researcher', 'writer'] } } });
+      expect(batch.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { agentId: { enum: ['researcher', 'writer'] } } } } } });
+      expect(takeover.inputSchema).toMatchObject({ properties: { agentId: { enum: ['researcher', 'writer'] } } });
+      const wrong = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'im-codex', task: 'Work' })));
+      expect(wrong.result).toMatchObject({ status: 'failed', error: expect.stringContaining('Available ids: ["researcher","writer"]') });
+      const right = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'writer', task: 'Work' })));
+      expect(right.result).toMatchObject({ status: 'completed', result: 'Implemented' });
+      return 'Done';
+    });
+    expect(await service.run('workspace_personal', 'execution', 'lead', 'Work', new AbortController().signal)).toBe('Done');
+  });
+
   it('attributes empty-model Codex snapshots to the exact invocation and replaces usage when that session continues', async () => {
     const { service, newService, execute, executeEngine } = await setup();
     db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() }, providerId: null, model: '', collaboration: { subAgentIds: [], capabilities: [], publicModels: [] } }).where(eq(agents.id, 'researcher')).run();

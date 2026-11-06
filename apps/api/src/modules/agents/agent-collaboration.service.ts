@@ -37,6 +37,18 @@ const SUB_AGENT_TOOLS: GatewayToolDefinition[] = [
   { name: 'run_sub_agent', description: 'Ask one assigned sub-Agent to perform a task with explicit context. Choose the specialist and next task from current evidence. For questions about previous work, answer from existing results first; if needed, pass its runId to ask the original specialist using saved context.', inputSchema: subInvocationSchema },
   { name: 'run_sub_agents', description: 'Run independent assigned sub-Agent tasks concurrently and receive each result. Use a separate call when a task depends on an earlier result.', inputSchema: { type: 'object', additionalProperties: false, required: ['tasks'], properties: { tasks: { type: 'array', minItems: 1, maxItems: 4, items: subInvocationSchema } } } },
 ];
+
+function assignedSubAgentTools(ids: string[]): GatewayToolDefinition[] {
+  const bind = (schema: Record<string, unknown>): Record<string, unknown> => {
+    const properties = object(schema.properties);
+    return {
+      ...schema,
+      ...(properties.agentId ? { properties: { ...properties, agentId: { ...object(properties.agentId), enum: ids, description: 'Exact stable id of a directly assigned sub-Agent. Never use its display name.' } } } : {}),
+      ...(properties.tasks ? { properties: { ...properties, tasks: { ...object(properties.tasks), items: bind(object(object(properties.tasks).items)) } } } : {}),
+    };
+  };
+  return SUB_AGENT_TOOLS.map((tool) => ({ ...tool, inputSchema: bind(tool.inputSchema) }));
+}
 const CAPABILITY_TOOL: GatewayToolDefinition = { name: 'use_capability', description: 'Call one configured capability with its declared input ports. A WeChat publish capability also accepts independent article operations in input: {operation:"list"}; {operation:"inspect"|"verify",runId,draftId}; {operation:"render_image",runId,draftId,key,html,width?,height?}; {operation:"revise",runId,draftId,requestKey,title?,imageReplacements?:{imageKey:artifactId}}; {operation:"publish",mode:"draft"|"publish",runId?,draftId?,article?,metadata?,images?,coverImage?,imageReplacements?}. List identifies saved articles; inspect reads their text and images; publish can reuse a recorded article and replace selected images. Only call the operations needed for the user task. Supply {$result: resultRef, path?: "$.field"} anywhere in input to pass a previous result without copying large images or text. To resume a user action, supply resumeCallId from the prior result with the same capabilityId; do not create a fresh publication.', inputSchema: { type: 'object', additionalProperties: false, required: ['capabilityId'], properties: { capabilityId: { type: 'string' }, input: {}, resumeCallId: { type: 'string' } } } };
 
 type InvocationState = { messages?: GatewayAgentMessage[]; resumeId?: string };
@@ -277,7 +289,7 @@ export class AgentCollaborationService {
       const skillCalls: SkillScriptCallRecord[] = [];
       const requiredSkills = catalog ? requiredSkillIds : await this.resources.resolveSkillIds(workspaceId, requiredSkillIds);
       const privateTools = config?.privateTools ?? [];
-      const tools = [...RESULT_TOOLS, ...privateTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), ...(children.length ? SUB_AGENT_TOOLS : []), ...(capabilityList.length ? [CAPABILITY_TOOL] : [])];
+      const tools = [...RESULT_TOOLS, ...privateTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), ...(children.length ? assignedSubAgentTools(children) : []), ...(capabilityList.length ? [CAPABILITY_TOOL] : [])];
       if (requiredSkills.some((skillId) => !invocationSkills.some((skill) => skill.id === skillId))) throw new BadRequestException('A required Skill is not assigned to this Agent.');
       let text: string;
       let rawOutput = '';
@@ -347,7 +359,7 @@ export class AgentCollaborationService {
               output = resolve(input.value);
             } else if (call.toolName === 'use_sub_agent_tool') {
               const childId = required(input.agentId, 'agentId');
-              if (!children.includes(childId)) throw new BadRequestException('This sub-Agent is not assigned to its parent.');
+              if (!children.includes(childId)) throw new BadRequestException(`This sub-Agent is not assigned to its parent. Use an exact assigned agentId, not a name. Available ids: ${JSON.stringify(children)}.`);
               const child = directory.get(childId)!;
               const childDirectory = workingDirectory ?? (child.agent.runtime.kind !== 'native' ? child.agent.runtime.projectDirectory : undefined);
               const childTools = child.agent.collaboration?.builtinToolNames ?? [];
@@ -390,7 +402,7 @@ export class AgentCollaborationService {
                 const child = typeof request.agentId === 'string' ? request.agentId : '';
                 try {
                   required(child, 'agentId');
-                  if (!children.includes(child)) throw new BadRequestException('This sub-Agent is not assigned to its parent.');
+                  if (!children.includes(child)) throw new BadRequestException(`This sub-Agent is not assigned to its parent. Use an exact assigned agentId, not a name. Available ids: ${JSON.stringify(children)}.`);
                   if (request.background !== undefined && typeof request.background !== 'boolean') throw new BadRequestException('background must be a boolean.');
                   const followUpRunId = request.runId === undefined ? undefined : required(request.runId, 'runId');
                   const childRunId = followUpRunId ?? `air_${randomUUID()}`;

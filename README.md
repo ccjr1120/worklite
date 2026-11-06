@@ -50,9 +50,9 @@ collaboration:
 这里填写 Agent 的完整提示词。
 ```
 
-子 Agent 的归属来自 `subagents/` 目录，不在 frontmatter 中填写 `subAgentIds`。私有工具在 `tools/*.yaml` 中声明 `name`、`description`、`inputSchema`、`handler`；Skills 的 `SKILL.md`、脚本和参考文件放在自身的 `skills/` 下。共享 Skill 被选中时会复制到该 Agent，之后独立维护。MCP 配置只保存服务器 ID，凭据仍由平台管理。
+子 Agent 的归属来自 `subagents/` 目录，不在 frontmatter 中填写 `subAgentIds`。私有工具在 `tools/*.yaml` 中声明 `name`、`description`、`inputSchema`、`handler`；Skills 的 `SKILL.md`、脚本和参考文件放在自身的 `skills/` 下。共享 Skill 被选中时会复制到该 Agent，之后独立维护。MCP 配置只保存服务器 ID，凭据仍由平台管理。`tools/` 与 `subagents/` 只属于 native Agent；Codex/Claude 包不生成这些目录。创建或修改会严格校验暂存包和最终目录，最终配置与运行索引都可读取后才提交，失败时恢复文件及索引。
 
-平台列表和 Chat 的 `@` 入口只显示顶层 Agent。通过主 Agent 配置管理子 Agent；子 Agent API 使用 `/api/agents/:parentId/sub-agents/:childId`，不能从全局入口直接运行。配置页面的保存操作也写入这些文件；手工编辑文件在后续读取/调用时生效，正在执行的任务继续使用已捕获的配置。删除配置文件不会从数据库恢复旧定义；删除操作保留历史执行数据。数据库 Agent 行仅为运行索引，不能再作为配置来源直接编辑。
+平台列表和 Chat 的 `@` 入口只显示顶层 Agent。通过主 Agent 配置管理子 Agent；子 Agent API 使用 `/api/agents/:parentId/sub-agents/:childId`，不能从全局入口直接运行。配置页面的保存操作也写入这些文件；手工编辑文件在后续读取/调用时生效，正在执行的任务继续使用已捕获的配置。删除配置文件不会从数据库恢复旧定义；删除主 Agent 会一次级联删除其全部后代，不需要先清空子 Agent；删除操作保留历史执行数据并停用被删除 Agent 的定时任务。数据库 Agent 行仅为运行索引，不能再作为配置来源直接编辑。
 
 迁移状态记录在数据库中。移动目录时需要同时调整 `WORKLITE_AGENTS_DIR` 和迁移记录中的根路径；只修改环境变量会拒绝启动，避免误导入另一套配置。
 

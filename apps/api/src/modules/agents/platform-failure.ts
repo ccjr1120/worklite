@@ -50,6 +50,7 @@ export function scriptFailure(output: string, responseContractFailure = false): 
       state: ['sent', 'responded', 'decoded'].includes(String(item.state)) ? String(item.state) : 'sent',
       requestId: typeof item.requestId === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(item.requestId) ? item.requestId : null,
       pathHash: typeof item.pathHash === 'string' && /^[a-f0-9]{64}$/.test(item.pathHash) ? item.pathHash : null,
+      ...([400, 404, 409, 422].includes(Number(item.status)) && typeof item.message === 'string' ? { message: item.message.slice(0, 1000) } : {}),
       apiCode: typeof item.apiCode === 'string' && /^[A-Z][A-Z0-9_]{1,100}$/.test(item.apiCode) ? item.apiCode : null,
     }));
     const writes = requests.filter((item: { method: string }) => item.method !== 'GET');

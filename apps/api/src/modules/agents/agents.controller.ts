@@ -1,5 +1,5 @@
 import { AgentHistoryService } from './agent-history.service';
-import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { AgentExecutionEvent, CreateAgentRequest, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -180,6 +180,7 @@ export class AgentsController {
 
   @Patch(':agentId')
   update(@Req() request: Request, @Param('agentId') agentId: string, @Body() body: UpdateAgentRequest) {
+    if (body.parentAgentId !== undefined) throw new BadRequestException('Use PATCH /agents/:parentId/sub-agents/:childId to update a private sub-Agent.');
     return this.agents.update(request, 'personal', agentId, body);
   }
 

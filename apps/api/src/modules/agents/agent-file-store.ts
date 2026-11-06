@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
+import { parseAgentRuntime } from './agent-runtime.configuration';
 import { parse, stringify, YAMLParseError } from 'yaml';
 import { agents, agentSkills, agentMcpServers, mcpServers, scheduledAgentTasks, skills, skillFiles, workspaces, type Database } from '@worklite/db';
 
@@ -65,10 +66,10 @@ export class AgentFileStore {
         if (!existsSync(join(directory, 'AGENT.md'))) throw new BadRequestException(`Missing AGENT.md in ${directory}.`);
         const { config, body } = document(join(directory, 'AGENT.md'));
         const id = requiredString(config.id, 'Agent id');
-        const runtime = record(config.runtime ?? { kind: 'native' });
-        if (!['native', 'claude', 'codex'].includes(String(runtime.kind))) throw new BadRequestException(`Invalid runtime in ${directory}.`);
-        if (runtime.kind !== 'native' && runtime.projectDirectory !== undefined && (typeof runtime.projectDirectory !== 'string' || (runtime.projectDirectory !== '' && !isAbsolute(runtime.projectDirectory)))) throw new BadRequestException('Agent projectDirectory must be absolute.');
-        if (runtime.approvalPolicy !== undefined && !['auto', 'ask'].includes(String(runtime.approvalPolicy))) throw new BadRequestException('Invalid Agent approvalPolicy.');
+        const runtime = parseAgentRuntime(config.runtime);
+        // Older publishers emitted empty scaffolding for every runtime. Keep it
+        // readable, while all actual tools and children remain native-only.
+        if (runtime.kind !== 'native' && ['tools', 'subagents'].some((name) => existsSync(join(directory, name)) && readdirSync(join(directory, name)).length > 0)) throw new BadRequestException(`An execution adapter cannot own tools/ or subagents/ contents: ${directory}.`);
         const collaboration = { ...record(config.collaboration), subAgentIds: [] as string[], capabilities: record(config.collaboration).capabilities ?? [] } as NonNullable<AgentRow['collaboration']>;
         if (record(config.collaboration).subAgentIds !== undefined || record(config.collaboration).privateTools !== undefined) throw new BadRequestException('Declare sub-Agents in subagents/ and private tools in tools/, not AGENT.md.');
         if (!Array.isArray(collaboration.capabilities)) throw new BadRequestException('Agent capabilities must be an array.');
@@ -166,32 +167,79 @@ export class AgentFileStore {
     this.refresh(workspaceId, this.workspaceRoot(workspaceId), false);
     const before = new Map(this.refresh(workspaceId).map((entry) => [entry.agent.id, entry]));
     const beforeRows = new Set(this.rows(workspaceId).map((row) => row.id));
+    const beforeEntries = new Map(this.entries);
+    const beforeFailures = this.failures.get(workspaceId);
+    const root = this.workspaceRoot(workspaceId);
     let backup: string | undefined;
+    let published = false;
+    let result: T;
     try {
-      const result = this.db.transaction((tx) => {
+      result = this.db.transaction((tx) => {
         const result = mutation(tx);
         const rows = this.rows(workspaceId).filter((row) => !excludedIds.has(row.id) && (before.has(row.id) || !beforeRows.has(row.id)));
         backup = this.publish(workspaceId, rows, before, skillSelections, true);
+        published = true;
+        // Read the final location before committing SQL or discarding the rollback copy.
+        // Tolerant discovery must never turn a successful write into an invisible package.
+        this.refresh(workspaceId, root, false);
+        const indexed = this.refresh(workspaceId);
+        if (indexed.length !== rows.length || rows.some((row) => !this.entries.has(row.id))) throw new BadRequestException('The published Agent catalog could not be indexed completely.');
         return result;
       });
-      if (backup) rmSync(backup, { recursive: true, force: true });
-      this.refresh(workspaceId);
-      return result;
     } catch (error) {
-      if (backup && existsSync(backup)) { rmSync(this.workspaceRoot(workspaceId), { recursive: true, force: true }); renameSync(backup, this.workspaceRoot(workspaceId)); }
+      if (published) rmSync(root, { recursive: true, force: true });
+      if (backup && existsSync(backup)) renameSync(backup, root);
+      this.entries = beforeEntries;
+      if (beforeFailures) this.failures.set(workspaceId, beforeFailures);
+      else this.failures.delete(workspaceId);
       throw error;
     }
+    if (backup) this.cleanup(backup);
+    return result;
+  }
+
+  private cleanup(path: string) {
+    try { rmSync(path, { recursive: true, force: true }); }
+    catch { this.logger.warn(`Committed Agent change; deferred cleanup of ${path}.`); }
   }
 
   remove(workspaceId: string, agentId: string, parentAgentId?: string) {
-    this.mutate(workspaceId, (tx) => {
+    this.refresh(workspaceId);
+    const entry = this.entries.get(agentId);
+    if (!entry || entry.agent.workspaceId !== workspaceId || entry.parentId !== (parentAgentId ?? null)) throw new BadRequestException('Agent not found in this scope.');
+    const ids = new Set<string>();
+    const collect = (id: string) => {
+      if (ids.has(id)) return;
+      ids.add(id);
+      for (const child of this.entries.get(id)?.agent.collaboration?.subAgentIds ?? []) collect(child);
+    };
+    collect(agentId);
+    const beforeEntries = new Map(this.entries);
+    const beforeFailures = this.failures.get(workspaceId);
+    const removed = join(dirname(entry.directory), `.deleted-${randomUUID()}`);
+    // Move just the owned subtree. Rewriting the whole workspace on deletion made
+    // an unrelated invalid package able to block removal of a healthy child.
+    renameSync(entry.directory, removed);
+    try { this.db.transaction((tx) => {
       if (parentAgentId) {
         const parent = tx.select().from(agents).where(eq(agents.id, parentAgentId)).get()!;
         tx.update(agents).set({ collaboration: { ...parent.collaboration!, subAgentIds: parent.collaboration!.subAgentIds.filter((id) => id !== agentId) } }).where(eq(agents.id, parentAgentId)).run();
       }
-      tx.update(scheduledAgentTasks).set({ enabled: false, running: false }).where(eq(scheduledAgentTasks.agentId, agentId)).run();
+      tx.update(scheduledAgentTasks).set({ enabled: false, running: false }).where(inArray(scheduledAgentTasks.agentId, [...ids])).run();
+      for (const id of ids) {
+        const row = this.entries.get(id)!.agent;
+        if (row.collaboration) tx.update(agents).set({ collaboration: { ...row.collaboration, subAgentIds: [] } }).where(eq(agents.id, id)).run();
+      }
       // Retain the Agent index row and every execution/session foreign key for historical evidence.
-    }, undefined, new Set([agentId]));
+      this.refresh(workspaceId);
+    }); } catch (error) {
+      renameSync(removed, entry.directory);
+      this.entries = beforeEntries;
+      if (beforeFailures) this.failures.set(workspaceId, beforeFailures);
+      else this.failures.delete(workspaceId);
+      throw error;
+    }
+    this.cleanup(removed);
   }
 
   /** Persist provider model maintenance through the same file source, rather than changing SQL alone. */
@@ -206,7 +254,6 @@ export class AgentFileStore {
     mkdirSync(dirname(root), { recursive: true });
     const stage = `${root}.stage-${randomUUID()}`;
     const backup = `${root}.backup-${randomUUID()}`;
-    mkdirSync(stage, { recursive: true, mode: 0o700 });
     const byId = new Map(rows.map((row) => [row.id, row]));
     const owners = new Map<string, string>();
     for (const row of rows) for (const child of row.collaboration?.subAgentIds ?? []) {
@@ -232,7 +279,7 @@ export class AgentFileStore {
       const serverIds = this.db.select().from(agentMcpServers).where(eq(agentMcpServers.agentId, row.id)).all().map((item) => item.mcpServerId);
       writeDocument(join(directory, 'AGENT.md'), { id: row.id, name: row.name, responsibility: row.responsibility, runtime: row.runtime, providerId: row.providerId, model: row.model, mcpServerIds: serverIds, collaboration }, row.systemPrompt);
       mkdirSync(join(directory, 'skills'), { mode: 0o700 });
-      mkdirSync(join(directory, 'tools'), { mode: 0o700 });
+      if (row.runtime.kind === 'native') mkdirSync(join(directory, 'tools'), { mode: 0o700 });
       if (old && existsSync(join(old.directory, 'tools'))) for (const name of readdirSync(join(old.directory, 'tools'))) {
         if (/\.ya?ml$/.test(name)) continue;
         const source = join(old.directory, 'tools', name); ensureSafeTree(source);
@@ -249,11 +296,12 @@ export class AgentFileStore {
         writeDocument(join(skillDirectory, 'SKILL.md'), { ...original.config, id: skill.id, name: skill.name, version: skill.version }, original.body);
       }
       for (const tool of privateTools ?? []) writeFileSync(join(directory, 'tools', `${slug(tool.name)}.yaml`), stringify(tool), { mode: 0o600 });
-      mkdirSync(join(directory, 'subagents'), { mode: 0o700 });
+      if (row.runtime.kind === 'native') mkdirSync(join(directory, 'subagents'), { mode: 0o700 });
       for (const child of row.collaboration?.subAgentIds ?? []) write(byId.get(child)!, join(directory, 'subagents'), depth + 1);
     };
     let moved = false;
     try {
+      mkdirSync(stage, { recursive: true, mode: 0o700 });
       // Preserve catalogs of additional workspaces, without exposing them as top-level Agents.
       if (workspaceId === 'workspace_personal' && existsSync(join(root, '.workspaces'))) cpSync(join(root, '.workspaces'), join(stage, '.workspaces'), { recursive: true });
       for (const row of rows) if (!owners.has(row.id)) write(row, stage, 0);

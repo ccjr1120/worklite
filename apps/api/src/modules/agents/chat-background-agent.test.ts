@@ -34,6 +34,50 @@ async function setup() {
 }
 
 describe('background Agent dispatch from Chat', () => {
+  it.each([
+    { projectDirectory: '', message: 'runtime.projectDirectory is required' },
+    { projectDirectory: '/worklite-missing-project-directory', message: 'runtime.projectDirectory must be an existing directory' },
+  ])('preserves the startup validation reason without accepting a launch: $projectDirectory', async ({ projectDirectory, message }) => {
+    const { internal } = await setup();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory } }).where(eq(agents.id, 'lead')).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
+    expect(call.status).toBe('failed');
+    expect(JSON.parse(call.output)).toMatchObject({ failure: { stage: 'start', code: 'PLATFORM_START_FAILED', effect: 'not_started', evidence: { exceptionType: 'BadRequestException', message: expect.stringContaining(message) } } });
+    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).all()).toEqual([]);
+    expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'platform.tool_failure')).get()!.metadata).toMatchObject({ failure: { evidence: { message: expect.stringContaining(message) } } });
+  });
+
+  it('uses the task directory when a Codex Agent has an empty saved default', async () => {
+    const { internal } = await setup();
+    vi.spyOn(service, 'schedule').mockImplementation(() => {});
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: '' } }).where(eq(agents.id, 'lead')).run();
+    db.update(agentToolCalls).set({ input: { agentId: 'lead', mode: 'new', task: 'Work', projectDirectory: process.cwd() } }).where(eq(agentToolCalls.id, 'dispatch')).run();
+    await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
+    const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
+    expect(call.status).toBe('completed');
+    const receipt = JSON.parse(call.output);
+    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, receipt.executionId)).get()!.projectDirectory).toBe(process.cwd());
+  });
+
+  it('rejects direct execution of a private child before creating any execution', async () => {
+    await setup();
+    db.insert(agents).values({ id: 'private', workspaceId: 'workspace_personal', name: 'Private', responsibility: '', systemPrompt: '', model: '', runtime: { kind: 'codex', projectDirectory: process.cwd() } }).run();
+    db.update(agents).set({ collaboration: { subAgentIds: ['private'], capabilities: [] } }).where(eq(agents.id, 'lead')).run();
+    await expect(service.create({} as never, 'personal', 'private', { message: 'Work' })).rejects.toThrow('Only top-level');
+    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+  });
+
+  it('does not let a saved external runtime snapshot bypass private-child dispatch restrictions', async () => {
+    await setup();
+    const snapshot = { agent: { id: 'lead', runtime: { kind: 'codex', projectDirectory: process.cwd() }, providerId: null, model: '', systemPrompt: 'Work' }, skills: [], mcpServers: [] };
+    db.insert(agentExecutions).values({ id: 'old-top-level', workspaceId: 'workspace_personal', agentId: 'lead', status: 'completed', capabilitySnapshot: snapshot as never }).run();
+    db.insert(agents).values({ id: 'new-owner', workspaceId: 'workspace_personal', name: 'Owner', responsibility: '', model: '', systemPrompt: '', collaboration: { subAgentIds: ['lead'], capabilities: [] } }).run();
+    await expect(service.continue({} as never, 'personal', 'lead', 'old-top-level', { message: 'Resume privately' })).rejects.toThrow('Only top-level');
+    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'old-top-level')).get()!.status).toBe('completed');
+  });
+
   async function savedInstance(status: AgentExecutionStatus = 'failed') {
     const context = await setup();
     vi.spyOn(service, 'schedule').mockImplementation(() => {});
