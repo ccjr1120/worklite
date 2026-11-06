@@ -33,6 +33,7 @@ describe('packaged protected tool result contracts', () => {
   });
 
   it.each([
+    ['scripts/upload-local-files.mjs', { files: [{ path: '/absolute/report.pdf' }] }, { files: [{ id: 'art_file', name: 'report.pdf', contentUrl: '/api/artifacts/art_file/content?download=true' }] }, 'snapshot'],
     ['scripts/create-agent.mjs', { name: 'Agent', responsibility: 'Task', systemPrompt: 'Task' }, { id: 'agent' }, 'snapshot'],
     ['scripts/discover-provider-models.mjs', { providerId: 'provider' }, { models: ['model'] }, 'provider_models'],
     ['scripts/update-provider-models.mjs', { providerId: 'provider', addModels: ['model'] }, { providerId: 'provider', models: ['model'] }, 'provider_models'],

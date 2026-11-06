@@ -2,17 +2,24 @@ import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, 
 import type { Request } from 'express';
 import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
+import { LocalFileArtifactsService } from '../artifacts/local-file-artifacts.service';
 import { LocalImageArtifactsService } from '../artifacts/local-image-artifacts.service';
 import { WorkspaceService } from './teams.service';
 
 @Controller()
 export class WorkspaceResourcesController {
-  constructor(private readonly resources: WorkspaceResourcesService, private readonly localImages: LocalImageArtifactsService, private readonly workspaces: WorkspaceService) {}
+  constructor(private readonly resources: WorkspaceResourcesService, private readonly localImages: LocalImageArtifactsService, private readonly workspaces: WorkspaceService, private readonly localFiles: LocalFileArtifactsService) {}
 
   @Post('artifacts/local-images')
   async importLocalImages(@Req() request: Request, @Body() body: unknown) {
     const workspace = await this.workspaces.getWorkspace(request, 'personal');
     return this.localImages.importImages(workspace.id, body);
+  }
+
+  @Post('artifacts/local-files')
+  async importLocalFiles(@Req() request: Request, @Body() body: unknown) {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
+    return this.localFiles.importFiles(workspace.id, body);
   }
 
   @Get('skills')
@@ -85,12 +92,12 @@ export class WorkspaceResourcesController {
   @Get('artifacts/:artifactId/content')
   @Header('X-Content-Type-Options', 'nosniff')
   async artifactContent(@Req() request: Request, @Param('artifactId') artifactId: string, @Query('download') download?: string) {
-    const image = await this.resources.artifactContent(request, 'personal', artifactId);
-    const disposition = download === 'true' ? 'attachment' : 'inline';
-    return new StreamableFile(image.content, {
-      type: image.mimeType,
-      disposition: `${disposition}; filename="${image.fileName}"`,
-      length: image.sizeBytes,
+    const file = await this.resources.artifactContent(request, 'personal', artifactId);
+    const disposition = download === 'true' || !file.isImage ? 'attachment' : 'inline';
+    return new StreamableFile(file.content, {
+      type: file.mimeType,
+      disposition: file.isImage ? `${disposition}; filename="${file.fileName}"` : `${disposition}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+      length: file.sizeBytes,
     });
   }
 

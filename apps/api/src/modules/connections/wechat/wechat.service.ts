@@ -1,11 +1,10 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { WechatLoginView } from '@worklite/contracts';
-import { chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
+import { artifacts, chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
 import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, upgradePhase } from '../../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
@@ -13,11 +12,13 @@ import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.s
 import { ChatAttachmentsService } from '../../agents/chat-attachments.service';
 import { ArtifactStorageService } from '../../artifacts/artifact-storage.service';
 import { readArtifactImageContent } from '../../artifacts/artifact-image-content';
-import { inspectWechatImage, wechatImageFailureText, type WechatReplyImage } from '../../artifacts/wechat-reply-images';
+import { readArtifactFileContent } from '../../artifacts/artifact-file-content';
+import { MAX_LOCAL_FILE_BYTES, readLocalFile, safeFileName } from '../../artifacts/local-file';
+import { inspectWechatFile, inspectWechatImage, wechatFileFailureText, wechatImageFailureText, type WechatReplyImage } from '../../artifacts/wechat-reply-images';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret } from '../connection-secrets';
 import { ChatChannelConfigurationService } from '../chat-channel-configuration.service';
-import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
+import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendFileMessage, sendImageMessage, sendTextMessage, sendTyping, uploadFileToCdn, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
 import { formatWechatReply } from './wechat-reply-format';
 
 type Json = Record<string, unknown>;
@@ -530,13 +531,35 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Both sources use the Web content readers and the conversation's workspace boundary.
-  private async sendReplyImage(chat: typeof externalChats.$inferSelect, reference: WechatReplyImage, key: string): Promise<{ messageId: string; mimeType: string; size: number }> {
+  private async replyMediaKind(chat: typeof externalChats.$inferSelect, reference: WechatReplyImage): Promise<'image' | 'file'> {
+    if (reference.asFile) return 'file';
+    if (reference.kind === 'artifact') {
+      const [artifact] = await this.db.select({ format: artifacts.format }).from(artifacts)
+        .where(and(eq(artifacts.id, reference.id), eq(artifacts.workspaceId, chat.workspaceId))).limit(1);
+      return artifact && artifact.format !== 'image' ? 'file' : 'image';
+    }
+    return this.attachments.open(chat.workspaceId, reference.id).attachment.mimeType.startsWith('image/') ? 'image' : 'file';
+  }
+
+  // Resolve registered bytes within the conversation workspace; never follow supplied URLs.
+  private async sendReplyMedia(chat: typeof externalChats.$inferSelect, reference: WechatReplyImage, key: string, kind: 'image' | 'file'): Promise<{ messageId: string; mimeType: string; size: number }> {
+    const clientId = digest(`wechat:${key}`).slice(0, 32);
+    if (kind === 'file') {
+      let file: { content: Buffer; fileName: string; mimeType: string };
+      if (reference.kind === 'artifact') file = await readArtifactFileContent(this.db, this.artifactStorage, chat.workspaceId, reference.id);
+      else {
+        const { attachment, path } = this.attachments.open(chat.workspaceId, reference.id);
+        file = { content: await readLocalFile(path, MAX_LOCAL_FILE_BYTES), fileName: safeFileName(attachment.fileName), mimeType: attachment.mimeType };
+      }
+      inspectWechatFile(file.content);
+      const uploaded = await uploadFileToCdn(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, content: file.content });
+      const result = await sendFileMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, file: uploaded, fileName: file.fileName, contextToken: chat.contextToken ?? '', clientId });
+      return { messageId: result.messageId || clientId, mimeType: file.mimeType, size: file.content.length };
+    }
     const image = reference.kind === 'artifact'
       ? (await readArtifactImageContent(this.db, this.artifactStorage, chat.workspaceId, reference.id)).content
-      : await readFile(this.attachments.open(chat.workspaceId, reference.id).path);
+      : await readLocalFile(this.attachments.open(chat.workspaceId, reference.id).path, MAX_LOCAL_FILE_BYTES, '图片');
     const { mimeType } = await inspectWechatImage(image);
-    const clientId = digest(`wechat:${key}`).slice(0, 32);
     const uploaded = await uploadImageToCdn(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, image });
     const result = await sendImageMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, image: uploaded, contextToken: chat.contextToken ?? '', clientId });
     return { messageId: result.messageId || clientId, mimeType, size: image.length };
@@ -598,7 +621,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       if (chat) await this.signalTyping(chat.externalId, chat.contextToken ?? undefined, false);
       return;
     }
-    // Send prose and every image in source order; text limits must never discard later images.
+    // Send prose and every media reference in source order; text limits must never discard later media.
     const parts = formatWechatReply(text);
     const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', parts, terminal }));
     if (fingerprint === submission.deliveryFingerprint) {
@@ -627,25 +650,27 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         if (part.kind === 'text') partText = part.text;
         else {
           let sent: { messageId: string; mimeType: string; size: number };
+          let mediaKind: 'image' | 'file' = part.asFile ? 'file' : 'image';
           try {
-            sent = await this.sendReplyImage(chat, part, partKey);
+            mediaKind = await this.replyMediaKind(chat, part);
+            sent = await this.sendReplyMedia(chat, part, partKey, mediaKind);
           } catch (error) {
-            const reason = error instanceof Error ? error.message : '微信图片发送失败。';
-            await this.recordDelivery(chatId, partKey, 'failed', { operation: 'image.send', purpose: `chat-${part.kind}`, imageId: part.id }, reason);
+            const reason = error instanceof Error ? error.message : '微信附件发送失败。';
+            await this.recordDelivery(chatId, partKey, 'failed', { operation: `${mediaKind}.send`, purpose: `chat-${part.kind}`, mediaId: part.id }, reason);
             // An expired session cannot deliver the fallback either; keep it retryable and
             // let the existing outer handler update login state.
             if (error instanceof ILinkApiError && (error.errcode === ILINK_STALE_TOKEN_ERRCODE || error.ret === ILINK_STALE_TOKEN_ERRCODE)) throw error;
-            partText = wechatImageFailureText(error);
+            partText = mediaKind === 'file' ? wechatFileFailureText(error) : wechatImageFailureText(error);
             const fallbackClientId = digest(`wechat:${partKey}:fallback`).slice(0, 32);
             const fallback = await sendTextMessage(this.fetchImpl, { baseUrl: this.baseUrl, token: this.token, toUserId: chat.externalId, text: partText, contextToken: chat.contextToken ?? '', clientId: fallbackClientId });
             lastMessageId = fallback.messageId || fallbackClientId;
-            // A delivered fallback settles only this occurrence, allowing later images through.
-            await this.recordDelivery(chatId, partKey, 'done', { operation: 'message.send', purpose: 'image-fallback', imageId: part.id, clientId: fallbackClientId, messageId: lastMessageId, text: partText });
+            // A delivered fallback settles only this occurrence, allowing later media through.
+            await this.recordDelivery(chatId, partKey, 'done', { operation: 'message.send', purpose: `${mediaKind}-fallback`, mediaId: part.id, clientId: fallbackClientId, messageId: lastMessageId, text: partText });
             continue;
           }
           lastMessageId = sent.messageId;
           await this.recordDelivery(chatId, partKey, 'done', {
-            operation: 'image.send', purpose: `chat-${part.kind}`, imageId: part.id,
+            operation: `${mediaKind}.send`, purpose: `chat-${part.kind}`, mediaId: part.id,
             clientId: partClientId, messageId: sent.messageId, mimeType: sent.mimeType, size: sent.size,
           });
           continue;

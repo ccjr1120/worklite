@@ -1,7 +1,7 @@
 // @vitest-environment node
-import { createDecipheriv } from 'node:crypto';
+import { createDecipheriv, createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { ILinkApiError, MESSAGE_ITEM_IMAGE, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, aesEcbPaddedSize, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, type FetchLike } from './ilink';
+import { ILinkApiError, MESSAGE_ITEM_IMAGE, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, aesEcbPaddedSize, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendFileMessage, sendImageMessage, sendTextMessage, sendTyping, uploadFileToCdn, uploadImageToCdn, type FetchLike } from './ilink';
 
 const okFetch = (body: string): FetchLike => async () => ({ ok: true, status: 200, text: async () => body });
 
@@ -214,5 +214,57 @@ describe('sendTyping', () => {
     await sendTyping(fetchImpl, { baseUrl: 'https://ilink.example', token: 'tok', userId: 'user-a', typingTicket: 'ticket-abc', cancel: true });
     const body = JSON.parse(captured) as Record<string, unknown>;
     expect(body.status).toBe(2);
+  });
+});
+
+describe('file outbound protocol', () => {
+  const options = { baseUrl: 'https://ilink.example', token: 'tok', toUserId: 'user-a' };
+
+  it('uploads encrypted FILE bytes and preserves the Unicode basename and plaintext length', async () => {
+    const content = Buffer.from('pdf/zip/office/unknown bytes\0');
+    let uploadRequest: Record<string, unknown> = {};
+    let sendRequest: Record<string, unknown> = {};
+    let uploadedBytes = Buffer.alloc(0);
+    const fetchImpl: FetchLike = async (url, init) => {
+      if (url.endsWith('/getuploadurl')) {
+        uploadRequest = JSON.parse(init!.body as string);
+        expect(init?.headers?.Authorization).toBe('Bearer tok');
+        return { ok: true, status: 200, text: async () => '{"upload_param":"a+b"}' };
+      }
+      if (url.startsWith('https://novac2c.cdn.weixin.qq.com/c2c/upload?')) {
+        expect(url).toContain('encrypted_query_param=a%2Bb');
+        uploadedBytes = Buffer.from(init!.body as Uint8Array);
+        return { ok: true, status: 200, text: async () => '', headers: { get: () => 'download' } };
+      }
+      sendRequest = JSON.parse(init!.body as string);
+      return { ok: true, status: 200, text: async () => '{"ret":0,"message_id":"file-1"}' };
+    };
+    const uploaded = await uploadFileToCdn(fetchImpl, { ...options, content });
+    expect(uploadRequest).toMatchObject({ media_type: 3, to_user_id: 'user-a', rawsize: content.length, filesize: aesEcbPaddedSize(content.length), no_need_thumb: true });
+    expect(uploadRequest.rawfilemd5).toBe(createHash('md5').update(content).digest('hex'));
+    const decipher = createDecipheriv('aes-128-ecb', Buffer.from(uploaded.aeskey, 'hex'), null);
+    expect(Buffer.concat([decipher.update(uploadedBytes), decipher.final()])).toEqual(content);
+    expect(await sendFileMessage(fetchImpl, { ...options, file: uploaded, fileName: '报告 2026.pdf', contextToken: 'ctx-file', clientId: 'stable-id' })).toEqual({ messageId: 'file-1' });
+    expect(sendRequest.msg).toEqual({ from_user_id: '', to_user_id: 'user-a', client_id: 'stable-id', message_type: 2, message_state: 2, context_token: 'ctx-file', item_list: [{ type: 4, file_item: {
+      file_name: '报告 2026.pdf', len: String(content.length), media: { encrypt_query_param: 'download', aes_key: Buffer.from(uploaded.aeskey).toString('base64'), encrypt_type: 1 },
+    } }] });
+  });
+
+  it('retries a missing CDN download parameter but never sends incomplete media', async () => {
+    let uploads = 0;
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.endsWith('/getuploadurl')) return { ok: true, status: 200, text: async () => '{"upload_full_url":"https://cdn.example/file"}' };
+      uploads++;
+      return { ok: true, status: 200, text: async () => '', headers: { get: () => null } };
+    };
+    await expect(uploadFileToCdn(fetchImpl, { ...options, content: Buffer.from('file') })).rejects.toThrow('download parameter');
+    expect(uploads).toBe(3);
+  });
+
+  it('rejects missing upload URLs and business errcodes', async () => {
+    await expect(uploadFileToCdn(okFetch('{"ret":0}'), { ...options, content: Buffer.from('file') })).rejects.toThrow('upload URL');
+    await expect(uploadFileToCdn(okFetch('{"ret":0,"errcode":-14}'), { ...options, content: Buffer.from('file') })).rejects.toMatchObject({ errcode: -14 });
+    const file = { filekey: 'key', downloadEncryptedQueryParam: 'download', aeskey: '0'.repeat(32), fileSize: 1, fileSizeCiphertext: 16 };
+    await expect(sendFileMessage(okFetch('{"ret":0,"errcode":-14}'), { ...options, file, fileName: 'a.zip', contextToken: 'ctx', clientId: 'id' })).rejects.toMatchObject({ errcode: -14 });
   });
 });

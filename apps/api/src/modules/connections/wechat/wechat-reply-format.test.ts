@@ -81,3 +81,18 @@ describe('WeChat reply formatting', () => {
     }
   });
 });
+
+
+describe('WeChat file download references', () => {
+  it('keeps file references in order with prose/images, including angle and absolute links', () => {
+    expect(formatWechatReply('之前\n[报告](</api/artifacts/art_report/content?download=true>)\n![图](/api/artifacts/art_image/content)\n[文件](https://worklite.example/api/chat/attachments/att_file?download=true)\n之后')).toEqual([
+      { kind: 'text', text: '之前' }, { kind: 'artifact', id: 'art_report', asFile: true },
+      { kind: 'artifact', id: 'art_image' }, { kind: 'attachment', id: 'att_file', asFile: true }, { kind: 'text', text: '之后' },
+    ]);
+  });
+
+  it('does not send files referenced as code or download arbitrary external files', () => {
+    const parts = formatWechatReply('`/api/artifacts/art_report/content?download=true`\n\n[外部](https://example.com/file.pdf)');
+    expect(parts.every((part) => part.kind === 'text')).toBe(true);
+  });
+});

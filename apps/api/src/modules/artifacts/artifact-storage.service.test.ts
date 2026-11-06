@@ -1,3 +1,4 @@
+// @vitest-environment node
 import type { ConfigService } from '@nestjs/config';
 import * as files from 'node:fs/promises';
 import { tmpdir } from 'node:os';

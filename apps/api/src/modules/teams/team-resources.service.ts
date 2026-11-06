@@ -80,7 +80,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
-import { readArtifactImageContent } from '../artifacts/artifact-image-content';
+import { readArtifactFileContent } from '../artifacts/artifact-file-content';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -1347,6 +1347,7 @@ export class WorkspaceResourcesService {
             upgradeRecords: 'WORKLITE_UPGRADE_RECORD_RETENTION_DAYS, default 30 days for terminal upgrade job records and deployment logs',
           },
         },
+        localFiles: { tool: 'upload_local_files', register: 'POST /artifacts/local-files with files:[{path}]', limits: '1-8 regular files, 20 MiB each, 40 MiB total; WorkLite budgets, not verified iLink server limits', reference: '[filename](/api/artifacts/art_…/content?download=true)', wechat: 'encrypted CDN upload and native file_item, in reply order; a readable notice replaces failed media, never an internal link', storage: 'persistent opaque Artifact, download-only; existing inline text/markdown/json Artifacts support the same content route' },
         chatAttachments: { upload: 'POST /chat/attachments (raw image body; image/png, image/jpeg, image/gif or image/webp; at most 10 MB; optional fileName, conversationId, projectTaskId query)', read: 'GET /chat/attachments/:id', delete: 'DELETE /chat/attachments/:id', reference: '![description](/api/chat/attachments/att_…)', storage: '.data/deployment/chat-attachments', retention: 'CHAT_ATTACHMENT_RETENTION_HOURS, default 12 hours like Gateway request logs', producers: 'project executors receive attachmentUploadUrl in task input; the Web composer uploads pasted images without a projectTaskId', modelInput: 'a Chat turn inlines live attachments uploaded by the reader (no projectTaskId) as image content blocks, at most 8 images, 3.5 MiB each and 10 MB per request, on the anthropic/messages, openai/chat, openai/responses and codex/responses protocols; an executor report image stays a Markdown reference', feishu: 'replaced by a text note pointing to Web' },
         chatShell: {
           available: true,
@@ -1675,16 +1676,16 @@ export class WorkspaceResourcesService {
     return artifact;
   }
 
-  async artifactContent(request: Request, workspaceSlug: string, artifactId: string): Promise<{ content: Buffer; mimeType: string; sizeBytes: number; fileName: string }> {
+  async artifactContent(request: Request, workspaceSlug: string, artifactId: string): Promise<{ content: Buffer; mimeType: string; sizeBytes: number; fileName: string; isImage: boolean }> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    return readArtifactImageContent(this.db, this.artifactStorage, team.id, artifactId);
+    return readArtifactFileContent(this.db, this.artifactStorage, team.id, artifactId);
   }
 
   async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
     const [deleted] = await this.db.delete(artifacts).where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id))).returning({ id: artifacts.id, format: artifacts.format, objectKey: artifacts.objectKey });
     if (!deleted) throw new NotFoundException('Artifact not found');
-    if (deleted.format === 'image' && deleted.objectKey) await this.artifactStorage.remove(deleted.objectKey);
+    if (deleted.objectKey) await this.artifactStorage.remove(deleted.objectKey);
   }
 
   private async workflowResourceIsReferenced(workspaceId: string, field: 'skillIds' | 'mcpServerIds', resourceId: string): Promise<boolean> {

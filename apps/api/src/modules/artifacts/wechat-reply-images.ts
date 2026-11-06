@@ -1,7 +1,8 @@
 import { BadRequestException, NotFoundException, PayloadTooLargeException, UnsupportedMediaTypeException } from '@nestjs/common';
 import { inspectLocalImage, MAX_LOCAL_IMAGE_BYTES } from './local-image';
+import { MAX_LOCAL_FILE_BYTES } from './local-file';
 
-export type WechatReplyImage = { kind: 'artifact' | 'attachment'; id: string };
+export type WechatReplyImage = { kind: 'artifact' | 'attachment'; id: string; asFile?: true };
 export type WechatReplyPart = { kind: 'text'; text: string } | WechatReplyImage;
 
 /** Keep every image occurrence in place, including links and bare content URLs. */
@@ -19,7 +20,8 @@ export function splitWechatReplyImages(markdown: string): WechatReplyPart[] {
     const url = match[1] ?? match[2]!;
     const artifactId = /\/api\/artifacts\/(art_[A-Za-z0-9-]+)\/content/.exec(url)?.[1];
     const attachmentId = /\/api\/chat\/attachments\/(att_[A-Za-z0-9-]+)/.exec(url)?.[1];
-    parts.push(artifactId ? { kind: 'artifact', id: artifactId } : { kind: 'attachment', id: attachmentId! });
+    const asFile = /[?&]download=true(?:[&#]|$)/.test(url) ? { asFile: true as const } : {};
+    parts.push(artifactId ? { kind: 'artifact', id: artifactId, ...asFile } : { kind: 'attachment', id: attachmentId!, ...asFile });
     offset = match.index! + match[0].length;
   }
   appendText(markdown.slice(offset));
@@ -41,4 +43,17 @@ export function wechatImageFailureText(error: unknown): string {
   if (error instanceof PayloadTooLargeException) return '[图片超过当前渠道的 10 MB 发送上限，请在 WorkLite 查看]';
   if (error instanceof UnsupportedMediaTypeException || error instanceof BadRequestException) return '[图片格式或尺寸无效，请在 WorkLite 查看]';
   return '[图片发送失败，请在 WorkLite 查看或稍后重试]';
+}
+
+/** Files have no verified server type whitelist; WorkLite bounds opaque bytes to 20 MiB. */
+export function inspectWechatFile(content: Buffer): void {
+  if (!content.length) throw new BadRequestException('文件内容为空。');
+  if (content.length > MAX_LOCAL_FILE_BYTES) throw new PayloadTooLargeException('文件超过当前渠道的 20 MB 发送上限。');
+}
+
+export function wechatFileFailureText(error: unknown): string {
+  if (error instanceof NotFoundException || (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) return '[文件已过期或不存在，请在 WorkLite 查看]';
+  if (error instanceof PayloadTooLargeException) return '[文件超过当前渠道的 20 MB 发送上限，请在 WorkLite 查看]';
+  if (error instanceof BadRequestException) return '[文件为空、不可读或无效，请在 WorkLite 查看]';
+  return '[文件发送失败，请在 WorkLite 查看或稍后重试]';
 }

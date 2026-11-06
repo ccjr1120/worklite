@@ -3,7 +3,7 @@ import { createCipheriv, createHash, randomBytes, randomInt } from 'node:crypto'
 // iLink bot protocol client for the WeChat conversation channel. The protocol shape follows
 // Tencent's MIT-licensed @tencent-weixin/openclaw-weixin plugin (v2.4.10), reimplemented here
 // as pure functions with an injectable fetch so tests and mocks sit at the network boundary.
-// Text and image outbound are implemented; other media stays inbound-labelled only.
+// Text, image and file outbound are implemented; voice/video stay inbound-labelled only.
 
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
 // Media uploads are independent of the regional bot API host: getuploadurl returns a full URL,
@@ -66,8 +66,10 @@ export const MESSAGE_TYPE_BOT = 2;
 export const MESSAGE_STATE_FINISH = 2;
 export const MESSAGE_ITEM_TEXT = 1;
 export const MESSAGE_ITEM_IMAGE = 2;
+export const MESSAGE_ITEM_FILE = 4;
 // proto: UploadMediaType
 const UPLOAD_MEDIA_IMAGE = 1;
+const UPLOAD_MEDIA_FILE = 3;
 // sendtyping status: 1 sets the typing indicator, 2 cancels it.
 const TYPING_STATUS_TYPING = 1;
 const TYPING_STATUS_CANCEL = 2;
@@ -163,7 +165,7 @@ export async function sendTextMessage(fetchImpl: FetchLike, options: { baseUrl: 
     base_info: baseInfo(),
   }, options.token, API_TIMEOUT_MS);
   const ret = asNumber(parsed.ret);
-  if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  if (ret !== 0 || asNumber(parsed.errcode) !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
   return { messageId: asString(parsed.message_id) };
 }
 
@@ -171,7 +173,7 @@ export async function sendTextMessage(fetchImpl: FetchLike, options: { baseUrl: 
 // pre-signed CDN target, POST the AES-128-ECB ciphertext there, then reference the returned
 // download parameter in an image_item. The AES key travels hex-encoded to getuploadurl and as a
 // base64 string (of that hex text, mirroring the reference client) on the sent image item.
-export type ILinkUploadedImage = {
+export type ILinkUploadedMedia = {
   filekey: string;
   downloadEncryptedQueryParam: string;
   /** Hex-encoded AES-128 key, as accepted by getuploadurl. */
@@ -181,6 +183,8 @@ export type ILinkUploadedImage = {
   /** AES-128-ECB ciphertext byte length, reported as the image's mid_size. */
   fileSizeCiphertext: number;
 };
+
+export type ILinkUploadedImage = ILinkUploadedMedia;
 
 /** PKCS7 padding always adds a block, so the ciphertext size rounds up from size + 1. */
 export function aesEcbPaddedSize(plaintextSize: number): number {
@@ -210,11 +214,11 @@ export function imageItem(uploaded: ILinkUploadedImage): Record<string, unknown>
 
 async function fetchUploadUrl(fetchImpl: FetchLike, options: {
   baseUrl: string; token: string; toUserId: string; filekey: string; rawsize: number;
-  rawfilemd5: string; filesize: number; aeskey: string;
+  rawfilemd5: string; filesize: number; aeskey: string; mediaType: number;
 }): Promise<{ uploadFullUrl: string; uploadParam: string }> {
   const parsed = await post(fetchImpl, `${options.baseUrl}/ilink/bot/getuploadurl`, {
     filekey: options.filekey,
-    media_type: UPLOAD_MEDIA_IMAGE,
+    media_type: options.mediaType,
     to_user_id: options.toUserId,
     rawsize: options.rawsize,
     rawfilemd5: options.rawfilemd5,
@@ -224,7 +228,7 @@ async function fetchUploadUrl(fetchImpl: FetchLike, options: {
     base_info: baseInfo(),
   }, options.token, API_TIMEOUT_MS);
   const ret = asNumber(parsed.ret);
-  if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink getuploadurl failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  if (ret !== 0 || asNumber(parsed.errcode) !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink getuploadurl failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
   return { uploadFullUrl: asString(parsed.upload_full_url).trim(), uploadParam: asString(parsed.upload_param) };
 }
 
@@ -242,40 +246,52 @@ async function uploadCiphertext(fetchImpl: FetchLike, url: string, ciphertext: B
       });
       if (response.status >= 400 && response.status < 500) {
         const detail = response.headers?.get('x-error-message') || '';
-        throw new ILinkApiError(`iLink CDN rejected the image upload (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`, null, null, response.status);
+        throw new ILinkApiError(`iLink CDN rejected the media upload (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`, null, null, response.status);
       }
       if (response.status !== 200) {
         const detail = response.headers?.get('x-error-message') || `HTTP ${response.status}`;
-        throw new ILinkApiError(`iLink CDN image upload failed: ${detail}`, null, null, response.status);
+        throw new ILinkApiError(`iLink CDN media upload failed: ${detail}`, null, null, response.status);
       }
       const downloadParam = response.headers?.get('x-encrypted-param');
       if (!downloadParam) throw new ILinkApiError('iLink CDN upload response did not include a download parameter.', null, null, response.status);
       return downloadParam;
     } catch (error) {
       lastError = error;
-      if (error instanceof ILinkApiError && error.httpStatus !== null && error.httpStatus < 500) throw error;
+      if (error instanceof ILinkApiError && error.httpStatus !== null && error.httpStatus >= 400 && error.httpStatus < 500) throw error;
     }
   }
-  throw lastError instanceof Error ? lastError : new ILinkApiError('iLink CDN image upload failed.');
+  throw lastError instanceof Error ? lastError : new ILinkApiError('iLink CDN media upload failed.');
 }
 
 export async function uploadImageToCdn(fetchImpl: FetchLike, options: {
   baseUrl: string; token: string; toUserId: string; image: Buffer; cdnBaseUrl?: string;
 }): Promise<ILinkUploadedImage> {
-  if (!options.image.length) throw new ILinkApiError('Cannot upload an empty image.');
-  const rawsize = options.image.length;
-  const rawfilemd5 = createHash('md5').update(options.image).digest('hex');
+  return uploadMediaToCdn(fetchImpl, { ...options, content: options.image, mediaType: UPLOAD_MEDIA_IMAGE });
+}
+
+export async function uploadFileToCdn(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; content: Buffer; cdnBaseUrl?: string;
+}): Promise<ILinkUploadedMedia> {
+  return uploadMediaToCdn(fetchImpl, { ...options, mediaType: UPLOAD_MEDIA_FILE });
+}
+
+async function uploadMediaToCdn(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; content: Buffer; cdnBaseUrl?: string; mediaType: number;
+}): Promise<ILinkUploadedMedia> {
+  if (!options.content.length) throw new ILinkApiError('Cannot upload empty media.');
+  const rawsize = options.content.length;
+  const rawfilemd5 = createHash('md5').update(options.content).digest('hex');
   const filesize = aesEcbPaddedSize(rawsize);
   const filekey = randomBytes(16).toString('hex');
   const aeskey = randomBytes(16);
   const upload = await fetchUploadUrl(fetchImpl, {
     baseUrl: options.baseUrl, token: options.token, toUserId: options.toUserId,
-    filekey, rawsize, rawfilemd5, filesize, aeskey: aeskey.toString('hex'),
+    filekey, rawsize, rawfilemd5, filesize, aeskey: aeskey.toString('hex'), mediaType: options.mediaType,
   });
   const uploadUrl = upload.uploadFullUrl
     || (upload.uploadParam ? buildCdnUploadUrl(options.cdnBaseUrl ?? ILINK_CDN_BASE_URL, upload.uploadParam, filekey) : '');
-  if (!uploadUrl) throw new ILinkApiError('iLink did not return an image upload URL.');
-  const ciphertext = encryptAesEcb(options.image, aeskey);
+  if (!uploadUrl) throw new ILinkApiError('iLink did not return a media upload URL.');
+  const ciphertext = encryptAesEcb(options.content, aeskey);
   const downloadEncryptedQueryParam = await uploadCiphertext(fetchImpl, uploadUrl, ciphertext);
   return {
     filekey, downloadEncryptedQueryParam, aeskey: aeskey.toString('hex'),
@@ -299,7 +315,27 @@ export async function sendImageMessage(fetchImpl: FetchLike, options: {
     base_info: baseInfo(),
   }, options.token, API_TIMEOUT_MS);
   const ret = asNumber(parsed.ret);
-  if (ret !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage (image) failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  if (ret !== 0 || asNumber(parsed.errcode) !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage (image) failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
+  return { messageId: asString(parsed.message_id) };
+}
+
+export async function sendFileMessage(fetchImpl: FetchLike, options: {
+  baseUrl: string; token: string; toUserId: string; file: ILinkUploadedMedia; fileName: string; contextToken: string; clientId: string;
+}): Promise<{ messageId: string }> {
+  const parsed = await post(fetchImpl, `${options.baseUrl}/ilink/bot/sendmessage`, {
+    msg: {
+      from_user_id: '',
+      to_user_id: options.toUserId,
+      client_id: options.clientId,
+      message_type: MESSAGE_TYPE_BOT,
+      message_state: MESSAGE_STATE_FINISH,
+      item_list: [{ type: MESSAGE_ITEM_FILE, file_item: { media: imageItem(options.file).media, file_name: options.fileName, len: String(options.file.fileSize) } }],
+      ...(options.contextToken ? { context_token: options.contextToken } : {}),
+    },
+    base_info: baseInfo(),
+  }, options.token, API_TIMEOUT_MS);
+  const ret = asNumber(parsed.ret);
+  if (ret !== 0 || asNumber(parsed.errcode) !== 0) throw new ILinkApiError(asString(parsed.errmsg) || `iLink sendmessage (file) failed (ret=${ret}).`, ret, asNumber(parsed.errcode));
   return { messageId: asString(parsed.message_id) };
 }
 

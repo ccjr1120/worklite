@@ -409,8 +409,12 @@ describe('WechatService native reply images', () => {
   let reply: string;
   let rejectText: string;
   let rejectNextImage: boolean;
+  let rejectFileCode: number;
+  let rejectFallback: boolean;
+  let mediaTypes: number[];
+  let fileClientIds: string[];
   let uploads: Buffer[];
-  let messages: Array<{ type: number; text?: string; clientId: string; contextToken: string }>;
+  let messages: Array<{ type: number; text?: string; clientId: string; contextToken: string; fileName?: string }>;
   const image = createCanvas(2, 2).toBuffer('image/png');
   const workspaceId = 'workspace_personal';
 
@@ -425,20 +429,24 @@ describe('WechatService native reply images', () => {
       { id: 'art_good', workspaceId, name: '图片', format: 'image', objectKey: 'artifacts/art_good.png', mimeType: 'image/png', sizeBytes: image.length },
       { id: 'art_invalid', workspaceId, name: '损坏图片', format: 'image', objectKey: 'artifacts/art_invalid.png', mimeType: 'image/png' },
       { id: 'art_text', workspaceId, name: '文本', format: 'text' },
+      { id: 'art_report', workspaceId, name: '调研报告', format: 'markdown', content: '# 实际产物\n正文' },
+      { id: 'art_binary', workspaceId, name: '资料 中文.zip', format: 'unsupported', objectKey: 'artifacts/art_binary.bin', mimeType: 'application/octet-stream' },
+      { id: 'art_large', workspaceId, name: '大文件.zip', format: 'unsupported', objectKey: 'artifacts/art_large.bin', sizeBytes: 20 * 1024 * 1024 + 1 },
     ]).run();
     submission = db.insert(chatSubmissions).values({ id: 'sub-images', workspaceId, chatId: 'wechat:images', message: '发图', target: { kind: 'conversation' }, reference: { kind: 'conversation', executionId: 'aex_images', afterMessageId: null, afterSequence: 0, completionStatus: 'completed', untilMessageId: null, completionError: null } }).returning().get();
     storage = { read: async (key: string) => {
       if (key === 'artifacts/art_good.png') return image;
+      if (key === 'artifacts/art_binary.bin') return Buffer.from('opaque-zip-bytes');
       if (key === 'artifacts/art_invalid.png') return Buffer.from('not an image');
       throw new NotFoundException();
     } } as ArtifactStorageService;
     const attachments = { open: (scope: string, id: string) => {
       if (scope !== workspaceId || id !== 'att_good') throw new NotFoundException();
-      return { path: attachmentPath };
+      return { path: attachmentPath, attachment: { mimeType: 'image/png', fileName: '附件.png' } };
     } };
     const executions = { get: async () => ({ status: 'completed', messages: [{ id: 'reply-images', role: 'assistant', content: reply }] }) };
     instance = new WechatService(db, {} as never, {} as never, executions as never, {} as never, attachments as never, storage);
-    reply = ''; rejectText = ''; rejectNextImage = false; uploads = []; messages = [];
+    reply = ''; rejectText = ''; rejectNextImage = false; rejectFileCode = 0; rejectFallback = false; mediaTypes = []; fileClientIds = []; uploads = []; messages = [];
     let aeskey = '';
     const fetchImpl: FetchLike = async (input, init) => {
       if (String(input) === 'https://cdn.example/image') {
@@ -450,16 +458,23 @@ describe('WechatService native reply images', () => {
       const body = JSON.parse(init!.body as string);
       if (endpoint === 'getuploadurl') {
         aeskey = body.aeskey;
+        mediaTypes.push(body.media_type);
         return { ok: true, status: 200, text: async () => '{"ret":0,"upload_full_url":"https://cdn.example/image"}' };
       }
       if (endpoint === 'sendmessage') {
         const item = body.msg.item_list[0];
+        if (item.type === 4) fileClientIds.push(body.msg.client_id);
+        if (item.type === 4 && rejectFileCode) {
+          const code = rejectFileCode; rejectFileCode = 0;
+          return { ok: true, status: 200, text: async () => JSON.stringify({ ret: code, errcode: code, errmsg: 'file rejected' }) };
+        }
+        if (rejectFallback && item.text_item?.text.startsWith('[文件发送失败')) throw new Error('Fallback failed');
         if (item.type === 2 && rejectNextImage) {
           rejectNextImage = false;
           return { ok: true, status: 200, text: async () => '{"ret":-1,"errmsg":"image rejected"}' };
         }
         if (item.text_item?.text === rejectText) throw new Error('Temporary text send failure');
-        messages.push({ type: item.type, text: item.text_item?.text, clientId: body.msg.client_id, contextToken: body.msg.context_token });
+        messages.push({ type: item.type, text: item.text_item?.text, clientId: body.msg.client_id, contextToken: body.msg.context_token, ...(item.file_item ? { fileName: item.file_item.file_name } : {}) });
         return { ok: true, status: 200, text: async () => JSON.stringify({ ret: 0, message_id: `message-${messages.length}` }) };
       }
       return { ok: true, status: 200, text: async () => '{"ret":0}' };
@@ -473,6 +488,63 @@ describe('WechatService native reply images', () => {
   });
 
   const deliver = () => (instance as unknown as { deliver: (value: typeof submission) => Promise<void> }).deliver(submission);
+
+  it('sends inline Artifacts, binary Artifacts and an attachment as files in exact source order', async () => {
+    reply = '说明\n[报告](/api/artifacts/art_report/content)\n[资料](/api/artifacts/art_binary/content?download=true)\n[附件](/api/chat/attachments/att_good?download=true)\n结束';
+    await deliver();
+    expect(messages.map((message) => message.text ?? message.fileName)).toEqual(['说明', '调研报告.md', '资料 中文.zip', '附件.png', '结束']);
+    expect(mediaTypes).toEqual([3, 3, 3]);
+    expect(uploads).toEqual([Buffer.from('# 实际产物\n正文'), Buffer.from('opaque-zip-bytes'), image]);
+    expect(messages.every((message) => message.contextToken === 'ctx-images')).toBe(true);
+    await deliver();
+    expect(mediaTypes).toHaveLength(3);
+  });
+
+  it('replaces oversized, empty and unavailable files with notices and continues', async () => {
+    reply = '[过大](/api/artifacts/art_large/content?download=true)\n[空](/api/artifacts/art_text/content?download=true)\n[缺失](/api/artifacts/art_missing/content?download=true)\n[附件过期](/api/chat/attachments/att_missing?download=true)\n[正常](/api/artifacts/art_binary/content?download=true)';
+    await deliver();
+    expect(messages.map((message) => message.type)).toEqual([1, 1, 1, 1, 4]);
+    expect(messages[0].text).toContain('20 MB');
+    expect(messages[1].text).toContain('为空');
+    expect(messages[2].text).toContain('不存在');
+    expect(messages[3].text).toContain('过期');
+    expect(JSON.stringify(messages)).not.toContain('/api/');
+    expect(mediaTypes).toEqual([3]);
+  });
+
+  it('resumes after failed fallback delivery without duplicating earlier files', async () => {
+    reply = '[第一份](/api/artifacts/art_report/content?download=true)\n[第二份](/api/artifacts/art_binary/content?download=true)\n尾声';
+    rejectText = '尾声';
+    await expect(deliver()).rejects.toThrow('Temporary text send failure');
+    rejectText = '';
+    await deliver();
+    expect(messages.map((message) => message.type)).toEqual([4, 4, 1]);
+    expect(mediaTypes).toEqual([3, 3]);
+
+    // A new reply has its own fingerprint. Only a successfully delivered fallback settles it.
+    reply = '[被拒](/api/artifacts/art_binary/content?download=true)';
+    rejectFileCode = -2; rejectFallback = true;
+    await expect(deliver()).rejects.toThrow('Fallback failed');
+    rejectFileCode = -2; rejectFallback = false;
+    await deliver();
+    await deliver();
+    expect(messages.at(-1)?.text).toBe('[文件发送失败，请在 WorkLite 查看或稍后重试]');
+    expect(messages).toHaveLength(4);
+  });
+
+  it('keeps stale-login file failures retryable and resumes with the same client id', async () => {
+    const updates: unknown[] = [];
+    Object.assign(instance, { configuration: { updateWechat: async (update: unknown) => { updates.push(update); } } });
+    reply = '[资料](/api/artifacts/art_binary/content?download=true)';
+    rejectFileCode = -14;
+    await expect(deliver()).rejects.toMatchObject({ errcode: -14 });
+    expect(messages).toEqual([]);
+    expect(updates).toEqual([{ wechatStatus: 'error', wechatLastError: '微信登录已过期，请重新扫码登录。' }]);
+    await deliver();
+    expect(messages.map((message) => message.type)).toEqual([4]);
+    expect(fileClientIds).toHaveLength(2);
+    expect(fileClientIds[0]).toBe(fileClientIds[1]);
+  });
 
   it('uploads actual artifact and attachment bytes and interleaves every occurrence with text', async () => {
     reply = '之前\n![产物](/api/artifacts/art_good/content)\n之间\n![附件](/api/chat/attachments/att_good)\n![重复产物](/api/artifacts/art_good/content)\n之后';

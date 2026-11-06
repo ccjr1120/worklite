@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import { artifacts, type Database } from '@worklite/db';
+import { MAX_LOCAL_FILE_BYTES } from './local-file';
 import type { ArtifactStorageService } from './artifact-storage.service';
 
 /** Shared by the Web content route and channel delivery; never resolve a supplied URL over HTTP. */
@@ -10,7 +11,7 @@ export async function readArtifactImageContent(db: Database, storage: ArtifactSt
     .where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, workspaceId)))
     .limit(1);
   if (!artifact || artifact.format !== 'image' || !artifact.objectKey) throw new NotFoundException('Artifact content not found');
-  const content = await storage.read(artifact.objectKey);
+  const content = await storage.read(artifact.objectKey, MAX_LOCAL_FILE_BYTES);
   return {
     content,
     mimeType: artifact.mimeType ?? 'image/png',

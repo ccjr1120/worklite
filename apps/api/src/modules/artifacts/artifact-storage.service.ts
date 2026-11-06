@@ -1,11 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ImageExtension } from './local-image';
 
-const IMAGE_OBJECT_KEY = /^artifacts\/art_[A-Za-z0-9-]+\.(png|jpg|gif|webp)$/;
+const ARTIFACT_OBJECT_KEY = /^artifacts\/art_[A-Za-z0-9-]+\.(png|jpg|gif|webp|bin)$/;
 
 export class ArtifactStorageCleanupError extends Error {
   constructor() { super('Artifact file cleanup failed.'); }
@@ -26,7 +26,15 @@ export class ArtifactStorageService {
   }
 
   async writeImage(id: string, content: Buffer, extension: ImageExtension): Promise<string> {
-    if (!/^art_[A-Za-z0-9-]+$/.test(id)) throw new Error('Invalid image Artifact id.');
+    return this.write(id, content, extension);
+  }
+
+  async writeFile(id: string, content: Buffer): Promise<string> {
+    return this.write(id, content, 'bin');
+  }
+
+  private async write(id: string, content: Buffer, extension: string): Promise<string> {
+    if (!/^art_[A-Za-z0-9-]+$/.test(id)) throw new Error('Invalid Artifact id.');
     const objectKey = `artifacts/${id}.${extension}`;
     const path = await this.pathFor(objectKey, true);
     const directory = await lstat(dirname(path));
@@ -65,15 +73,31 @@ export class ArtifactStorageService {
     return objectKey;
   }
 
-  async read(objectKey: string): Promise<Buffer> {
+  async read(objectKey: string, maxBytes?: number): Promise<Buffer> {
     try {
       const path = await this.pathFor(objectKey);
-      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try { return await handle.readFile(); }
+      const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile()) throw new NotFoundException('Artifact content not found.');
+        if (maxBytes !== undefined) {
+          if (stat.size > maxBytes) throw new PayloadTooLargeException('文件超过当前渠道的发送上限。');
+          const content = Buffer.alloc(Math.min(stat.size + 1, maxBytes + 1));
+          let length = 0;
+          while (length < content.length) {
+            const read = await handle.read(content, length, content.length - length, null);
+            if (!read.bytesRead) break;
+            length += read.bytesRead;
+          }
+          if (length > maxBytes || length !== stat.size) throw new PayloadTooLargeException('文件大小发生变化或超过发送上限。');
+          return content.subarray(0, length);
+        }
+        return await handle.readFile();
+      }
       finally { await handle.close(); }
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-        throw new NotFoundException('Artifact image not found.');
+        throw new NotFoundException('Artifact content not found.');
       }
       throw error;
     }
@@ -87,7 +111,7 @@ export class ArtifactStorageService {
   }
 
   private async pathFor(objectKey: string, create = false): Promise<string> {
-    if (!IMAGE_OBJECT_KEY.test(objectKey)) throw new NotFoundException('Artifact image not found.');
+    if (!ARTIFACT_OBJECT_KEY.test(objectKey)) throw new NotFoundException('Artifact content not found.');
     if (create) await mkdir(this.deploymentDirectory, { recursive: true });
     // The configured deployment directory is the trust anchor, including OS aliases.
     // The artifact directory itself must be a real child, never a redirected symlink.

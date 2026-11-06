@@ -52,6 +52,21 @@ describe('initializeDatabase restart recovery', () => {
     }
   });
 
+  it('publishes the protected file tool and teaches Chat the actual WeChat trigger and limits', async () => {
+    db = createDb(':memory:'); await initializeDatabase(db);
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    expect(tools['scripts/upload-local-files.mjs']).toMatchObject({ name: 'upload_local_files', inputSchema: {
+      required: ['files'], additionalProperties: false, properties: { files: { minItems: 1, maxItems: 8, items: { required: ['path'], additionalProperties: false } } },
+    } });
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    for (const text of [chat.systemPrompt, platformFile('SKILL.md').content]) {
+      expect(text).toContain('upload_local_files');
+      expect(text).toContain('20 MB each and 40 MB total');
+      expect(text).toContain('/content?download=true');
+      expect(text).toContain('Voice and native video sending remain unimplemented');
+    }
+  });
+
   it('does not expose a compatibility reader for deleted pre-group conversations', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
@@ -204,7 +219,7 @@ describe('initializeDatabase restart recovery', () => {
           type: 'tool-result',
           toolCallId: 'call_restart_test',
           toolName: 'inspect_workspace',
-          output: { type: 'error-text', value: 'The API restarted before this Agent tool execution completed.' },
+          output: { type: 'error-text', value: 'The API restarted before this Agent tool execution completed. Outcome unknown; inspect effects before retrying.' },
         }],
       },
     ]);
