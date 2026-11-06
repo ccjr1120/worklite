@@ -1562,6 +1562,17 @@ export type ApiRequestLogStats = {
   retentionDays: number;
 };
 
+export type LocalImageArtifactView = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  width: number;
+  height: number;
+  contentUrl: string;
+  markdown: string;
+};
+
 export type ArtifactFormat = 'json' | 'text' | 'markdown' | 'image' | 'unsupported';
 
 export type ArtifactPlacement = 'inline' | 'asset';

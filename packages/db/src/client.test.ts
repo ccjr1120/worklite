@@ -22,6 +22,32 @@ afterEach(() => {
 });
 
 describe('initializeDatabase restart recovery', () => {
+  it('publishes the protected local-image tool and synchronizes the seeded Chat prompt', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    const tools = JSON.parse(platformFile('scripts/tools.json').content);
+    const tool = tools['scripts/upload-local-images.mjs'];
+    expect(tool.name).toBe('upload_local_images');
+    expect(tool.inputSchema).toMatchObject({ required: ['files'], additionalProperties: false, properties: {
+      files: { type: 'array', minItems: 1, maxItems: 8, items: { required: ['path'], additionalProperties: false,
+        properties: { path: { type: 'string', maxLength: 4096 }, description: { type: 'string', maxLength: 200 } } } },
+    } });
+    const description = tool.inputSchema.properties.files.items.properties.description;
+    expect(new RegExp(description.pattern).test('首页截图')).toBe(true);
+    for (const value of ['/tmp/private.png', 'a\\b', 'a\nb']) expect(new RegExp(description.pattern).test(value)).toBe(false);
+    const script = platformFile('scripts/upload-local-images.mjs').content;
+    expect(script).toContain("call('/artifacts/local-images', { method: 'POST', body: raw })");
+    expect(script).toContain('print(data)');
+    expect(script).not.toContain("type: 'snapshot'");
+    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    for (const text of [chat.systemPrompt, platformFile('SKILL.md').content]) {
+      expect(text).toContain('upload_local_images');
+      expect(text).toContain('Use each returned markdown verbatim');
+      expect(text).toContain('10 MB each and 40 MB total');
+      expect(text).toContain('never invent URLs');
+    }
+  });
+
   it('does not expose a compatibility reader for deleted pre-group conversations', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);

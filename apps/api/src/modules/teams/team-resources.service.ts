@@ -1673,7 +1673,7 @@ export class WorkspaceResourcesService {
       content,
       mimeType: artifact.mimeType ?? 'image/png',
       sizeBytes: artifact.sizeBytes ?? content.byteLength,
-      fileName: `${artifact.id}.png`,
+      fileName: `${artifact.id}.${artifact.mimeType === 'image/jpeg' ? 'jpg' : artifact.mimeType === 'image/gif' ? 'gif' : artifact.mimeType === 'image/webp' ? 'webp' : 'png'}`,
     };
   }
 

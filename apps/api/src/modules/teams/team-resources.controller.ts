@@ -1,11 +1,19 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, StreamableFile } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, StreamableFile } from '@nestjs/common';
 import type { Request } from 'express';
 import type { CreateMcpServerRequest, CreateSkillRequest, ExecuteSkillScriptRequest, ImportSkillRequest, UpdateMcpServerRequest, UpdateWorkspaceSettingsRequest } from '@worklite/contracts';
 import { WorkspaceResourcesService } from './team-resources.service';
+import { LocalImageArtifactsService } from '../artifacts/local-image-artifacts.service';
+import { WorkspaceService } from './teams.service';
 
 @Controller()
 export class WorkspaceResourcesController {
-  constructor(private readonly resources: WorkspaceResourcesService) {}
+  constructor(private readonly resources: WorkspaceResourcesService, private readonly localImages: LocalImageArtifactsService, private readonly workspaces: WorkspaceService) {}
+
+  @Post('artifacts/local-images')
+  async importLocalImages(@Req() request: Request, @Body() body: unknown) {
+    const workspace = await this.workspaces.getWorkspace(request, 'personal');
+    return this.localImages.importImages(workspace.id, body);
+  }
 
   @Get('skills')
   skills(@Req() request: Request) { return this.resources.skills(request, 'personal'); }
@@ -75,6 +83,7 @@ export class WorkspaceResourcesController {
   artifact(@Req() request: Request, @Param('artifactId') artifactId: string) { return this.resources.artifact(request, 'personal', artifactId); }
 
   @Get('artifacts/:artifactId/content')
+  @Header('X-Content-Type-Options', 'nosniff')
   async artifactContent(@Req() request: Request, @Param('artifactId') artifactId: string, @Query('download') download?: string) {
     const image = await this.resources.artifactContent(request, 'personal', artifactId);
     const disposition = download === 'true' ? 'attachment' : 'inline';
