@@ -79,6 +79,7 @@ import {
 import { McpClientService } from '../mcp-servers/mcp-client.service';
 import { getArtifactDetail, listArtifacts } from '../artifacts/artifacts-query';
 import { ArtifactStorageService } from '../artifacts/artifact-storage.service';
+import { readArtifactImageContent } from '../artifacts/artifact-image-content';
 import { isWorkliteNavigationTarget, resolveWorkliteNavigationRoute } from './worklite-navigation';
 
 function maskSecret(value: string): string {
@@ -1663,18 +1664,7 @@ export class WorkspaceResourcesService {
 
   async artifactContent(request: Request, workspaceSlug: string, artifactId: string): Promise<{ content: Buffer; mimeType: string; sizeBytes: number; fileName: string }> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const [artifact] = await this.db.select({ id: artifacts.id, format: artifacts.format, objectKey: artifacts.objectKey, mimeType: artifacts.mimeType, sizeBytes: artifacts.sizeBytes, name: artifacts.name })
-      .from(artifacts)
-      .where(and(eq(artifacts.id, artifactId), eq(artifacts.workspaceId, team.id)))
-      .limit(1);
-    if (!artifact || artifact.format !== 'image' || !artifact.objectKey) throw new NotFoundException('Artifact content not found');
-    const content = await this.artifactStorage.read(artifact.objectKey);
-    return {
-      content,
-      mimeType: artifact.mimeType ?? 'image/png',
-      sizeBytes: artifact.sizeBytes ?? content.byteLength,
-      fileName: `${artifact.id}.${artifact.mimeType === 'image/jpeg' ? 'jpg' : artifact.mimeType === 'image/gif' ? 'gif' : artifact.mimeType === 'image/webp' ? 'webp' : 'png'}`,
-    };
+    return readArtifactImageContent(this.db, this.artifactStorage, team.id, artifactId);
   }
 
   async deleteArtifact(request: Request, workspaceSlug: string, artifactId: string): Promise<void> {

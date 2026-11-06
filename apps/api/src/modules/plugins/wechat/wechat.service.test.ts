@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createCanvas } from '@napi-rs/canvas';
+import { createDecipheriv } from 'node:crypto';
+import { NotFoundException } from '@nestjs/common';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDb, initializeDatabase, agentExecutions, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
+import { createDb, initializeDatabase, agentExecutions, artifacts, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
 import { eq } from 'drizzle-orm';
 import type { AgentExecutionView } from '@worklite/contracts';
 import { isWechatNewConversationCommand, monitorFailureState, truncateWechatText, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WECHAT_NEW_CONVERSATION_REPLY, WechatService } from './wechat.service';
 import type { FetchLike } from './ilink';
+import type { ArtifactStorageService } from '../../artifacts/artifact-storage.service';
+import { readArtifactImageContent } from '../../artifacts/artifact-image-content';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -76,12 +81,11 @@ describe('monitorFailureState', () => {
   });
 });
 
-// The two deliver() paths under test only ever select from externalChats, so a single
-// configured row set is enough; a real empty-result chain covers any other `.from()` call.
+// Receipt lookups must stay empty; only externalChats returns the configured conversation.
 function selectFrom(rows: unknown[]): unknown {
   return () => ({
-    from: () => {
-      const query = { where: () => query, orderBy: () => query, limit: () => query, then: (onFulfilled?: (value: unknown[]) => unknown) => Promise.resolve(rows).then(onFulfilled) };
+    from: (table: unknown) => {
+      const query = { where: () => query, orderBy: () => query, limit: () => query, then: (onFulfilled?: (value: unknown[]) => unknown) => Promise.resolve(table === externalChats ? rows : []).then(onFulfilled) };
       return query;
     },
   });
@@ -106,7 +110,7 @@ describe('WechatService#deliver typing indicator', () => {
       return { ok: true, status: 200, text: async () => '{}' };
     };
     const db = { select: selectFrom([chatRow]), update: () => { throw new Error('deliver must not write when nothing is ready to report'); } };
-    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -135,7 +139,7 @@ describe('WechatService#deliver typing indicator', () => {
       update: () => { const query = { set: (patch: Record<string, unknown>) => { updates.push(patch); return query; }, where: () => Promise.resolve(undefined) }; return query; },
       insert: () => { const query = { values: (v: Record<string, unknown>) => { inserts.push(v); return query; }, onConflictDoUpdate: () => Promise.resolve(undefined), onConflictDoNothing: () => Promise.resolve(undefined) }; return query; },
     };
-    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -173,7 +177,7 @@ describe('WechatService#deliver typing indicator', () => {
     const executions = {
       get: async () => ({ status: 'waiting_for_input', error: null, messages: [], pendingQuestion: { id: 'q-new', question: 'Click the button to begin a new conversation.', options: [], action: 'new_conversation' } }),
     };
-    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike; baseUrl: string; token: string }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string; token: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -206,7 +210,7 @@ describe('WechatService#deliver typing indicator', () => {
         { id: 'm-answer', role: 'user', content: '好的' },
       ] }),
     };
-    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never);
+    const service = new WechatService(db as never, {} as never, {} as never, executions as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
     (service as unknown as { baseUrl: string }).baseUrl = 'https://ilink.example';
     (service as unknown as { token: string }).token = 'tok';
@@ -262,7 +266,7 @@ describe('WechatService "新对话" command', () => {
       }
       return { ok: true, status: 200, text: async () => '{}' };
     };
-    const instance = new WechatService(db as never, {} as never, dispatches as never, executions as never, {} as never, {} as never);
+    const instance = new WechatService(db as never, {} as never, dispatches as never, executions as never, {} as never, {} as never, {} as never);
     (instance as unknown as { allowedUserId: string }).allowedUserId = ALLOWED_USER;
     if (options.transport) {
       (instance as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
@@ -416,6 +420,121 @@ describe('WechatService "新对话" command', () => {
   });
 });
 
+describe('WechatService native reply images', () => {
+  let db: Database;
+  let directory: string;
+  let instance: WechatService;
+  let storage: ArtifactStorageService;
+  let submission: typeof chatSubmissions.$inferSelect;
+  let reply: string;
+  let rejectText: string;
+  let rejectNextImage: boolean;
+  let uploads: Buffer[];
+  let messages: Array<{ type: number; text?: string; clientId: string; contextToken: string }>;
+  const image = createCanvas(2, 2).toBuffer('image/png');
+  const workspaceId = 'workspace_personal';
+
+  beforeEach(async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    directory = mkdtempSync(join(tmpdir(), 'worklite-wechat-images-'));
+    const attachmentPath = join(directory, 'attachment');
+    writeFileSync(attachmentPath, image);
+    db.insert(externalChats).values({ id: 'wechat:images', workspaceId, channel: 'wechat', externalId: 'user-a', userId: 'user-a', contextToken: 'ctx-images' }).run();
+    db.insert(artifacts).values([
+      { id: 'art_good', workspaceId, name: '图片', format: 'image', objectKey: 'artifacts/art_good.png', mimeType: 'image/png', sizeBytes: image.length },
+      { id: 'art_invalid', workspaceId, name: '损坏图片', format: 'image', objectKey: 'artifacts/art_invalid.png', mimeType: 'image/png' },
+      { id: 'art_text', workspaceId, name: '文本', format: 'text' },
+    ]).run();
+    submission = db.insert(chatSubmissions).values({ id: 'sub-images', workspaceId, chatId: 'wechat:images', message: '发图', target: { kind: 'conversation' }, reference: { kind: 'conversation', executionId: 'aex_images', afterMessageId: null, afterSequence: 0, completionStatus: 'completed', untilMessageId: null, completionError: null } }).returning().get();
+    storage = { read: async (key: string) => {
+      if (key === 'artifacts/art_good.png') return image;
+      if (key === 'artifacts/art_invalid.png') return Buffer.from('not an image');
+      throw new NotFoundException();
+    } } as ArtifactStorageService;
+    const attachments = { open: (scope: string, id: string) => {
+      if (scope !== workspaceId || id !== 'att_good') throw new NotFoundException();
+      return { path: attachmentPath };
+    } };
+    const executions = { get: async () => ({ status: 'completed', messages: [{ id: 'reply-images', role: 'assistant', content: reply }] }) };
+    instance = new WechatService(db, {} as never, {} as never, executions as never, {} as never, attachments as never, storage);
+    reply = ''; rejectText = ''; rejectNextImage = false; uploads = []; messages = [];
+    let aeskey = '';
+    const fetchImpl: FetchLike = async (input, init) => {
+      if (String(input) === 'https://cdn.example/image') {
+        const decipher = createDecipheriv('aes-128-ecb', Buffer.from(aeskey, 'hex'), null);
+        uploads.push(Buffer.concat([decipher.update(init!.body as Buffer), decipher.final()]));
+        return { ok: true, status: 200, text: async () => '', headers: { get: (name: string) => name === 'x-encrypted-param' ? 'download-param' : null } };
+      }
+      const endpoint = String(input).split('/ilink/bot/')[1];
+      const body = JSON.parse(init!.body as string);
+      if (endpoint === 'getuploadurl') {
+        aeskey = body.aeskey;
+        return { ok: true, status: 200, text: async () => '{"ret":0,"upload_full_url":"https://cdn.example/image"}' };
+      }
+      if (endpoint === 'sendmessage') {
+        const item = body.msg.item_list[0];
+        if (item.type === 2 && rejectNextImage) {
+          rejectNextImage = false;
+          return { ok: true, status: 200, text: async () => '{"ret":-1,"errmsg":"image rejected"}' };
+        }
+        if (item.text_item?.text === rejectText) throw new Error('Temporary text send failure');
+        messages.push({ type: item.type, text: item.text_item?.text, clientId: body.msg.client_id, contextToken: body.msg.context_token });
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ret: 0, message_id: `message-${messages.length}` }) };
+      }
+      return { ok: true, status: 200, text: async () => '{"ret":0}' };
+    };
+    Object.assign(instance, { fetchImpl, baseUrl: 'https://ilink.example', token: 'tok' });
+  });
+
+  afterEach(() => {
+    db.$client.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  const deliver = () => (instance as unknown as { deliver: (value: typeof submission) => Promise<void> }).deliver(submission);
+
+  it('uploads actual artifact and attachment bytes and interleaves every occurrence with text', async () => {
+    reply = '之前\n![产物](/api/artifacts/art_good/content)\n之间\n![附件](/api/chat/attachments/att_good)\n![重复产物](/api/artifacts/art_good/content)\n之后';
+    await deliver();
+    expect(messages.map((message) => message.text ?? '图片')).toEqual(['之前', '图片', '之间', '图片', '图片', '之后']);
+    expect(uploads).toEqual([image, image, image]);
+    expect(messages.every((message) => message.contextToken === 'ctx-images')).toBe(true);
+    expect(new Set(messages.map((message) => message.clientId)).size).toBe(messages.length);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+  });
+
+  it('replaces missing, non-image and corrupt content without preventing later valid images', async () => {
+    reply = '![缺失](/api/artifacts/art_missing/content)\n![文本](/api/artifacts/art_text/content)\n![损坏](/api/artifacts/art_invalid/content)\n![有效](/api/artifacts/art_good/content)';
+    await deliver();
+    expect(messages.map((message) => message.type)).toEqual([1, 1, 1, 2]);
+    expect(messages[0]!.text).toContain('不存在');
+    expect(messages[2]!.text).toContain('格式或尺寸无效');
+    expect(JSON.stringify(messages)).not.toContain('/api/');
+    expect(uploads).toEqual([image]);
+    await expect(readArtifactImageContent(db, storage, 'workspace_other', 'art_good')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('sends a readable notice after an API rejection and continues to the next image', async () => {
+    rejectNextImage = true;
+    reply = '![第一张](/api/artifacts/art_good/content)\n![第二张](/api/artifacts/art_good/content)';
+    await deliver();
+    expect(messages.map((message) => message.text ?? '图片')).toEqual(['[图片发送失败，请在 WorkLite 查看或稍后重试]', '图片']);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
+  });
+
+  it('does not resend preceding text or images after a later text failure', async () => {
+    reply = '之前\n![图](/api/artifacts/art_good/content)\n之后';
+    rejectText = '之后';
+    await expect(deliver()).rejects.toThrow('Temporary text send failure');
+    rejectText = '';
+    await deliver();
+    expect(messages.map((message) => message.text ?? '图片')).toEqual(['之前', '图片', '之后']);
+    expect(uploads).toEqual([image]);
+    expect(db.select().from(chatSubmissions).get()!.outputMessageId).toBe('message-3');
+  });
+});
+
 describe('WechatService monitor under an upgrade freeze', () => {
   let directory = '';
 
@@ -447,7 +566,7 @@ describe('WechatService monitor under an upgrade freeze', () => {
       updateWechat: async (patch: Record<string, unknown>) => { updates.push(patch); },
     };
     const db = { select: emptyQuery, update: emptyQuery, insert: emptyQuery };
-    const service = new WechatService(db as never, plugins as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new WechatService(db as never, plugins as never, {} as never, {} as never, {} as never, {} as never, {} as never);
     (service as unknown as { fetchImpl: FetchLike }).fetchImpl = fetchImpl;
 
     try {
