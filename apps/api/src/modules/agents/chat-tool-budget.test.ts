@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CHAT_DELEGATION_RULE, agentExecutions, agentToolCalls, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { CHAT_DELEGATION_RULE, agentExecutions, agentToolCalls, externalChats, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
 import type { HostNotificationsService } from '../notifications/host-notifications.service';
@@ -61,6 +61,14 @@ async function advance(service: AgentExecutionsService) {
 }
 
 describe('Chat tool budget', () => {
+  it.each(['wechat', 'feishu', 'web'] as const)('supplies the actual %s delivery channel to Chat', async (channel) => {
+    const { db, service } = await setup(0);
+    if (channel !== 'web') db.insert(externalChats).values({ id: `${channel}:user`, workspaceId: WORKSPACE_ID, channel, externalId: 'user', userId: 'user', executionId: 'aex_budget' }).run();
+    gateway.generateAgentStep.mockResolvedValueOnce({ text: 'Done.', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
+    await advance(service);
+    expect(gateway.generateAgentStep.mock.calls[0]![0].systemPrompt).toContain(`Current conversation delivery channel: ${channel}.`);
+  });
+
   it('applies delegation boundaries even to an existing Chat capability snapshot', async () => {
     const { service } = await setup(0);
     gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });

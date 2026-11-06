@@ -8,10 +8,11 @@ import { join } from 'node:path';
 import { createDb, initializeDatabase, agentExecutions, artifacts, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
 import { eq } from 'drizzle-orm';
 import type { AgentExecutionView } from '@worklite/contracts';
-import { isWechatNewConversationCommand, monitorFailureState, truncateWechatText, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WECHAT_NEW_CONVERSATION_REPLY, WechatService } from './wechat.service';
+import { isWechatNewConversationCommand, monitorFailureState, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WECHAT_NEW_CONVERSATION_REPLY, WechatService } from './wechat.service';
 import type { FetchLike } from './ilink';
 import type { ArtifactStorageService } from '../../artifacts/artifact-storage.service';
 import { readArtifactImageContent } from '../../artifacts/artifact-image-content';
+import { formatWechatReply, WECHAT_TEXT_BYTES } from './wechat-reply-format';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -32,27 +33,6 @@ function emptyQuery(): unknown {
   };
   return query;
 }
-
-describe('truncateWechatText', () => {
-  it('leaves a reply under the platform limit untouched', () => {
-    const text = '普通回复';
-    expect(truncateWechatText(text)).toBe(text);
-  });
-
-  it('keeps the platform limit and appends the truncation note', () => {
-    const text = 'a'.repeat(10_000);
-    const truncated = truncateWechatText(text);
-    expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(3_500);
-    expect(truncated.endsWith('完整内容请在 WorkLite 查看）')).toBe(true);
-    expect(truncated.startsWith('a'.repeat(100))).toBe(true);
-  });
-
-  it('never splits a multi-byte character', () => {
-    const truncated = truncateWechatText('微信渠道长回复'.repeat(1_000));
-    expect(truncated).not.toContain('�');
-    expect(Buffer.byteLength(truncated)).toBeLessThanOrEqual(3_500);
-  });
-});
 
 describe('isWechatNewConversationCommand', () => {
   it('matches only the exact command spellings after trimming', () => {
@@ -532,6 +512,27 @@ describe('WechatService native reply images', () => {
     expect(messages.map((message) => message.text ?? '图片')).toEqual(['之前', '图片', '之后']);
     expect(uploads).toEqual([image]);
     expect(db.select().from(chatSubmissions).get()!.outputMessageId).toBe('message-3');
+  });
+
+  it('delivers all long-reply chunks and later images, resuming after a failed chunk', async () => {
+    const prose = Array.from({ length: 1500 }, (_, index) => `第${index}条完整中文回复😀`).join('');
+    reply = prose + '\n![图](/api/artifacts/art_good/content)\n**结尾**';
+    const expected = formatWechatReply(reply);
+    const failedPart = expected[1];
+    if (failedPart.kind !== 'text') throw new Error('Expected a text chunk.');
+    rejectText = failedPart.text;
+    await expect(deliver()).rejects.toThrow('Temporary text send failure');
+    expect(messages).toHaveLength(1);
+    rejectText = '';
+    await deliver();
+    await deliver();
+    expect(messages.map((message) => message.text ?? '图片')).toEqual(expected.map((part) => part.kind === 'text' ? part.text : '图片'));
+    expect(messages.filter((message) => message.text).every((message) => Buffer.byteLength(message.text!) <= WECHAT_TEXT_BYTES)).toBe(true);
+    expect(messages.filter((message) => message.text && message.text !== '**结尾**').map((message) => message.text).join('')).toBe(prose);
+    expect(uploads).toEqual([image]);
+    expect(new Set(messages.map((message) => message.clientId)).size).toBe(messages.length);
+    expect(messages.every((message) => message.contextToken === 'ctx-images')).toBe(true);
+    expect(db.select().from(chatSubmissions).get()!.settled).toBe(true);
   });
 });
 

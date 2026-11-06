@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { createDecipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ILinkApiError, MESSAGE_ITEM_IMAGE, MESSAGE_TYPE_BOT, MESSAGE_STATE_FINISH, aesEcbPaddedSize, fetchTypingTicket, getUpdates, mediaLabel, parseILinkJson, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, type FetchLike } from './ilink';

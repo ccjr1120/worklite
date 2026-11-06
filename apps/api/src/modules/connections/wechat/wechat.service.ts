@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -13,11 +13,12 @@ import { CHAT_AGENT_ID, ChatDispatchService } from '../../agents/chat-dispatch.s
 import { ChatAttachmentsService } from '../../agents/chat-attachments.service';
 import { ArtifactStorageService } from '../../artifacts/artifact-storage.service';
 import { readArtifactImageContent } from '../../artifacts/artifact-image-content';
-import { inspectWechatImage, splitWechatReplyImages, wechatImageFailureText, type WechatReplyImage } from '../../artifacts/wechat-reply-images';
+import { inspectWechatImage, wechatImageFailureText, type WechatReplyImage } from '../../artifacts/wechat-reply-images';
 import { UpgradesService } from '../../upgrades/upgrades.service';
 import { encryptSecret } from '../connection-secrets';
 import { ChatChannelConfigurationService } from '../chat-channel-configuration.service';
 import { fetchBotQrCode, fetchTypingTicket, getUpdates, ILINK_DEFAULT_BASE_URL, ILINK_STALE_TOKEN_ERRCODE, ILinkApiError, mediaLabel, parseInboundMessage, pollQrCodeStatus, sendImageMessage, sendTextMessage, sendTyping, uploadImageToCdn, MESSAGE_TYPE_USER, type FetchLike, type ILinkInboundMessage, type ILinkRawMessage } from './ilink';
+import { formatWechatReply } from './wechat-reply-format';
 
 type Json = Record<string, unknown>;
 type Submission = typeof chatSubmissions.$inferSelect;
@@ -69,21 +70,6 @@ const NEW_CONVERSATION_COMMANDS = new Set(['新对话', '/新对话', '／新对
 export const WECHAT_NEW_CONVERSATION_REPLY = '已开启新对话。';
 export function isWechatNewConversationCommand(text: string): boolean {
   return NEW_CONVERSATION_COMMANDS.has(text.trim());
-}
-// WeChat text messages are whole sends with no edit channel; overlong content is truncated
-// instead of split so one delivery state stays one platform message.
-const MAX_TEXT_BYTES = 3_500;
-const TRUNCATION_NOTE = '\n\n……（内容过长已截断，完整内容请在 WorkLite 查看）';
-// Cut on a UTF-8 character boundary instead of re-measuring the whole string per code unit: a
-// long failed-turn reply can otherwise spend seconds in the delivery sweep, and a naive slice can
-// leave a split multi-byte character for the platform to reject.
-export function truncateWechatText(value: string): string {
-  if (Buffer.byteLength(value) <= MAX_TEXT_BYTES) return value;
-  const budget = Math.max(0, MAX_TEXT_BYTES - Buffer.byteLength(TRUNCATION_NOTE));
-  const bytes = Buffer.from(value, 'utf8');
-  let end = Math.min(budget, bytes.length);
-  while (end > 0 && end < bytes.length && (bytes[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
-  return bytes.subarray(0, end).toString('utf8') + TRUNCATION_NOTE;
 }
 // Mirrors the reference iLink client's getconfig cache window; refetching every poll would
 // be wasteful since the ticket outlives any single turn.
@@ -613,7 +599,7 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     // Send prose and every image in source order; text limits must never discard later images.
-    const parts = splitWechatReplyImages(text).map((part) => part.kind === 'text' ? { ...part, text: truncateWechatText(part.text) } : part);
+    const parts = formatWechatReply(text);
     const fingerprint = digest(JSON.stringify({ kind: reference?.kind ?? 'pending', parts, terminal }));
     if (fingerprint === submission.deliveryFingerprint) {
       if (terminal) await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));

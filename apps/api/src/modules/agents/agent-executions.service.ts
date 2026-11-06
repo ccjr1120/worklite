@@ -666,8 +666,12 @@ export class AgentExecutionsService implements OnModuleInit {
     const conversationShellCalls = agent.id === CHAT_AGENT_ID
       ? await this.db.select({ id: agentToolCalls.id, shell: agentToolCalls.shell, workingDirectory: agentToolCalls.workingDirectory, commandExecutionId: agentToolCalls.commandExecutionId, status: agentToolCalls.status, exitCode: agentToolCalls.exitCode }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), sql`${agentToolCalls.shell} IS NOT NULL`)).orderBy(asc(agentToolCalls.createdAt))
       : [];
+    const [deliveryChat] = agent.id === CHAT_AGENT_ID
+      ? await this.db.select({ channel: externalChats.channel }).from(externalChats).where(and(eq(externalChats.workspaceId, workspace.id), eq(externalChats.executionId, executionId))).limit(1)
+      : [];
     const systemPrompt = [
       agent.systemPrompt.trim(),
+      agent.id === CHAT_AGENT_ID ? `Current conversation delivery channel: ${deliveryChat?.channel ?? 'web'}. This is the bound delivery channel even when a turn is submitted from Web.` : '',
       agent.id === CHAT_AGENT_ID && agentFiles(this.db) ? `Agent package catalog root for this workspace: ${JSON.stringify(agentFiles(this.db)!.workspaceRoot(workspace.id))}. Use run_host_command to inspect AGENT.md ids and write private skills/ and tools/ files here. Private sub-Agents live under their owner subagents/ directory.` : '',
       agent.id === CHAT_AGENT_ID ? `This conversation turn allows at most ${MAX_CHAT_TOOL_CALLS} tool calls in total, including failed calls and plan updates. ${priorToolCalls.length} have been used. Repeated empty or failed results are a reason to reconsider the target, permissions, configuration or assumptions; do not repeat the same investigation indefinitely. At the limit, stop using tools and report evidence, unresolved work and likely blocking causes.` : '',
       conversationShellCalls.length ? `Historical Shell evidence (new direct commands use run_host_command; old uncertain effects require explicit recovery):\n${JSON.stringify(conversationShellCalls)}` : '',
