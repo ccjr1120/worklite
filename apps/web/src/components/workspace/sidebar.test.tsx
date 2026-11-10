@@ -10,10 +10,6 @@ vi.mock('@/app-version', () => ({ APP_VERSION_LABEL: 'v9.9.9' }));
 
 vi.mock('@/lib/reload', () => ({ reloadPage: vi.fn() }));
 
-vi.mock('@/api/queries', () => ({
-  useChatConversationsQuery: () => ({ data: undefined }),
-}));
-
 const routerState = vi.hoisted(() => ({ pathname: '/chat' }));
 
 vi.mock('@tanstack/react-router', () => ({

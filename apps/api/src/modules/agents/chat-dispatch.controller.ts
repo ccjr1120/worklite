@@ -7,10 +7,11 @@ import { ChatMemoriesService } from './chat-memories.service';
 import { ChatProjectTasksService } from './chat-project-tasks.service';
 import { AgentExecutionsService } from './agent-executions.service';
 import { WorkspaceService } from '../teams/teams.service';
+import { ChatSuggestionsService } from './chat-suggestions.service';
 
 @Controller('chat')
 export class ChatDispatchController {
-  constructor(private readonly dispatches: ChatDispatchService, private readonly conversations: ChatConversationsService, private readonly projectTasks: ChatProjectTasksService, private readonly executions: AgentExecutionsService, private readonly workspaces: WorkspaceService, private readonly memories: ChatMemoriesService) {}
+  constructor(private readonly dispatches: ChatDispatchService, private readonly conversations: ChatConversationsService, private readonly projectTasks: ChatProjectTasksService, private readonly executions: AgentExecutionsService, private readonly workspaces: WorkspaceService, private readonly memories: ChatMemoriesService, private readonly suggestions: ChatSuggestionsService) {}
 
   @Get('project-tasks')
   async listProjectTasks(@Req() request: Request, @Query('status') status?: string, @Query('limit') limit?: string) {
@@ -69,6 +70,12 @@ export class ChatDispatchController {
 
   @Post('conversations/:id/summarize')
   summarize(@Req() request: Request, @Param('id') id: string) { return this.conversations.summarize(request, id); }
+
+  @Post('conversations/:id/suggestions')
+  suggest(@Req() request: Request, @Param('id') id: string, @Body() input: { contextVersion?: string }) {
+    if (typeof input?.contextVersion !== 'string' || !/^v1-[a-z0-9]+-[a-z0-9]+$/.test(input.contextVersion) || input.contextVersion.length > 40) throw new BadRequestException('Invalid suggestion context version.');
+    return this.suggestions.suggest(request, id, input.contextVersion);
+  }
 
   @Post('dispatch')
   dispatch(@Req() request: Request, @Body() input: DispatchChatRequest) {

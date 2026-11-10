@@ -7,6 +7,7 @@ import {
   recordRequestLog,
   recordRequestStat,
   requestLogs,
+  requestLog,
   requestStats,
 } from './provider-registry';
 
@@ -164,4 +165,21 @@ describe('gateway usage storage', () => {
     expect(requestLogs({ from, to, model: 'test-model' }).items.map((item) => item.id)).toEqual(['glog_usage_test']);
     expect(requestLogs({ from, to, model: 'other/test-model' }).items).toEqual([]);
   });
+  it('compresses full bodies losslessly and leaves expiry writes to maintenance', () => {
+    const request = { messages: [{ role: 'user', content: '长上下文 '.repeat(10000) }] };
+    const response = { kind: 'text' as const, body: '完整响应 '.repeat(10000) };
+    recordRequestLog({ id: 'glog_packed', provider: 'packed', model: 'test', endpoint: '/responses', status: 200, durationMs: 1, streaming: false, request, response });
+    expect(requestLog('glog_packed')).toEqual(expect.objectContaining({ request, response }));
+    const db = new BetterSqlite3(testDatabasePath);
+    try {
+      const stored = db.prepare('SELECT request_body, response_body FROM gateway_request_logs WHERE id=?').get('glog_packed') as { request_body: string; response_body: string };
+      expect(stored.request_body.length).toBeLessThan(JSON.stringify(request).length / 10);
+      expect(stored.response_body.length).toBeLessThan(response.body.length / 10);
+      db.prepare('UPDATE gateway_request_logs SET occurred_at=? WHERE id=?').run(Date.now()-13*3600000, 'glog_packed');
+      expect(requestLog('glog_packed')).toBeNull();
+      expect(requestLogs({ from: new Date(Date.now()-24*3600000).toISOString(), to: new Date().toISOString() }).items.some((item) => item.id === 'glog_packed')).toBe(false);
+      expect(db.prepare('SELECT id FROM gateway_request_logs WHERE id=?').get('glog_packed')).toEqual({ id: 'glog_packed' });
+    } finally { db.close(); }
+  });
+
 });

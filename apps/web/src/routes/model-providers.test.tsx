@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
@@ -28,7 +28,8 @@ vi.mock('@/api/queries', () => ({
   useCodexAccountUsagesQuery: () => ({ data: undefined, isLoading: false, isError: false, refetch: vi.fn() }),
 }));
 
-vi.mock('@/api/client', () => ({ ApiError: class extends Error {}, api: {} }));
+const createProvider = vi.hoisted(() => vi.fn(async () => ({})));
+vi.mock('@/api/client', () => ({ ApiError: class extends Error {}, api: { saveModelProvider: createProvider } }));
 vi.mock('@/lib/query-client', () => ({ queryClient: { invalidateQueries: vi.fn(() => Promise.resolve()) } }));
 vi.mock('@/components/locale-provider', () => ({ useLocale: () => ({ locale: 'zh-CN' }) }));
 vi.mock('@/components/workspace/workspace-chrome', () => ({ WorkspaceChrome: () => null }));
@@ -40,7 +41,7 @@ vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: { component: unknown; validateSearch: unknown }) => ({ options, useSearch: () => ({}) }),
 }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const ModelProvidersPage = (Route as unknown as { options: { component: () => React.ReactElement } }).options.component;
 
@@ -78,4 +79,16 @@ describe('model providers page', () => {
     expect(within(dialog).queryByRole('button', { name: 'Codex 账号池' })).not.toBeInTheDocument();
     expect(screen.queryByText('pool-account@example.com')).not.toBeInTheDocument();
   });
+  it('offers codex/responses when creating a Provider and submits it without an API key', async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: '创建提供商' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('提供商名称'), { target: { value: 'custom-codex' } });
+    fireEvent.change(within(dialog).getByLabelText('Base URL'), { target: { value: 'https://chatgpt.com/backend-api/codex' } });
+    fireEvent.click(within(dialog).getByRole('combobox'));
+    fireEvent.click(screen.getByRole('option', { name: 'codex/responses' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建提供商' }));
+    await waitFor(() => expect(createProvider).toHaveBeenCalledWith('personal', expect.objectContaining({ name: 'custom-codex', protocol: 'codex/responses', apiKey: undefined })));
+  });
+
 });

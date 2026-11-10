@@ -170,6 +170,11 @@ export class AgentsController {
     return this.executions.controlSubAgent(request, 'personal', agentId, executionId, runId, 'resume');
   }
 
+  @Post(':agentId/executions/:executionId/sub-agents/:runId/cancel')
+  cancelSubAgent(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('runId') runId: string) {
+    return this.executions.controlSubAgent(request, 'personal', agentId, executionId, runId, 'cancel');
+  }
+
   @Post(':agentId/executions/:executionId/cancel')
   cancelExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
     return this.executions.cancel(request, 'personal', agentId, executionId);

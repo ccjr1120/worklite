@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, type OnModuleDestroy, 
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { ApiRequestLogItem, ApiRequestLogList, ApiRequestLogQuery, ApiRequestLogStats, ApiRequestLogStatusClass, ApiRequestRouteStat } from '@worklite/contracts';
-import type { Database } from '@worklite/db';
+import { databaseMaintenanceSettings, type Database } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { runtimeWritesFrozen } from '../../infrastructure/runtime-upgrade-state';
 
@@ -30,14 +30,11 @@ type LogRow = {
 };
 
 const FLUSH_INTERVAL_MS = 1_000;
-const PRUNE_INTERVAL_MS = 10 * 60 * 1_000;
-const FIRST_PRUNE_DELAY_MS = 30 * 1_000;
 const PRUNE_BATCH = 5_000;
 const BUFFER_LIMIT = 5_000;
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
 const MAX_STAT_ROUTES = 200;
-const DEFAULT_RETENTION_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 /** Paths whose timing is not recorded: the log's own reads and the liveness probe. */
@@ -67,8 +64,7 @@ function routeTemplate(request: Request): string {
 }
 
 function retentionDaysFromEnv(): number {
-  const parsed = Number(process.env.API_REQUEST_LOG_RETENTION_DAYS);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RETENTION_DAYS;
+  return databaseMaintenanceSettings().apiLogRetentionMs / DAY_MS;
 }
 
 function parseInstant(value: string | undefined, name: string): number | undefined {
@@ -128,8 +124,6 @@ export class ApiRequestLogsService implements OnModuleInit, OnModuleDestroy {
   private buffer: ApiRequestLogEntry[] = [];
   private dropped = 0;
   private flushTimer?: ReturnType<typeof setInterval>;
-  private pruneTimer?: ReturnType<typeof setTimeout>;
-  private stopped = false;
 
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
@@ -138,15 +132,11 @@ export class ApiRequestLogsService implements OnModuleInit, OnModuleDestroy {
     if (!this.enabled) return;
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
     this.flushTimer.unref();
-    this.schedulePrune(FIRST_PRUNE_DELAY_MS);
   }
 
   onModuleDestroy(): void {
-    this.stopped = true;
     if (this.flushTimer) clearInterval(this.flushTimer);
-    if (this.pruneTimer) clearTimeout(this.pruneTimer);
     this.flushTimer = undefined;
-    this.pruneTimer = undefined;
     this.flush();
   }
 
@@ -221,32 +211,14 @@ export class ApiRequestLogsService implements OnModuleInit, OnModuleDestroy {
   prune(now = Date.now()): number {
     const cutoff = now - this.retentionDays * DAY_MS;
     const statement = this.db.$client.prepare('DELETE FROM api_request_logs WHERE id IN (SELECT id FROM api_request_logs WHERE created_at < ? LIMIT ?)');
-    let removed = 0;
-    for (;;) {
-      const { changes } = statement.run(cutoff, PRUNE_BATCH);
-      removed += changes;
-      if (changes < PRUNE_BATCH) return removed;
-    }
-  }
-
-  private schedulePrune(delayMs: number): void {
-    if (this.stopped) return;
-    this.pruneTimer = setTimeout(() => {
-      try {
-        if (!runtimeWritesFrozen()) this.prune();
-      } catch (error) {
-        this.logger.warn(`API request log retention pass failed: ${error instanceof Error ? error.message : String(error)}`);
-      } finally {
-        this.schedulePrune(PRUNE_INTERVAL_MS);
-      }
-    }, delayMs);
-    this.pruneTimer.unref();
+    if (this.retentionDays <= 0) return 0;
+    return statement.run(cutoff, PRUNE_BATCH).changes;
   }
 
   private range(query: ApiRequestLogQuery): { from: number; to: number } {
     const now = Date.now();
     const to = parseInstant(query.to, 'to') ?? now;
-    const from = parseInstant(query.from, 'from') ?? to - this.retentionDays * DAY_MS;
+    const from = parseInstant(query.from, 'from') ?? to - (this.retentionDays || 1) * DAY_MS;
     if (from > to) throw new BadRequestException('from must not be later than to.');
     return { from, to };
   }

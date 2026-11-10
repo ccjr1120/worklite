@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { createDb, type Database } from '@worklite/db';
+import { createDb, installStoredArrayStorage, type Database } from '@worklite/db';
 import { ChatProjectTasksService, extractTaskResult, settleChatProjectTask } from './chat-project-tasks.service';
 import type { ProjectExecutorService } from './project-executor.service';
 import type { ChatAttachmentsService } from './chat-attachments.service';
@@ -165,6 +165,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
@@ -247,6 +248,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
@@ -287,6 +289,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
@@ -326,6 +329,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
@@ -357,6 +361,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')
@@ -403,6 +408,7 @@ describe('ChatProjectTasksService.capture workspace behavior', () => {
     const db = createDb(':memory:');
     dbs.push(db);
     for (const statement of DDL) db.$client.exec(statement);
+    installStoredArrayStorage(db.$client);
     db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
     db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
     db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id, capability_snapshot) VALUES (?, ?, ?, ?)')

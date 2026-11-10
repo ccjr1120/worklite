@@ -198,7 +198,8 @@ describe('CodexToolCallPanel project task card', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
 
     await waitFor(() => expect(api.cancelChatProjectTask).toHaveBeenCalledWith('acall_task_card_test'));
-    expect(await screen.findByText('已取消')).toBeVisible();
+    expect(await screen.findByText('已中断')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '取消任务' })).not.toBeInTheDocument();
     expect(screen.queryByText('确认停止当前执行？')).not.toBeInTheDocument();
   });
 
@@ -212,7 +213,8 @@ describe('CodexToolCallPanel project task card', () => {
     expect(screen.getByRole('button', { name: '正在取消…' })).toBeDisabled();
 
     resolveCancellation(task({ status: 'cancelled', stage: 'cancelled', progressText: '' }));
-    expect(await screen.findByText('已取消')).toBeVisible();
+    expect(await screen.findByText('已中断')).toBeVisible();
+    expect(screen.queryByRole('button', { name: '取消任务' })).not.toBeInTheDocument();
   });
 
   it('keeps cancellation confirmation open and reports a cancellation failure', async () => {

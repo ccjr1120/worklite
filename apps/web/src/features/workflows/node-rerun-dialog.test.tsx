@@ -185,3 +185,13 @@ describe('NodeRerunDialog', () => {
     expect(screen.getByRole('button', { name: '确认重跑' })).toBeEnabled();
   });
 });
+
+it('submits parameters for this rerun without changing the saved node', async () => {
+  renderDialog();
+  const json = screen.getByRole('textbox', { name: '请求参数（JSON）' });
+  fireEvent.change(json, { target: { value: '{"temperature": 0.25}' } });
+  fireEvent.blur(json);
+  fireEvent.click(screen.getByRole('button', { name: '确认重跑' }));
+  await waitFor(() => expect(api.rerunRunNode).toHaveBeenCalledWith('personal', 'run_1', 'nrun_target', { modelOverride: 'gateway/current', modelParameters: { requestBody: { temperature: 0.25 } } }));
+  expect(baseDefinition.nodes[0]?.config).not.toHaveProperty('modelParameters');
+});

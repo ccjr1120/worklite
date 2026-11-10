@@ -1,7 +1,8 @@
+import { agentExecutionColumns, agentExecutions, scheduledAgentTasks, type Database } from '@worklite/db';
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { and, eq, lte } from 'drizzle-orm';
 import type { Request } from 'express';
-import { agentExecutions, scheduledAgentTasks, type Database } from '@worklite/db';
+
 import { DATABASE } from '../../infrastructure/database.module';
 import { runtimeAdmissionClosed } from '../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -24,7 +25,7 @@ export class AgentSchedulesService implements OnModuleInit, OnModuleDestroy {
     try {
       const running = this.db.select().from(scheduledAgentTasks).where(eq(scheduledAgentTasks.running, true)).all();
       for (const task of running) {
-        const execution = task.activeExecutionId ? this.db.select().from(agentExecutions).where(eq(agentExecutions.id, task.activeExecutionId)).get() : undefined;
+        const execution = task.activeExecutionId ? this.db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, task.activeExecutionId)).get() : undefined;
         if (execution && ['running', 'waiting_for_input'].includes(execution.status)) continue;
         this.db.update(scheduledAgentTasks).set({ running: false, activeExecutionId: null, lastStatus: execution?.status ?? 'failed', nextRunAt: new Date(Date.now() + task.intervalSeconds * 1000), updatedAt: new Date() }).where(eq(scheduledAgentTasks.id, task.id)).run();
       }

@@ -303,3 +303,13 @@ describe('RunsService node rerun', () => {
     expect(await db.select().from(auditLogs).where(eq(auditLogs.action, 'workflow.node_rerun'))).toHaveLength(0);
   });
 });
+
+it('persists and applies parameters only to the requested rerun attempt', async () => {
+  const originalDefinition = seedFixture();
+  const modelParameters = { reasoningEffort: 'high' as const, serviceTier: 'fast' as const };
+  const accepted = await service.rerunNode(request, 'personal', RUN_ID, 'nr_target', { modelParameters });
+  expect(accepted.nodeRuns?.find((row) => row.rerunEvidence)?.rerunEvidence).toMatchObject({ modelParameters });
+  await drainExecution();
+  expect(executeWorkflowAgent.mock.calls[0]?.at(-1)).toEqual(modelParameters);
+  expect(db.select().from(workflowVersions).where(eq(workflowVersions.id, 'wfv_rerun')).get()?.definition).toEqual(originalDefinition);
+});

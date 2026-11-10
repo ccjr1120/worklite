@@ -20,6 +20,45 @@ function mount() {
   return { onConfigure, client };
 }
 describe('Agent run overview', () => {
+  it.each(['codex', 'claude'] as const)('shows %s lead public messages, tool work and final replies in the run record', async (runtime) => {
+    const root: AgentRunView = { ...run('root', '主 Agent'), runtime, status: 'running', currentActivity: { phase: 'tool', toolName: 'pnpm test' }, activities: [
+      { id: 'message', kind: 'message', text: '我先检查现有实现' },
+      { id: 'tool', kind: 'tool', toolName: runtime === 'codex' ? 'commandExecution' : 'Bash', summary: 'pnpm test', status: 'running' },
+    ] };
+    vi.mocked(api.agentHistory).mockResolvedValue({ items: [root], hasMore: false });
+    vi.mocked(api.agentRun).mockResolvedValue({ run: root, invocations: [root], artifacts: [] });
+    const { client } = mount();
+    expect(await screen.findByText('我先检查现有实现')).toBeVisible();
+    expect(screen.getByText('pnpm test')).toBeVisible();
+    expect(screen.getAllByText('正在调用 pnpm test…')).toHaveLength(2);
+    const completed: AgentRunView = { ...root, status: 'completed', currentActivity: null, output: '修改完成，验证通过', activities: [
+      root.activities![0], { ...root.activities![1], status: 'completed' } as NonNullable<AgentRunView['activities']>[number],
+      { id: 'final', kind: 'message', text: '修改完成，验证通过' },
+    ] };
+    vi.mocked(api.agentRun).mockResolvedValue({ run: completed, invocations: [completed], artifacts: [] });
+    await client.invalidateQueries({ queryKey: ['agent-run'] });
+    expect(await screen.findByText('修改完成，验证通过')).toBeVisible();
+    expect(screen.getAllByText('修改完成，验证通过')).toHaveLength(1);
+    expect(screen.queryByText('正在调用 pnpm test…')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '消息与执行过程' }).closest('details')).toHaveAttribute('open');
+    client.clear();
+  });
+
+  it('shows saved engine replies without activity events and keeps child content in its own record', async () => {
+    const root = { ...run('root', '主 Agent'), runtime: 'codex' as const, output: '历史主 Agent 回复' };
+    const child = { ...run('child', '子 Agent'), runtime: 'claude' as const, parentRunId: root.id, status: 'failed' as const, output: '失败前的说明', activities: [{ id: 'tool', kind: 'tool' as const, toolName: 'Read', summary: 'src/index.ts', status: 'interrupted' as const }] };
+    vi.mocked(api.agentHistory).mockResolvedValue({ items: [root], hasMore: false });
+    vi.mocked(api.agentRun).mockResolvedValue({ run: root, invocations: [root, child], artifacts: [] });
+    const { client } = mount();
+    expect(await screen.findByText('历史主 Agent 回复')).toBeVisible();
+    const childRecord = screen.getByText('子 Agent', { selector: 'span' }).closest('details')!;
+    fireEvent.click(childRecord.querySelector('summary')!);
+    expect(within(childRecord).getByText('失败前的说明')).toBeVisible();
+    expect(within(childRecord).getByText('已中断')).toBeVisible();
+    expect(within(childRecord).getByText('src/index.ts')).toBeVisible();
+    client.clear();
+  });
+
   it.each(['available', 'unavailable'] as const)('includes direct Codex usage in the task total when Gateway is %s', async (status) => {
     const root = { ...run('root', '项目 Agent'), usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, cacheReadTokens: 0, cacheCreationTokens: 0 } };
     const codex = { ...run('codex', 'im-codex'), parentRunId: root.id, runtime: 'codex' as const,

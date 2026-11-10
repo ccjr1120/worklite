@@ -370,3 +370,11 @@ describe('Claude durable runtime sessions', () => {
     expect(onSession).toHaveBeenCalledWith('saved-session');
   });
 });
+
+it('passes per-use effort and an explicit fast-mode switch to the Claude SDK', async () => {
+  fakeQuery.impl = () => new FakeQuery([systemInit(), assistantText('ok'), resultSuccess('ok')]);
+  const { request, prepared } = buildRequest({ model: 'pp-cc/claude-sonnet-5', modelParameters: { reasoningEffort: 'high', serviceTier: 'fast' } });
+  await service().execute(request, prepared);
+  expect(captured.lastOptions?.effort).toBe('high');
+  expect(captured.lastOptions?.settings).toMatchObject({ fastMode: true });
+});

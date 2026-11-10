@@ -141,3 +141,11 @@ it('does not hang on a pending question if the native process stops after comple
   await failure;
   answer('main');
 });
+
+it('passes use-site effort and fast into new and resumed Codex turns', async () => {
+  for (const resumeId of [undefined, 'thread-1']) {
+    const peer = rpcPeer();
+    await peer.service.execute({ ...runtimeRequest(), model: 'provider/model', modelParameters: { reasoningEffort: 'high', serviceTier: 'fast' }, runtimeSession: { resumeId, onSession: async () => {} } }, prepared);
+    expect(peer.sent.find((message) => message.method === 'turn/start')?.params).toMatchObject({ effort: 'high', serviceTier: 'priority' });
+  }
+});

@@ -192,8 +192,8 @@ export type SystemOneTestResult =
   | { ok: true; status: number; input: SystemOneTestInput; output: SystemOneTestOutput }
   | { ok: false; status: number; input: SystemOneTestInput; message: string };
 
-export async function systemOneTest(provider: GatewayProvider, model: string, requestLogId: string): Promise<SystemOneTestResult> {
-  const body = JSON.stringify({ model, ...SYSTEM_ONE_TEST_INPUT });
+export async function systemOneTest(provider: GatewayProvider, model: string, requestLogId: string, parameters: Record<string, unknown> = {}): Promise<SystemOneTestResult> {
+  const body = JSON.stringify({ model, ...SYSTEM_ONE_TEST_INPUT, ...parameters });
   const headers = new Headers({ 'content-type': 'application/json', 'x-worklite-surface': 'provider_test', 'x-worklite-log-source': 'provider_test', 'x-worklite-log-id': requestLogId });
   const response = await systemOnePassthrough(new Request(`http://127.0.0.1${SYSTEMONE_PATH}`, { method: 'POST', headers, body }), provider, model);
   const raw = await response.text();

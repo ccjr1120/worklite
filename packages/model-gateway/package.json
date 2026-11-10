@@ -12,6 +12,7 @@
     "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
+    "@worklite/contracts": "workspace:*",
     "@ai-sdk/anthropic": "^4.0.58",
     "@ai-sdk/openai": "^4.0.46",
     "ai": "^7.0.77"

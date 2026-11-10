@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -22,7 +21,7 @@ afterEach(async () => {
 });
 
 async function setup(execute: (request: ProjectExecutorRequest) => Promise<string>) {
-  root = await mkdtemp(join(tmpdir(), 'worklite-runtime-test-'));
+  root = await mkdtemp(join(process.cwd(), '.runtime-test-'));
   vi.stubEnv('WORKLITE_AGENT_RUNTIME_DIR', root);
   db = createDb(':memory:');
   await initializeDatabase(db);
@@ -49,7 +48,8 @@ describe('AgentRuntimeService', () => {
     const executor = await setup(async (request) => {
       await request.runtimeSession!.onSession('native-thread-1');
       await request.onTextDelta?.('done');
-      await request.onEvent?.({ phase: 'codex.item_completed', itemId: 'item-1', summary: 'not archived', text: 'not archived' });
+      await request.onEvent?.({ phase: 'codex.item_completed', itemId: 'item-1', itemType: 'agentMessage', text: 'Public reply' });
+      await request.onEvent?.({ phase: 'codex.item_started', itemId: 'tool-1', itemType: 'commandExecution', summary: 'pnpm test' });
       await request.onEvent?.({ phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } });
       return 'done';
     });
@@ -68,7 +68,8 @@ describe('AgentRuntimeService', () => {
       { kind: 'activity', phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } },
       { kind: 'activity', phase: 'codex.usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cacheReadTokens: 80, cacheCreationTokens: null } },
     ]);
-    expect(JSON.stringify(events)).not.toContain('not archived');
+    expect(events.some((event) => event.data.kind === 'activity' && event.data.text === 'Public reply')).toBe(true);
+    expect(events.some((event) => event.data.kind === 'activity' && event.data.summary === 'pnpm test')).toBe(true);
     expect(db.select().from(agentRuntimeSessions).get()?.status).toBe('idle');
   });
 
@@ -106,6 +107,55 @@ describe('AgentRuntimeService', () => {
     await runtime.closeSession(workspaceId, sessionId);
     await expect(stat(resourceDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(runtime.executeTurn(request())).rejects.toThrow('closed');
+  });
+
+  it('keeps an asynchronous question answerable after the native turn ends and resumes with only the answer', async () => {
+    let question!: Promise<string | undefined>;
+    let turns = 0;
+    const executor = await setup(async (request) => {
+      if (++turns === 1) {
+        await request.runtimeSession!.onSession('saved-thread');
+        question = request.onQuestion!('Which branch?');
+        return 'Please choose a branch.';
+      }
+      expect(request.runtimeSession?.resumeId).toBe('saved-thread');
+      expect(request.input).toContain('main');
+      expect(request.input).not.toContain('first message');
+      return 'Continued on main';
+    });
+    const turn = request();
+    const running = runtime.executeTurn(turn);
+    await vi.waitFor(() => expect(turn.onInteraction).toHaveBeenCalledOnce());
+    const interaction = db.select().from(agentRuntimeInteractions).get()!;
+    expect(db.select().from(agentRuntimeRuns).get()?.status).toBe('waiting_for_input');
+    expect(interaction.status).toBe('pending');
+    await runtime.answer(workspaceId, sessionId, interaction.id, 'main', () => {});
+    await expect(running).resolves.toBe('Continued on main');
+    await expect(question).resolves.toBe('main');
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(db.select().from(agentRuntimeInteractions).get()).toMatchObject({ status: 'answered', answer: 'main' });
+    expect(db.select().from(agentRuntimeRuns).get()?.status).toBe('completed');
+  });
+
+  it('cancels an asynchronous question after the native turn ends without starting another turn', async () => {
+    let question!: Promise<string | undefined>;
+    const executor = await setup(async (request) => {
+      await request.runtimeSession!.onSession('saved-thread');
+      question = request.onQuestion!('Waiting');
+      void question.catch(() => undefined);
+      return 'Please answer.';
+    });
+    const controller = new AbortController();
+    const turn = request(controller.signal);
+    const running = runtime.executeTurn(turn);
+    const failure = expect(running).rejects.toThrow('stop');
+    await vi.waitFor(() => expect(turn.onInteraction).toHaveBeenCalledOnce());
+    controller.abort(new Error('stop'));
+    await failure;
+    await expect(question).rejects.toThrow('stop');
+    expect(executor.execute).toHaveBeenCalledOnce();
+    expect(db.select().from(agentRuntimeRuns).get()?.status).toBe('cancelled');
+    expect(db.select().from(agentRuntimeInteractions).get()?.status).toBe('cancelled');
   });
 
   it('denies approvals unless explicitly approved and records the interaction kind', async () => {

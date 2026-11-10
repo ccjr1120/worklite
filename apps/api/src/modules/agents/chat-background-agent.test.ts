@@ -1,6 +1,7 @@
+import { agentExecutionColumns, agentCapabilityResults, agentExecutions, agents, agentToolCalls, auditLogs, chatSubmissions, externalChats, workspaces, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { agentCapabilityResults, agentExecutions, agents, agentToolCalls, auditLogs, chatSubmissions, externalChats, workspaces, createDb, initializeDatabase, type Database } from '@worklite/db';
+
 import { CHAT_AGENT_ID, type AgentExecutionStatus } from '@worklite/contracts';
 import type { AgentCollaborationService } from './agent-collaboration.service';
 import { AgentExecutionsService } from './agent-executions.service';
@@ -45,7 +46,7 @@ describe('background Agent dispatch from Chat', () => {
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
     const [notice] = db.select().from(chatSubmissions).all();
     expect(notice).toMatchObject({ id: 'dispatch_dispatch', chatId: 'bound-chat', settled: false, reference: { kind: 'conversation', completionStatus: 'completed', dispatchNotice: '已派 @qcoder：Investigate，正在执行' } });
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()!).toMatchObject({ status: 'completed', displayMessages: [] });
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()!).toMatchObject({ status: 'completed', displayMessages: [] });
     expect(gateway.generateAgentStep).not.toHaveBeenCalled();
 
     // Simulate interruption after the acceptance transaction, before saving the tool result.
@@ -53,7 +54,7 @@ describe('background Agent dispatch from Chat', () => {
     db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, notice!.id)).run();
     db.update(agentToolCalls).set({ status: 'running', output: '' }).where(eq(agentToolCalls.id, 'dispatch')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
     expect(db.select().from(chatSubmissions).all()).toEqual([{ ...notice, settled: true }]);
   });
 
@@ -98,7 +99,7 @@ describe('background Agent dispatch from Chat', () => {
     bindChannel('wechat');
     db.$client.exec("CREATE TRIGGER reject_notice BEFORE INSERT ON chat_submissions BEGIN SELECT RAISE(ABORT, 'notice storage failed'); END");
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(1);
     expect(db.select().from(chatSubmissions).all()).toEqual([]);
     expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).all()).toEqual([]);
     expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('failed');
@@ -116,7 +117,7 @@ describe('background Agent dispatch from Chat', () => {
     const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
     expect(call.status).toBe('failed');
     expect(JSON.parse(call.output)).toMatchObject({ failure: { stage: 'start', code: 'PLATFORM_START_FAILED', effect: 'not_started', evidence: { exceptionType: 'BadRequestException', message: expect.stringContaining(message) } } });
-    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(1);
     expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).all()).toEqual([]);
     expect(db.select().from(chatSubmissions).all()).toEqual([]);
     expect(db.select().from(auditLogs).where(eq(auditLogs.action, 'platform.tool_failure')).get()!.metadata).toMatchObject({ failure: { evidence: { message: expect.stringContaining(message) } } });
@@ -131,7 +132,7 @@ describe('background Agent dispatch from Chat', () => {
     const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
     expect(call.status).toBe('completed');
     const receipt = JSON.parse(call.output);
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, receipt.executionId)).get()!.projectDirectory).toBe(process.cwd());
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, receipt.executionId)).get()!.projectDirectory).toBe(process.cwd());
   });
 
   it('rejects direct execution of a private child before creating any execution', async () => {
@@ -139,7 +140,7 @@ describe('background Agent dispatch from Chat', () => {
     db.insert(agents).values({ id: 'private', workspaceId: 'workspace_personal', name: 'Private', responsibility: '', systemPrompt: '', model: '', runtime: { kind: 'codex', projectDirectory: process.cwd() } }).run();
     db.update(agents).set({ collaboration: { subAgentIds: ['private'], capabilities: [] } }).where(eq(agents.id, 'lead')).run();
     await expect(service.create({} as never, 'personal', 'private', { message: 'Work' })).rejects.toThrow('Only top-level');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(1);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(1);
   });
 
   it('does not let a saved external runtime snapshot bypass private-child dispatch restrictions', async () => {
@@ -148,7 +149,7 @@ describe('background Agent dispatch from Chat', () => {
     db.insert(agentExecutions).values({ id: 'old-top-level', workspaceId: 'workspace_personal', agentId: 'lead', status: 'completed', capabilitySnapshot: snapshot as never }).run();
     db.insert(agents).values({ id: 'new-owner', workspaceId: 'workspace_personal', name: 'Owner', responsibility: '', model: '', systemPrompt: '', collaboration: { subAgentIds: ['lead'], capabilities: [] } }).run();
     await expect(service.continue({} as never, 'personal', 'lead', 'old-top-level', { message: 'Resume privately' })).rejects.toThrow('Only top-level');
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'old-top-level')).get()!.status).toBe('completed');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'old-top-level')).get()!.status).toBe('completed');
   });
 
   async function savedInstance(status: AgentExecutionStatus = 'failed') {
@@ -171,7 +172,7 @@ describe('background Agent dispatch from Chat', () => {
     db.insert(agentToolCalls).values({ ...call, id: 'dispatch-next', toolCallId: 'model-next', status: 'running', resultAppended: false }).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch-next');
     expect(db.select().from(chatSubmissions).all().map((row) => row.id)).toEqual(['dispatch_dispatch', 'dispatch_dispatch-next']);
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
   });
 
   it.each(['running', 'waiting_for_input', 'completed', 'failed', 'cancelled'] as const)('uses the live %s Agent state consistently across conversation reads and events', async (status) => {
@@ -230,8 +231,8 @@ describe('background Agent dispatch from Chat', () => {
   it.each(['failed', 'completed', 'cancelled'] as const)('wakes the same %s instance and retains its history and saved tools', async (status) => {
     const { internal } = await savedInstance(status);
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
-    const saved = db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!;
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
+    const saved = db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!;
     expect(saved.status).toBe('running');
     expect(saved.modelMessages[0]).toEqual({ role: 'user', content: 'Original article' });
     expect(saved.modelMessages).toHaveLength(3);
@@ -251,7 +252,7 @@ describe('background Agent dispatch from Chat', () => {
     const receipt = JSON.parse(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.output);
     expect(receipt.executionId).not.toBe('saved');
     expect(receipt.continued).toBeUndefined();
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('failed');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('failed');
   });
 
   it.each([
@@ -263,8 +264,8 @@ describe('background Agent dispatch from Chat', () => {
     const { internal } = await savedInstance();
     db.update(agentToolCalls).set({ input }).where(eq(agentToolCalls.id, 'dispatch')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('failed');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('failed');
     expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('failed');
   });
 
@@ -272,7 +273,7 @@ describe('background Agent dispatch from Chat', () => {
     const { internal } = await savedInstance('cancelled');
     db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue', mode: 'continue', continuationReason: 'Same task', executionId: 'saved' } }).where(eq(agentToolCalls.id, 'dispatch')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('cancelled');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.status).toBe('cancelled');
     expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('failed');
   });
 
@@ -281,7 +282,7 @@ describe('background Agent dispatch from Chat', () => {
     const legacy = '[Saved instance tool evidence] [{"callId":"research"}]\nContinue this instance with the saved results and resultRef references.';
     db.update(agentExecutions).set({ modelMessages: [{ role: 'user', content: 'Original article' }, { role: 'user', content: legacy }, { role: 'user', content: legacy }] }).where(eq(agentExecutions.id, 'saved')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    const saved = db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!;
+    const saved = db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!;
     expect(JSON.stringify(saved.modelMessages)).not.toContain(legacy);
     expect(saved.modelMessages.at(-1)).toEqual({ role: 'user', content: 'Continue writing' });
     const archives = db.select().from(agentCapabilityResults).all();
@@ -294,7 +295,7 @@ describe('background Agent dispatch from Chat', () => {
     db.update(agentExecutions).set({ status: 'completed' }).where(eq(agentExecutions.id, 'saved')).run();
     await service.continue({} as never, 'personal', 'lead', 'saved', { message: 'Another correction' });
     expect(db.select().from(agentCapabilityResults).all()).toHaveLength(1);
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.modelMessages.at(-1)).toEqual({ role: 'user', content: 'Another correction' });
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'saved')).get()!.modelMessages.at(-1)).toEqual({ role: 'user', content: 'Another correction' });
   });
 
   it('honors an instance-bound @mention even when the model omits executionId', async () => {
@@ -302,7 +303,7 @@ describe('background Agent dispatch from Chat', () => {
     db.update(agentExecutions).set({ displayMessages: [{ id: 'mention', role: 'user', content: '[@qcoder](/agents/lead?runId=air_saved&executionId=saved) Continue writing', createdAt: new Date().toISOString() }] }).where(eq(agentExecutions.id, 'chat')).run();
     db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue writing', mode: 'continue', continuationReason: 'Revise the same article', resumeCancelled: true } }).where(eq(agentToolCalls.id, 'dispatch')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
     expect(JSON.parse(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.output)).toMatchObject({ continued: true, executionId: 'saved' });
   });
 
@@ -312,7 +313,7 @@ describe('background Agent dispatch from Chat', () => {
     if (scenario === 'wrong-workspace') { db.insert(workspaces).values({ id: 'workspace_foreign', slug: 'foreign', name: 'Foreign' }).run(); db.update(agentExecutions).set({ workspaceId: 'workspace_foreign' }).where(eq(agentExecutions.id, 'saved')).run(); }
     if (scenario === 'missing') db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue', mode: 'continue', continuationReason: 'Same task', executionId: 'absent' } }).where(eq(agentToolCalls.id, 'dispatch')).run();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
-    expect(db.select().from(agentExecutions).all()).toHaveLength(2);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
     expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.status).toBe('failed');
     expect(gateway.generateAgentStep).toHaveBeenCalledTimes(1);
   });
@@ -321,25 +322,25 @@ describe('background Agent dispatch from Chat', () => {
     const { internal, fail } = await setup();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
     const schedule = vi.spyOn(service, 'schedule').mockImplementation(() => {});
-    const background = db.select().from(agentExecutions).all().find((row) => row.agentId === 'lead')!;
+    const background = db.select(agentExecutionColumns).from(agentExecutions).all().find((row) => row.agentId === 'lead')!;
     fail(new Error('Research failed'));
-    await vi.waitFor(() => expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, background.id)).get()?.status).toBe('failed'));
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, background.id)).get()?.status).toBe('failed'));
     const binding = db.select().from(auditLogs).where(eq(auditLogs.action, 'chat_agent.dispatched')).get()!;
     await internal.reportBackgroundAgent(binding.id);
     expect(schedule).toHaveBeenCalledTimes(1);
     expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()?.status).toBe('completed');
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.modelMessages.at(-1)).toMatchObject({ content: expect.stringContaining('failed') });
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.modelMessages.at(-1)).toMatchObject({ content: expect.stringContaining('failed') });
   });
 
   it('releases Chat before the Agent finishes, keeps execution independent, and reports once', async () => {
     const { internal, collaboration, finish } = await setup();
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
     expect(collaboration.run).toHaveBeenCalledTimes(1);
-    const background = db.select().from(agentExecutions).all().find((row) => row.agentId === 'lead')!;
+    const background = db.select(agentExecutionColumns).from(agentExecutions).all().find((row) => row.agentId === 'lead')!;
     expect(background.status).toBe('running');
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.status).toBe('completed');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.status).toBe('completed');
     expect(gateway.generateAgentStep).not.toHaveBeenCalled();
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.displayMessages).toEqual([]);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()?.displayMessages).toEqual([]);
     const chatView = await service.get({} as never, 'personal', CHAT_AGENT_ID, 'chat');
     expect(chatView.toolCalls.find((item) => item.id === 'dispatch')?.agentInvocation).toMatchObject({ agentName: 'qcoder', task: 'Investigate', status: 'running' });
     const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!;
@@ -353,7 +354,7 @@ describe('background Agent dispatch from Chat', () => {
     // A result that arrives during another Chat turn stays pending until that turn settles.
     db.update(agentExecutions).set({ status: 'running' }).where(eq(agentExecutions.id, 'chat')).run();
     finish('Investigation complete');
-    await vi.waitFor(() => expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, background.id)).get()?.status).toBe('completed'));
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, background.id)).get()?.status).toBe('completed'));
     await internal.reportBackgroundAgent(binding.id);
     expect(db.select().from(auditLogs).where(eq(auditLogs.id, binding.id)).get()?.metadata).not.toHaveProperty('reportedStatus');
     db.update(agentExecutions).set({ status: 'completed' }).where(eq(agentExecutions.id, 'chat')).run();
@@ -361,7 +362,7 @@ describe('background Agent dispatch from Chat', () => {
     await internal.reportBackgroundAgent(binding.id);
     await internal.reportBackgroundAgent(binding.id);
     expect(schedule).toHaveBeenCalledTimes(1);
-    const chat = db.select().from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()!;
+    const chat = db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'chat')).get()!;
     expect(chat.modelMessages.at(-1)).toMatchObject({ role: 'user', content: expect.stringContaining('Investigation complete') });
     expect(db.select().from(auditLogs).where(eq(auditLogs.id, binding.id)).get()?.metadata).toHaveProperty('reportedStatus', 'completed');
   });

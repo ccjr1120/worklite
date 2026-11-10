@@ -1,6 +1,7 @@
+import { installStoredArrayStorage, createDb, type Database } from '@worklite/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
-import { createDb, type Database } from '@worklite/db';
+
 import { activeWorkSignature, buildActiveWorkNote, ChatProgressReportsService, DEFAULT_PROGRESS_NOTE_INTERVAL_SECONDS, type ActiveWorkItem } from './chat-progress-reports.service';
 import type { AgentExecutionsService } from './agent-executions.service';
 import type { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
@@ -75,6 +76,7 @@ function setup(options?: { report?: 'reported' | 'busy' | 'unavailable'; env?: R
   const db = createDb(':memory:');
   dbs.push(db);
   for (const statement of DDL) db.$client.exec(statement);
+  installStoredArrayStorage(db.$client);
   db.$client.prepare('INSERT INTO workspaces (id) VALUES (?)').run(WORKSPACE_ID);
   db.$client.prepare('INSERT INTO agents (id) VALUES (?)').run('agt_system_helper_chat');
   db.$client.prepare('INSERT INTO agent_executions (id, workspace_id, agent_id) VALUES (?, ?, ?)').run(EXECUTION_ID, WORKSPACE_ID, 'agt_system_helper_chat');

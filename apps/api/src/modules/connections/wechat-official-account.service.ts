@@ -15,7 +15,7 @@ import { applyInlineImageUrls, findInlineImageReferences, INLINE_IMAGE_PLACEHOLD
 import { inspectQrPng } from './qr-png';
 
 type ActionListener = (actionId: string) => void;
-type BrowserSession = { browser: Browser; context: BrowserContext; page: Page; headed?: boolean };
+type BrowserSession = { browser: Browser; context: BrowserContext; page: Page; headed?: boolean; expiresAt?: number };
 type QrSourceEvaluation = {
   sourceKind: 'image-url' | 'image-data-url' | 'image-blob-url' | 'canvas' | 'none' | 'unsupported';
   sourceMimeType: string | null;
@@ -48,6 +48,7 @@ export class WechatOfficialAccountService {
   private readonly listeners = new Set<ActionListener>();
   private readonly sessions = new Map<string, BrowserSession>();
   private activeActionId: string | null = null;
+  private reservationExpiresAt = 0;
 
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
@@ -101,6 +102,7 @@ export class WechatOfficialAccountService {
   async refresh(actionId: string): Promise<PendingNodeExecutionResult['pendingAction']> {
     const [action] = await this.db.select().from(workflowPendingActions).where(eq(workflowPendingActions.id, actionId)).limit(1);
     if (!action) throw new NotFoundException('Pending action not found.');
+    if (action.status !== 'pending' && action.status !== 'expired') throw new BadRequestException('This authorization is no longer waiting for input.');
     await this.closeSession(actionId);
     if (action.type === 'wechat_login') {
       const [publication] = await this.db.select().from(wechatPublications).where(eq(wechatPublications.nodeRunId, action.nodeRunId)).limit(1);
@@ -136,7 +138,7 @@ export class WechatOfficialAccountService {
       await this.extendPendingAction(actionId, expiresAt);
       return expiresAt;
     }
-    this.assertAccountAvailable(actionId);
+    await this.assertAccountAvailable(actionId);
 
     // Launch before taking over, so a host that cannot open a login browser
     // leaves the existing QR session untouched instead of stranding the Run.
@@ -144,6 +146,7 @@ export class WechatOfficialAccountService {
     try {
       session = await this.openLoginBrowser();
     } catch (error) {
+      if (!this.sessions.has(actionId)) await this.closeSession(actionId);
       throw new BadRequestException(`Unable to open the WeChat Official Account login browser: ${errorMessage(error)}`);
     }
     await this.closeSession(actionId);
@@ -157,7 +160,8 @@ export class WechatOfficialAccountService {
       // steering the panels here would fight their own clicks.
       await session.page.bringToFront().catch(() => undefined);
       await this.extendPendingAction(actionId, expiresAt);
-      void this.monitorLogin(actionId, publication.accountId, session, expiresAt, true);
+      session.expiresAt = expiresAt.getTime();
+      this.watchLogin(actionId, publication.accountId, session, expiresAt, true);
       return expiresAt;
     } catch (error) {
       await this.closeSession(actionId);
@@ -172,7 +176,7 @@ export class WechatOfficialAccountService {
   }
 
   async disconnect(): Promise<WechatOfficialAccountView> {
-    if (this.activeActionId) await this.closeSession(this.activeActionId);
+    if (this.activeActionId) await this.cancel(this.activeActionId);
     await this.db.update(wechatOfficialAccounts).set({ status: 'disconnected', encryptedStorageState: null, qrCode: null, qrExpiresAt: null, lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, WECHAT_OFFICIAL_ACCOUNT_ID));
     return this.getAccount();
   }
@@ -192,25 +196,37 @@ export class WechatOfficialAccountService {
   }
 
   async cancel(actionId: string): Promise<void> {
-    await this.closeSession(actionId);
+    const [action] = await this.db.select().from(workflowPendingActions).where(eq(workflowPendingActions.id, actionId)).limit(1);
+    const [publication] = await this.db.select().from(wechatPublications).where(eq(wechatPublications.nodeRunId, action?.nodeRunId ?? '')).limit(1);
+    await this.expire(actionId, action?.type === 'wechat_login' ? publication?.accountId : undefined);
+  }
+
+  hasSession(actionId: string): boolean {
+    const session = this.sessions.get(actionId);
+    return !!session && session.browser.isConnected() && !session.page.isClosed() && (!session.expiresAt || session.expiresAt > Date.now());
   }
 
   private async startLogin(actionId: string, accountId: string, waitForPendingAction = false): Promise<PendingNodeExecutionResult['pendingAction']> {
-    this.assertAccountAvailable(actionId);
+    const action = this.db.select().from(workflowPendingActions).where(eq(workflowPendingActions.id, actionId)).get();
+    if (this.hasSession(actionId) && action?.status === 'pending' && action.qrCode && action.expiresAt && action.expiresAt.getTime() > Date.now()) {
+      return { id: action.id, type: action.type, title: action.title, description: action.description, qrCode: action.qrCode, expiresAt: action.expiresAt };
+    }
+    if (this.sessions.has(actionId)) await this.expire(actionId, accountId);
+    await this.assertAccountAvailable(actionId);
     // Clear the error left by an earlier attempt up front, so a transient
     // capture failure cannot leave the account reading as broken once a new
     // attempt is under way.
-    await this.resetAccountForLogin(accountId);
-    const session = await this.createSession();
-    this.sessions.set(actionId, session);
-    this.activeActionId = actionId;
     try {
+      await this.resetAccountForLogin(accountId);
+      const session = await this.createSession();
+      this.sessions.set(actionId, session);
       await session.page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
       await showScanLogin(session.page);
       const qrCode = await captureLoginQrCode(session.page);
       const expiresAt = new Date(Date.now() + QR_LIFETIME_MS);
+      session.expiresAt = expiresAt.getTime();
       await this.db.update(wechatOfficialAccounts).set({ status: 'qr_pending', qrCode, qrExpiresAt: expiresAt, lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
-      void this.monitorLogin(actionId, accountId, session, expiresAt, waitForPendingAction);
+      this.watchLogin(actionId, accountId, session, expiresAt, waitForPendingAction);
       return { id: actionId, type: 'wechat_login', title: 'Scan to sign in to WeChat Official Account', description: 'Use the account administrator WeChat app to scan this QR code. The Workflow will resume automatically.', qrCode, expiresAt };
     } catch (error) {
       await this.failAccount(accountId, error);
@@ -220,8 +236,8 @@ export class WechatOfficialAccountService {
   }
 
   private async compose(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string, signal: AbortSignal, inlineImages: GeneratedInlineImage[] = [], coverPath?: string): Promise<NodeExecutionResult> {
-    this.assertAccountAvailable(actionId);
-    const session = await this.createSession(encryptedStorageState);
+    await this.assertAccountAvailable(actionId);
+    const session = await this.createActionSession(actionId, encryptedStorageState);
     this.sessions.set(actionId, session);
     this.activeActionId = actionId;
     try {
@@ -271,8 +287,8 @@ export class WechatOfficialAccountService {
     const actionId = `wechat_revision_${input.revisionId}`;
     const account = await this.getAccountRow(publication.accountId);
     if (!account.encryptedStorageState) throw new DraftRevisionError('failed', 'The WeChat Official Account is not signed in. Sign in from the publishing Agent configuration first.');
-    this.assertAccountAvailable(actionId);
-    const session = await this.createSession(account.encryptedStorageState);
+    await this.assertAccountAvailable(actionId);
+    const session = await this.createActionSession(actionId, account.encryptedStorageState);
     this.sessions.set(actionId, session);
     this.activeActionId = actionId;
     const { page } = session;
@@ -389,8 +405,8 @@ export class WechatOfficialAccountService {
   }
 
   private async openDraftForConfirmation(actionId: string, publication: typeof wechatPublications.$inferSelect, encryptedStorageState: string): Promise<PendingNodeExecutionResult['pendingAction']> {
-    this.assertAccountAvailable(actionId);
-    const session = await this.createSession(encryptedStorageState);
+    await this.assertAccountAvailable(actionId);
+    const session = await this.createActionSession(actionId, encryptedStorageState);
     this.sessions.set(actionId, session);
     this.activeActionId = actionId;
     try {
@@ -431,8 +447,9 @@ export class WechatOfficialAccountService {
     await delay(2_000);
     const qrCode = await captureQrCode(session.page);
     const expiresAt = new Date(Date.now() + QR_LIFETIME_MS);
+    session.expiresAt = expiresAt.getTime();
     await this.db.update(wechatPublications).set({ status: 'confirmation_pending', updatedAt: new Date() }).where(and(eq(wechatPublications.id, publication.id), ne(wechatPublications.status, 'published')));
-    void this.monitorPublish(actionId, publication.id, session, expiresAt);
+    void this.monitorPublish(actionId, publication.id, session, expiresAt).catch((error: unknown) => this.monitorFailed(actionId, session, error));
     return { id: actionId, type: 'wechat_publish_confirmation', title: 'Confirm WeChat publication', description: 'Scan with the account administrator WeChat app to confirm publication. The Workflow will resume automatically.', qrCode, expiresAt };
   }
 
@@ -441,14 +458,16 @@ export class WechatOfficialAccountService {
     let lastDiagnostics = '';
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
-      if (Date.now() >= expiresAt.getTime()) break;
+      if (this.sessions.get(actionId) !== session) return;
+      if (Date.now() >= (session.expiresAt ?? expiresAt.getTime())) break;
       if (waitForPendingAction) {
         const actionStatus = await this.getPendingActionStatus(actionId);
         if (!actionStatus || actionStatus === 'expired') continue;
-        if (actionStatus !== 'pending') return;
+        if (actionStatus !== 'pending') { await this.expire(actionId, accountId); return; }
       }
       if (await isLoginConfirmed(session.context)) {
         const storageState = await session.context.storageState();
+        if (this.sessions.get(actionId) !== session) return;
         await this.db.update(wechatOfficialAccounts).set({ status: 'connected', encryptedStorageState: encryptSecret(JSON.stringify(storageState)), qrCode: null, qrExpiresAt: null, lastVerifiedAt: new Date(), lastError: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
         if (waitForPendingAction) await this.restorePendingActionForCompletion(actionId);
         await this.closeSession(actionId);
@@ -477,11 +496,13 @@ export class WechatOfficialAccountService {
   private async monitorPublish(actionId: string, publicationId: string, session: BrowserSession, expiresAt: Date): Promise<void> {
     while (this.sessions.get(actionId) === session) {
       await delay(1_000);
+      if (this.sessions.get(actionId) !== session) return;
       if (Date.now() >= expiresAt.getTime()) break;
       const actionStatus = await this.getPendingActionStatus(actionId);
       if (!actionStatus || actionStatus === 'expired') continue;
-      if (actionStatus !== 'pending') return;
+      if (actionStatus !== 'pending') { await this.expire(actionId); return; }
       const publishedUrl = await detectPublishedUrl(session.page);
+      if (this.sessions.get(actionId) !== session) return;
       if (publishedUrl) {
         await this.db.update(wechatPublications).set({ status: 'published', publishedUrl, lastError: null, updatedAt: new Date() }).where(eq(wechatPublications.id, publicationId));
         await this.closeSession(actionId);
@@ -503,17 +524,36 @@ export class WechatOfficialAccountService {
   }
 
   private async expire(actionId: string, accountId?: string): Promise<void> {
+    // Clear rows before yielding to browser.close; an old monitor must never
+    // erase the QR belonging to a newly acquired session.
+    if (accountId && this.activeActionId === actionId) this.db.update(wechatOfficialAccounts).set({ status: 'disconnected', qrCode: null, qrExpiresAt: null, updatedAt: new Date() }).where(and(eq(wechatOfficialAccounts.id, accountId), ne(wechatOfficialAccounts.status, 'connected'))).run();
+    this.db.update(workflowPendingActions).set({ status: 'expired', qrCode: null, updatedAt: new Date() }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending'))).run();
     await this.closeSession(actionId);
-    if (accountId) await this.db.update(wechatOfficialAccounts).set({ status: 'disconnected', qrCode: null, qrExpiresAt: null, updatedAt: new Date() }).where(eq(wechatOfficialAccounts.id, accountId));
-    await this.db.update(workflowPendingActions).set({ status: 'expired', qrCode: null, updatedAt: new Date() }).where(and(eq(workflowPendingActions.id, actionId), eq(workflowPendingActions.status, 'pending')));
+  }
+
+  private watchLogin(actionId: string, accountId: string, session: BrowserSession, expiresAt: Date, waiting: boolean): void {
+    void this.monitorLogin(actionId, accountId, session, expiresAt, waiting).catch((error: unknown) => this.monitorFailed(actionId, session, error, accountId));
+  }
+
+  private async monitorFailed(actionId: string, session: BrowserSession, error: unknown, accountId?: string): Promise<void> {
+    if (this.sessions.get(actionId) !== session) return;
+    this.logger.warn(`WeChat authorization ${actionId} stopped: ${errorMessage(error)}`);
+    await this.expire(actionId, accountId);
   }
 
   private async createSession(encryptedStorageState?: string): Promise<BrowserSession> {
     const headless = process.env.WECHAT_HEADED !== '1';
     const browser = await chromium.launch({ headless });
-    const context = await browser.newContext(encryptedStorageState ? { storageState: JSON.parse(decryptSecret(encryptedStorageState)) } : undefined);
-    const page = await context.newPage();
-    return { browser, context, page, headed: !headless };
+    try {
+      const context = await browser.newContext(encryptedStorageState ? { storageState: JSON.parse(decryptSecret(encryptedStorageState)) } : undefined);
+      const page = await context.newPage();
+      return { browser, context, page, headed: !headless };
+    } catch (error) { await browser.close().catch(() => undefined); throw error; }
+  }
+
+  private async createActionSession(actionId: string, encryptedStorageState?: string): Promise<BrowserSession> {
+    try { return await this.createSession(encryptedStorageState); }
+    catch (error) { await this.closeSession(actionId); throw error; }
   }
 
   /**
@@ -566,6 +606,8 @@ export class WechatOfficialAccountService {
 
   /** Keep a login the user is still working through from reading as expired. */
   private async extendPendingAction(actionId: string, expiresAt: Date): Promise<void> {
+    const session = this.sessions.get(actionId);
+    if (session) session.expiresAt = expiresAt.getTime();
     await this.db.update(workflowPendingActions).set({ status: 'pending', expiresAt, updatedAt: new Date() })
       .where(and(eq(workflowPendingActions.id, actionId), inArray(workflowPendingActions.status, ['pending', 'expired'])));
   }
@@ -586,8 +628,22 @@ export class WechatOfficialAccountService {
       .where(and(eq(wechatOfficialAccounts.id, accountId), ne(wechatOfficialAccounts.status, 'connected')));
   }
 
-  private assertAccountAvailable(actionId: string): void {
+  private async assertAccountAvailable(actionId: string): Promise<void> {
+    const previousId = this.activeActionId;
+    if (previousId && previousId !== actionId) {
+      const session = this.sessions.get(previousId);
+      const action = this.db.select().from(workflowPendingActions).where(eq(workflowPendingActions.id, previousId)).get();
+      const stale = (!session && this.reservationExpiresAt <= Date.now()) || (session?.expiresAt !== undefined && session.expiresAt <= Date.now()) || (session && (!session.browser.isConnected() || session.page.isClosed()))
+        || (action && (action.status !== 'pending' || (action.expiresAt && action.expiresAt.getTime() <= Date.now())));
+      if (stale) {
+        const publication = action ? this.db.select().from(wechatPublications).where(eq(wechatPublications.nodeRunId, action.nodeRunId)).get() : undefined;
+        await this.expire(previousId, action?.type === 'wechat_login' ? publication?.accountId : undefined);
+      }
+    }
     if (this.activeActionId && this.activeActionId !== actionId) throw new BadRequestException('The WeChat Official Account is already handling another action.');
+    // Reserve before browser launch yields, so two new actions cannot both pass.
+    this.activeActionId = actionId;
+    this.reservationExpiresAt = Date.now() + BROWSER_LAUNCH_BUDGET_MS;
   }
 
   private async closeSession(actionId: string): Promise<void> {

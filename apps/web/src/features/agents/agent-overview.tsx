@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/error-state';
 import { formatTokenCount } from '@/i18n/format';
 import { useLocale } from '@/components/locale-provider';
 import { cn } from '@/lib/utils';
+import { StreamingMarkdown } from '@/components/ai/streaming-markdown';
 
 function RunStatus({ status }: { status: AgentRunView['status'] }) {
   const { t } = useTranslation('agents');
@@ -29,6 +30,25 @@ function CurrentActivity({ run }: { run: AgentRunView }) {
   const { t } = useTranslation('agents');
   if (!['running', 'waiting_for_input'].includes(run.status)) return null;
   return <p className="text-sm text-muted-foreground">{run.status === 'waiting_for_input' ? t('statusLabels.waiting_for_input') : run.currentActivity?.phase === 'tool' ? t('currentTool', { tool: run.currentActivity.toolName }) : t('currentModel')}</p>;
+}
+
+function EngineRunActivity({ run }: { run: AgentRunView }) {
+  const { t, i18n } = useTranslation('agents');
+  if (run.runtime !== 'codex' && run.runtime !== 'claude') return null;
+  const activities = run.activities ?? [];
+  const output = run.output.trim();
+  const outputRecorded = activities.some((activity) => activity.kind === 'message' && (output === activity.text.trim() || output.endsWith(`\n\n${activity.text.trim()}`)));
+  if (!activities.length && !output) return null;
+  return <section className="min-w-0 space-y-3" aria-label={t('engineActivity')}>
+    <h4 className="text-xs font-medium text-muted-foreground">{t('engineActivity')}</h4>
+    {activities.map((activity) => activity.kind === 'message'
+      ? <StreamingMarkdown key={activity.id} content={activity.text} />
+      : <div key={activity.id} className="min-w-0 rounded-md border border-border px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{i18n.exists(`agents:engineTools.${activity.toolName}`) ? t(`engineTools.${activity.toolName}`, { defaultValue: activity.toolName }) : activity.toolName}</span><span className={activity.status === 'failed' ? 'text-danger' : 'text-muted-foreground'}>{activity.status === 'interrupted' ? t('activityInterrupted') : t(`statusLabels.${activity.status}`)}</span></div>
+        {activity.summary ? <p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono leading-5 text-muted-foreground">{activity.summary}</p> : null}
+      </div>)}
+    {output && !outputRecorded ? <StreamingMarkdown content={run.output} streaming={run.status === 'running'} /> : null}
+  </section>;
 }
 
 function TokenUsage({ detail }: { detail: AgentRunDetailView }) {
@@ -56,9 +76,9 @@ export function AgentOverview({ agent, initialRunId, onConfigure }: { agent: Age
   const { t, i18n } = useTranslation('agents');
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(initialRunId ?? null);
-  const history = useQuery({ queryKey: ['agent-history', agent.id, offset], queryFn: () => api.agentHistory(agent.id, offset), refetchInterval: 5000 });
+  const history = useQuery({ queryKey: ['agent-history', agent.id, offset], queryFn: () => api.agentHistory(agent.id, offset), refetchInterval: 15_000, refetchIntervalInBackground: false });
   const runId = selectedId ?? history.data?.items[0]?.id;
-  const detail = useQuery({ queryKey: ['agent-run', agent.id, runId], queryFn: () => api.agentRun(agent.id, runId!), enabled: !!runId, refetchInterval: 2000 });
+  const detail = useQuery({ queryKey: ['agent-run', agent.id, runId], queryFn: () => api.agentRun(agent.id, runId!), enabled: !!runId, refetchInterval: (query) => query.state.data?.invocations.some((run) => ['running', 'waiting_for_input'].includes(run.status)) ? 3_000 : 30_000, refetchIntervalInBackground: false });
   const date = (value: string) => new Date(value).toLocaleString(i18n.language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   return <div className="mx-auto flex h-full min-h-0 min-w-0 w-full max-w-[1200px] flex-col overflow-hidden px-4 py-6 md:px-6">
     <WorkspaceChrome crumbs={[{ label: t('title'), to: '/agents' }, { label: agent.name }]} />
@@ -78,7 +98,7 @@ export function AgentOverview({ agent, initialRunId, onConfigure }: { agent: Age
               <div className="flex items-center justify-between gap-3"><div className="min-w-0"><CurrentActivity run={detail.data.run} /></div><div className="flex shrink-0 items-center gap-2"><CopyRunId key={detail.data.run.id} id={detail.data.run.id} /><RunStatus status={detail.data.run.status} />{!detail.data.run.parentRunId && !detail.data.run.id.startsWith('atc_') && !['running', 'waiting_for_input'].includes(detail.data.run.status) ? <Button asChild variant="secondary" size="compact"><Link to="/chat" search={{ view: 'conversation', agentId: agent.id, agentRunId: detail.data.run.id, agentExecutionId: detail.data.run.executionId }}>{t('continueInChat')}</Link></Button> : null}</div></div>
               {detail.data.run.error ? <p role="alert" className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm text-danger">{detail.data.run.error}</p> : null}
               <details key={detail.data.run.id} className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-sm font-medium">{t('task')}</summary><p className="mt-4 whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-6">{detail.data.run.task || agent.name}</p></details>
-              <section aria-labelledby="agent-invocations-heading"><h3 id="agent-invocations-heading" className="mb-3 text-sm font-medium">{t('invocations')}</h3><div className="divide-y divide-border rounded-lg border border-border">{detail.data.invocations.map((run) => <details key={run.id} open={['running', 'waiting_for_input'].includes(run.status) || undefined} className="group px-3 py-3"><summary className="cursor-pointer text-[13px]"><span className="ml-2 inline-flex max-w-full flex-wrap items-center gap-3 font-medium [overflow-wrap:anywhere]">{run.agentName}<RunStatus status={run.status} /><time className="text-xs font-normal text-muted-foreground" dateTime={run.createdAt}>{date(run.createdAt)}</time></span></summary><div className="mt-4 min-w-0 space-y-3 overflow-hidden [overflow-wrap:anywhere]"><CurrentActivity run={run} /><p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-6">{run.task}</p>{run.error ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm text-danger">{run.error}</p> : null}</div></details>)}</div></section>
+              <section aria-labelledby="agent-invocations-heading"><h3 id="agent-invocations-heading" className="mb-3 text-sm font-medium">{t('invocations')}</h3><div className="divide-y divide-border rounded-lg border border-border">{detail.data.invocations.map((run) => <details key={run.id} open={['running', 'waiting_for_input'].includes(run.status) || (run.id === detail.data.run.id && (run.runtime === 'codex' || run.runtime === 'claude')) || undefined} className="group px-3 py-3"><summary className="cursor-pointer text-[13px]"><span className="ml-2 inline-flex max-w-full flex-wrap items-center gap-3 font-medium [overflow-wrap:anywhere]">{run.agentName}<RunStatus status={run.status} /><time className="text-xs font-normal text-muted-foreground" dateTime={run.createdAt}>{date(run.createdAt)}</time></span></summary><div className="mt-4 min-w-0 space-y-3 overflow-hidden [overflow-wrap:anywhere]"><CurrentActivity run={run} /><p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-6">{run.task}</p>{run.error ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-sm text-danger">{run.error}</p> : null}<EngineRunActivity run={run} /></div></details>)}</div></section>
               <section aria-labelledby="agent-outputs-heading"><h3 id="agent-outputs-heading" className="mb-3 text-sm font-medium">{t('outputs')}</h3>{detail.data.artifacts.length ? <ul className="mb-4 space-y-2">{detail.data.artifacts.map((artifact) => <li key={artifact.id}><a href={`/api/artifact-previews/${encodeURIComponent(artifact.id)}/open`} target="_blank" rel="noopener noreferrer" className="text-sm text-brand hover:underline">{artifact.name}</a></li>)}</ul> : null}{!detail.data.artifacts.length ? <p className="text-[13px] text-muted-foreground">{t('noOutputs')}</p> : null}</section>
               <section aria-labelledby="agent-usage-heading"><h3 id="agent-usage-heading" className="mb-3 text-sm font-medium">{t('usage')}</h3>
                 <TokenUsage detail={detail.data} />

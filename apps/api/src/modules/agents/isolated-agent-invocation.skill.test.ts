@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 // test asserts real prompt/tool composition instead of a reimplementation.
 const gateway = vi.hoisted(() => ({ runWorkflowAgent: vi.fn() }));
 
-vi.mock('@worklite/model-gateway', () => ({
+vi.mock('@worklite/model-gateway', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@worklite/model-gateway')>()),
   createModelGateway: () => ({ runWorkflowAgent: gateway.runWorkflowAgent }),
 }));
 

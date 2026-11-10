@@ -67,8 +67,15 @@ export class ProjectExecutorService {
 }
 
 async function prepare(directory: string, request: ProjectExecutorRequest): Promise<PreparedProjectExecution> {
+  const chatRuntime = request.owner === 'chat' && Boolean(request.runtimeSession);
   let skillRoot: string | undefined;
   let pluginDirectory: string | undefined;
+  // A durable session must forget deselected files, including when the new selection is empty.
+  await rm(join(directory, 'plugin'), { recursive: true, force: true });
+  if (chatRuntime) {
+    for (const root of ['.agents/skills', '.claude/skills']) await rm(join(directory, root), { recursive: true, force: true });
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) await writeInside(directory, name, request.systemPrompt);
+  }
   if (request.skills.length > 0) {
     pluginDirectory = join(directory, 'plugin');
     skillRoot = join(pluginDirectory, 'skills');
@@ -78,6 +85,10 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
       for (const file of skill.files) {
         const content = file.path === 'SKILL.md' ? withSkillFrontmatter(slug, skill, file.content) : file.content;
         await writeInside(join(skillRoot, slug), file.path, content);
+        if (chatRuntime) {
+          await writeInside(join(directory, '.agents/skills', slug), file.path, content);
+          await writeInside(join(directory, '.claude/skills', slug), file.path, content);
+        }
       }
     }
     if (request.launch.executor === 'claude') {
@@ -99,8 +110,8 @@ async function prepare(directory: string, request: ProjectExecutorRequest): Prom
   }
   return {
     directory,
-    skillRoot,
-    pluginDirectory,
+    skillRoot: chatRuntime && skillRoot ? join(directory, '.agents/skills') : skillRoot,
+    pluginDirectory: chatRuntime ? undefined : pluginDirectory,
     systemPrompt: [
       request.systemPrompt.trim(),
       references.length ? `Pinned read-only process reference files:\n${references.join('\n')}` : '',

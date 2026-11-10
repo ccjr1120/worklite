@@ -1,4 +1,5 @@
-import { resolveWorkflowNodeCapability } from '@worklite/workflow-engine';
+import { validateModelParameters } from '@worklite/contracts';
+import { validateAgentCapabilities } from './agent-capability-validation';
 import { BadRequestException, Logger } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
 import { parseAgentRuntime } from './agent-runtime.configuration';
 import { parse, stringify, YAMLParseError } from 'yaml';
-import { agents, agentSkills, agentMcpServers, mcpServers, scheduledAgentTasks, skills, skillFiles, workspaces, type Database } from '@worklite/db';
+import { migrateCodexConfiguration, codexProviderMigrationState, agents, agentSkills, agentMcpServers, mcpServers, scheduledAgentTasks, skills, skillFiles, workspaces, type Database } from '@worklite/db';
 
 export type AgentFileTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type AgentRow = typeof agents.$inferSelect;
@@ -54,6 +55,7 @@ export class AgentFileStore {
 
   refresh(workspaceId: string, sourceRoot = this.workspaceRoot(workspaceId), project = true): AgentFileEntry[] {
     const found: AgentFileEntry[] = [];
+    const codexMigration = codexProviderMigrationState(this.db.$client);
     const root = sourceRoot;
     const visit = (base: string, parentId: string | null, depth: number, names?: string[]) => {
       if (!existsSync(base)) return;
@@ -65,20 +67,16 @@ export class AgentFileStore {
         ensureDirectory(directory);
         if (!existsSync(join(directory, 'AGENT.md'))) throw new BadRequestException(`Missing AGENT.md in ${directory}.`);
         const { config, body } = document(join(directory, 'AGENT.md'));
+        if (migrateCodexConfiguration(config, codexMigration.retired, codexMigration.active.map((provider) => provider.name))) writeDocument(join(directory, 'AGENT.md'), config, body);
         const id = requiredString(config.id, 'Agent id');
         const runtime = parseAgentRuntime(config.runtime);
         // Older publishers emitted empty scaffolding for every runtime. Keep it
         // readable, while all actual tools and children remain native-only.
-        if (runtime.kind !== 'native' && ['tools', 'subagents'].some((name) => existsSync(join(directory, name)) && readdirSync(join(directory, name)).length > 0)) throw new BadRequestException(`An execution adapter cannot own tools/ or subagents/ contents: ${directory}.`);
         const collaboration = { ...record(config.collaboration), subAgentIds: [] as string[], capabilities: record(config.collaboration).capabilities ?? [] } as NonNullable<AgentRow['collaboration']>;
         if (record(config.collaboration).subAgentIds !== undefined || record(config.collaboration).privateTools !== undefined) throw new BadRequestException('Declare sub-Agents in subagents/ and private tools in tools/, not AGENT.md.');
-        if (!Array.isArray(collaboration.capabilities)) throw new BadRequestException('Agent capabilities must be an array.');
-        const capabilityIds = new Set<string>();
-        for (const capability of collaboration.capabilities) {
-          if (!capability || typeof capability.id !== 'string' || !capability.id.trim() || capabilityIds.has(capability.id) || !capability.config || typeof capability.config !== 'object' || Array.isArray(capability.config)) throw new BadRequestException(`Invalid or duplicate Agent capability in ${join(directory, 'AGENT.md')}.`);
-          if (!resolveWorkflowNodeCapability(capability.type, capability.typeVersion)) throw new BadRequestException(`Unsupported Agent capability ${capability.type}@${capability.typeVersion} in ${join(directory, 'AGENT.md')}. Update the API to a version supporting this capability.`);
-          capabilityIds.add(capability.id);
-        }
+        if (collaboration.modelParameters != null && (typeof collaboration.modelParameters !== 'object' || Array.isArray(collaboration.modelParameters))) throw new BadRequestException('Model parameter selections must be an object.');
+        for (const value of Object.values(collaboration.modelParameters ?? {})) validateModelParameters(value);
+        validateAgentCapabilities(collaboration.capabilities, join(directory, 'AGENT.md'));
         for (const key of ['publicModels', 'builtinToolNames', 'requiredSkillIds', 'outputContract', 'allowEmptyOutputKeys'] as const) if (collaboration[key] !== undefined) stringArray(collaboration[key], key);
         if (collaboration.builtinToolNames?.some((name) => !['bash', 'read', 'write', 'glob', 'grep'].includes(name))) throw new BadRequestException('Invalid built-in tool name.');
         if (collaboration.outputFormat !== undefined && !['text', 'json'].includes(collaboration.outputFormat)) throw new BadRequestException('Invalid Agent outputFormat.');
@@ -87,10 +85,9 @@ export class AgentFileStore {
         for (const tool of privateTools) { const handler = tool.handler; if (handler.kind === 'capability' && !collaboration.capabilities.some((item) => item.id === handler.capabilityId)) throw new BadRequestException('Private tool capability must belong to its Agent.'); }
         if (privateTools.length) collaboration.privateTools = privateTools;
         const assignedSkills = readSkills(join(directory, 'skills'), id);
-        if (runtime.kind !== 'native' && (privateTools.length || collaboration.capabilities.length || existsSync(join(directory, 'subagents')) && readdirSync(join(directory, 'subagents')).some((name) => !name.startsWith('.')))) throw new BadRequestException('An execution adapter cannot own sub-Agents or private capability tools.');
         const previous = this.db.select().from(agents).where(eq(agents.id, id)).get();
         if (previous && (previous.workspaceId !== workspaceId || previous.kind !== 'custom')) throw new BadRequestException('An Agent file id conflicts with an existing workspace or system Agent.');
-        const agent: AgentRow = { id, workspaceId, kind: 'custom', name: requiredString(config.name, 'Agent name'), responsibility: optionalString(config.responsibility, ''), model: optionalString(config.model, ''), providerId: config.providerId == null ? null : requiredString(config.providerId, 'providerId'), systemPrompt: body, runtime: runtime as AgentRow['runtime'], collaboration, createdAt: previous?.createdAt ?? new Date(), updatedAt: previous?.updatedAt ?? new Date() };
+        const agent: AgentRow = { id, workspaceId, kind: 'custom', name: requiredString(config.name, 'Agent name'), responsibility: optionalString(config.responsibility, ''), model: optionalString(config.model, ''), modelParameters: validateModelParameters(config.modelParameters), providerId: config.providerId == null ? null : requiredString(config.providerId, 'providerId'), systemPrompt: body, runtime: runtime as AgentRow['runtime'], collaboration, createdAt: previous?.createdAt ?? new Date(), updatedAt: previous?.updatedAt ?? new Date() };
         const entry = { agent, directory, parentId, skills: assignedSkills, serverIds: stringArray(config.mcpServerIds ?? [], 'mcpServerIds') };
         found.push(entry);
         visit(join(directory, 'subagents'), id, depth + 1);
@@ -277,9 +274,9 @@ export class AgentFileStore {
       }
       const { subAgentIds: _children, privateTools, ...collaboration } = row.collaboration ?? { subAgentIds: [], capabilities: [] };
       const serverIds = this.db.select().from(agentMcpServers).where(eq(agentMcpServers.agentId, row.id)).all().map((item) => item.mcpServerId);
-      writeDocument(join(directory, 'AGENT.md'), { id: row.id, name: row.name, responsibility: row.responsibility, runtime: row.runtime, providerId: row.providerId, model: row.model, mcpServerIds: serverIds, collaboration }, row.systemPrompt);
+      writeDocument(join(directory, 'AGENT.md'), { id: row.id, name: row.name, responsibility: row.responsibility, runtime: row.runtime, providerId: row.providerId, model: row.model, modelParameters: row.modelParameters ?? {}, mcpServerIds: serverIds, collaboration }, row.systemPrompt);
       mkdirSync(join(directory, 'skills'), { mode: 0o700 });
-      if (row.runtime.kind === 'native') mkdirSync(join(directory, 'tools'), { mode: 0o700 });
+      if (row.runtime.kind === 'native' || privateTools?.length) mkdirSync(join(directory, 'tools'), { mode: 0o700 });
       if (old && existsSync(join(old.directory, 'tools'))) for (const name of readdirSync(join(old.directory, 'tools'))) {
         if (/\.ya?ml$/.test(name)) continue;
         const source = join(old.directory, 'tools', name); ensureSafeTree(source);
@@ -296,7 +293,7 @@ export class AgentFileStore {
         writeDocument(join(skillDirectory, 'SKILL.md'), { ...original.config, id: skill.id, name: skill.name, version: skill.version }, original.body);
       }
       for (const tool of privateTools ?? []) writeFileSync(join(directory, 'tools', `${slug(tool.name)}.yaml`), stringify(tool), { mode: 0o600 });
-      if (row.runtime.kind === 'native') mkdirSync(join(directory, 'subagents'), { mode: 0o700 });
+      if (row.runtime.kind === 'native' || row.collaboration?.subAgentIds.length) mkdirSync(join(directory, 'subagents'), { mode: 0o700 });
       for (const child of row.collaboration?.subAgentIds ?? []) write(byId.get(child)!, join(directory, 'subagents'), depth + 1);
     };
     let moved = false;
@@ -373,4 +370,4 @@ function readTools(root: string): NonNullable<AgentRow['collaboration']>['privat
   }
   return tools as NonNullable<AgentRow['collaboration']>['privateTools'] & object;
 }
-function signature(row: AgentRow) { return JSON.stringify([row.id, row.workspaceId, row.kind, row.name, row.responsibility, row.model, row.providerId, row.systemPrompt, row.runtime, row.collaboration]); }
+function signature(row: AgentRow) { return JSON.stringify([row.id, row.workspaceId, row.kind, row.name, row.responsibility, row.model, row.modelParameters, row.providerId, row.systemPrompt, row.runtime, row.collaboration]); }

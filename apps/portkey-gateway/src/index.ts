@@ -1,3 +1,4 @@
+import { modelRequestParameters, type ModelParameters } from '@worklite/contracts';
 /**
  * Portkey AI Gateway
  *
@@ -294,15 +295,18 @@ const parseResponsesTestOutput = (payload: ResponsesTestPayload): string => {
 app.post('/worklite/providers/:providerId/test', async (c) => {
   const provider = await getProvider(c.req.param('providerId'));
   if (!provider) return c.json({ message: 'Model provider not found.' }, 404);
-  const input = await c.req.json().catch(() => null) as { model?: unknown } | null;
+  const input = await c.req.json().catch(() => null) as { model?: unknown; modelParameters?: ModelParameters } | null;
   const model = typeof input?.model === 'string' ? input.model.trim() : '';
   if (!model) return c.json({ message: 'Select a model before testing this provider.' }, 400);
   if (!provider.models.includes(model)) return c.json({ message: 'The selected model is not configured for this provider.' }, 400);
+  let parameters: Record<string, unknown>;
+  try { parameters = modelRequestParameters(provider.protocol, input?.modelParameters); }
+  catch (error) { return c.json({ message: error instanceof Error ? error.message : 'Invalid model parameters.' }, 400); }
   if (isSystemOneProtocol(provider)) {
     // The fixed chat prompt has no representation in this contract, so the test
     // sends one minimal typed question instead.
     const requestLogId = `glog_${crypto.randomUUID()}`;
-    const result = await systemOneTest(provider, model, requestLogId);
+    const result = await systemOneTest(provider, model, requestLogId, parameters);
     if (!result.ok) return c.json({ message: result.message, requestLogId, protocol: 'typesafe/systemone', testInput: result.input }, result.status as 400);
     return c.json({ connection: 'connected', protocol: 'typesafe/systemone', model, input: result.input, output: result.output, traceId: crypto.randomUUID() });
   }
@@ -333,7 +337,7 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
     : isResponses
       ? { model, input: prompt, max_output_tokens: 1024 }
       : { model, messages: [{ role: 'user', content: prompt }], max_tokens: 32 };
-  const testRequest = new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify(body) });
+  const testRequest = new Request(new URL(path, c.req.url), { method: 'POST', headers, body: JSON.stringify({ ...body, ...parameters }) });
   // A provider test already has an explicit provider config and uses the
   // provider's bare model id. Skip the public unified-model selector, which
   // expects a providerName/modelId pair and would reject this request before
@@ -348,11 +352,9 @@ app.post('/worklite/providers/:providerId/test', async (c) => {
   let payload: { choices?: Array<{ message?: { content?: string } }>; content?: Array<{ type?: string; text?: string }>; output_text?: string; output?: Array<{ type?: string; content?: unknown; summary?: unknown }> } = {};
   try { payload = JSON.parse(raw); } catch { /* Keep the empty payload when the upstream response is not JSON. */ }
   const streamedResponse = [...raw.matchAll(/"delta":"((?:\\.|[^"\\])*)"/g)].map((match) => JSON.parse(`"${match[1]}"`)).join('');
-  const response = provider.protocol === 'openai/responses'
+  const response = isResponses
     ? parseResponsesTestOutput(payload) || payload.output_text || streamedResponse
-    : isCodex
-      ? payload.output_text ?? streamedResponse
-      : isMessages
+    : isMessages
         ? payload.content?.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('') ?? ''
         : payload.choices?.[0]?.message?.content ?? '';
   return c.json({ connection: 'connected', protocol: provider.protocol, model, prompt, response, traceId: crypto.randomUUID() });

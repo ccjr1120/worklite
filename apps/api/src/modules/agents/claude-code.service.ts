@@ -1,3 +1,4 @@
+import { validateModelParameters } from '@worklite/contracts';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { mkdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -43,10 +44,15 @@ export class ClaudeCodeService implements AgentRuntimeAdapter {
     request.signal.throwIfAborted();
     const launch = request.launch as ClaudeLaunch;
     const model = request.model ?? launch.model;
+    const parameters = validateModelParameters(request.modelParameters);
+    if (Object.keys(parameters.requestBody ?? {}).length) throw new BadRequestException('Claude runtime request JSON parameters require a native Agent.');
+    if (parameters.reasoningEffort && !['low', 'medium', 'high', 'xhigh', 'max'].includes(parameters.reasoningEffort)) throw new BadRequestException('Unsupported Claude reasoning effort.');
+    if (parameters.serviceTier && !['default', 'fast'].includes(parameters.serviceTier)) throw new BadRequestException('Claude speed must be default or fast.');
     const mcpServers = await resolveClaudeMcpServers(prepared, (server) => this.mcp.discover(
       { endpoint: server.endpoint, ...(server.authToken ? { authToken: server.authToken } : {}) },
       request.signal,
     ));
+    if (request.owner === 'chat' && request.runtimeSession && prepared.mcpServers.some((server) => server.id === 'chat') && !mcpServers.config?.worklite_chat) throw new ClaudeCodeError('The Chat platform MCP server is unavailable.');
     const session = new ClaudeCodeSession(request);
     const sdkQuery = query({
       prompt: session.inputStream(),
@@ -56,6 +62,7 @@ export class ClaudeCodeService implements AgentRuntimeAdapter {
         // ordinary working style and WorkLite's own instructions are appended to it.
         systemPrompt: { type: 'preset', preset: 'claude_code', append: prepared.systemPrompt },
         ...(model ? { model } : {}),
+        ...(parameters.reasoningEffort ? { effort: parameters.reasoningEffort as 'low' | 'medium' | 'high' | 'xhigh' | 'max' } : {}),
         includePartialMessages: true,
         persistSession: Boolean(request.runtimeSession) || request.owner === 'coder',
         ...(request.runtimeSession?.resumeId ? { resume: request.runtimeSession.resumeId } : {}),
@@ -65,13 +72,13 @@ export class ClaudeCodeService implements AgentRuntimeAdapter {
         // project instructions); 'local' is the project's .claude/settings.local.json. The
         // flag-settings layer below still wins over all three for Gateway env.
         settingSources: ['user', 'project', 'local'],
-        settings: { env: await this.gatewaySettingsEnv(model, launch, request) },
+        settings: { env: await this.gatewaySettingsEnv(model, launch, request), ...(parameters.serviceTier ? { fastMode: parameters.serviceTier === 'fast' } : {}) },
         env: await isolatedEnvironment(model, launch),
         permissionMode: request.approvalPolicy === 'ask' ? 'default' : 'bypassPermissions',
         allowDangerouslySkipPermissions: request.approvalPolicy !== 'ask',
-        canUseTool: session.canUseTool,
+        ...(request.owner === 'chat' && request.runtimeSession ? {} : { canUseTool: session.canUseTool }),
         ...(mcpServers.config ? { mcpServers: mcpServers.config } : {}),
-        ...(mcpServers.disallowedTools.length ? { disallowedTools: mcpServers.disallowedTools } : {}),
+        ...((mcpServers.disallowedTools.length || (request.owner === 'chat' && Boolean(request.runtimeSession))) ? { disallowedTools: [...mcpServers.disallowedTools, ...((request.owner === 'chat' && Boolean(request.runtimeSession)) ? ['Agent', 'Task', 'TodoWrite', 'AskUserQuestion'] : [])] } : {}),
         ...(prepared.pluginDirectory ? { plugins: [{ type: 'local', path: prepared.pluginDirectory }] } : {}),
       } satisfies Options,
     });
@@ -88,7 +95,7 @@ export class ClaudeCodeService implements AgentRuntimeAdapter {
       return output;
     } finally {
       request.signal.removeEventListener('abort', cancel);
-      session.close();
+      await session.close();
     }
   }
 
@@ -148,7 +155,7 @@ export async function resolveClaudeMcpServers(
       mcpLogger.warn(`MCP server ${server.key} could not be discovered and was not injected into Claude Code: ${error instanceof Error ? error.message : 'unknown error'}`);
       continue;
     }
-    config[server.key] = { type: 'http', url: server.endpoint, ...(server.authToken ? { headers: { Authorization: `Bearer ${server.authToken}` } } : {}) };
+    config[server.key] = { type: 'http', url: server.endpoint, ...(['chat', 'agent_tools'].includes(server.id) ? { alwaysLoad: true } : {}), ...(server.authToken ? { headers: { Authorization: `Bearer ${server.authToken}` } } : {}) };
     disallowedTools.push(...tools.filter((tool) => !server.allowedTools.includes(tool.name)).map((tool) => `mcp__${server.key}__${tool.name}`));
   }
   return { config: Object.keys(config).length ? config : undefined, disallowedTools };
@@ -189,6 +196,7 @@ class ClaudeCodeSession {
   private finish!: (text: string) => void;
   private reject!: (error: unknown) => void;
   private closing = false;
+  private consumption?: Promise<void>;
   // Resolves once the one streamed input message has been yielded, so close() can end the
   // input generator without racing its own first (and only) send.
   private inputSent?: () => void;
@@ -212,7 +220,7 @@ class ClaudeCodeSession {
   }
 
   start(): void {
-    void this.consume();
+    this.consumption = this.consume();
   }
 
   private async consume(): Promise<void> {
@@ -302,11 +310,12 @@ class ClaudeCodeSession {
     this.fail(reason);
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.closing = true;
     this.inputSent?.();
     this.sdkQuery?.close();
     this.fail(new Error('The Claude Code session is closed.'));
+    await this.consumption;
   }
 
   fail(error: unknown): void {
@@ -319,7 +328,7 @@ class ClaudeCodeSession {
     let text: string;
     try { text = await this.finished; }
     finally { await this.eventQueue; }
-    if (!text.trim()) throw new Error('Claude Code returned an empty task result.');
+    if (!text.trim() && !(this.request.owner === 'chat' && this.request.runtimeSession)) throw new Error('Claude Code returned an empty task result.');
     return text.trim();
   }
 
@@ -350,7 +359,7 @@ class ClaudeCodeSession {
       for (const block of message.message.content) {
         if (block.type === 'text' && topLevel && typeof block.text === 'string') {
           this.text = block.text;
-          this.queueActivity('claude.agent_message', { itemType: 'agent_message', text: block.text });
+          this.queueActivity('claude.agent_message', { itemId: `${message.uuid}:${message.message.content.indexOf(block)}`, itemType: 'agent_message', text: block.text });
         }
         if (block.type === 'tool_use' && typeof block.id === 'string') {
           this.toolNames.set(block.id, String(block.name));
@@ -366,7 +375,7 @@ class ClaudeCodeSession {
         const result = block as { tool_use_id?: unknown; is_error?: unknown };
         if (typeof result.tool_use_id !== 'string') continue;
         const itemType = this.toolNames.get(result.tool_use_id);
-        this.queueActivity('claude.tool_completed', { itemId: result.tool_use_id, ...(itemType ? { itemType } : {}), ...(result.is_error ? { summary: 'error' } : {}) });
+        this.queueActivity('claude.tool_completed', { itemId: result.tool_use_id, ...(itemType ? { itemType } : {}), status: result.is_error ? 'failed' : 'completed' });
       }
       return;
     }

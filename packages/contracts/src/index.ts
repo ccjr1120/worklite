@@ -1,3 +1,57 @@
+/** Parameters belong to a model use site, never to a Provider's defaults. */
+export type ModelParameters = {
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  serviceTier?: 'auto' | 'default' | 'fast' | 'priority' | 'flex';
+  requestBody?: Record<string, unknown>;
+};
+
+export const MODEL_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const;
+export const MODEL_SERVICE_TIERS = ['auto', 'default', 'fast', 'priority', 'flex'] as const;
+const RESERVED = new Set(['model', 'input', 'messages', 'system', 'instructions', 'stream', 'tools', 'tool_choice', 'parallel_tool_calls', 'store', 'previous_response_id', 'conversation', 'metadata', 'state', 'questions', '__proto__', 'constructor', 'prototype']);
+
+export function validateModelParameters(value: unknown): ModelParameters {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Model parameters must be an object.');
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) if (!['reasoningEffort', 'serviceTier', 'requestBody'].includes(key)) throw new Error(`Unknown model parameter: ${key}.`);
+  if (record.reasoningEffort !== undefined && !MODEL_REASONING_EFFORTS.includes(record.reasoningEffort as never)) throw new Error('Invalid reasoning effort.');
+  if (record.serviceTier !== undefined && !MODEL_SERVICE_TIERS.includes(record.serviceTier as never)) throw new Error('Invalid service tier.');
+  if (record.requestBody !== undefined) {
+    if (!record.requestBody || typeof record.requestBody !== 'object' || Array.isArray(record.requestBody)) throw new Error('Request parameters must be a JSON object.');
+    for (const key of Object.keys(record.requestBody)) if (RESERVED.has(key)) throw new Error(`Request parameters cannot override ${key}.`);
+    if (JSON.stringify(record.requestBody).length > 16_384) throw new Error('Request parameters exceed 16 KiB.');
+  }
+  return value as ModelParameters;
+}
+
+export function modelRequestParameters(protocol: string, value?: ModelParameters | null): Record<string, unknown> {
+  const parameters = validateModelParameters(value);
+  const body = { ...parameters.requestBody };
+  const anthropic = protocol === 'anthropic/messages';
+  const openai = protocol.startsWith('openai/') || protocol === 'codex/responses';
+  if (parameters.reasoningEffort) {
+    if (anthropic) {
+      if (!['low', 'medium', 'high', 'xhigh', 'max'].includes(parameters.reasoningEffort)) throw new Error('This reasoning effort is not supported by the Anthropic protocol.');
+      body.output_config = { ...asObject(body.output_config), effort: parameters.reasoningEffort };
+    } else if (openai) {
+      if (protocol === 'openai/chat') body.reasoning_effort = parameters.reasoningEffort;
+      else body.reasoning = { ...asObject(body.reasoning), effort: parameters.reasoningEffort };
+    } else throw new Error('Select reasoning parameters in the protocol request JSON.');
+  }
+  if (parameters.serviceTier) {
+    if (anthropic) {
+      if (!['default', 'fast'].includes(parameters.serviceTier)) throw new Error('Anthropic speed must be default or fast.');
+      body.speed = parameters.serviceTier === 'fast' ? 'fast' : 'standard';
+    } else if (openai) body.service_tier = protocol === 'codex/responses' && parameters.serviceTier === 'fast' ? 'priority' : parameters.serviceTier;
+    else throw new Error('Select service parameters in the protocol request JSON.');
+  }
+  return body;
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -167,6 +221,9 @@ export type ChatConversationList = {
   nextCursor: string | null;
 };
 
+export { chatSuggestionContext } from './chat-suggestions.ts';
+export type { ChatSuggestion, ChatSuggestionResponse } from './chat-suggestions.ts';
+
 export type ChatConversationView = {
   conversation: ChatConversationSummary;
   execution: AgentExecutionView | null;
@@ -258,6 +315,7 @@ export type AgentCollaboration = {
   privateTools?: Array<{ name: string; description: string; inputSchema: Record<string, unknown>; handler: { kind: 'capability'; capabilityId: string } | { kind: 'command'; command: string; workingDirectory: string } }>;
   capabilities: Array<{ id: string; type: string; typeVersion: string; config: Record<string, unknown> }>;
   publicModels?: string[];
+  modelParameters?: Record<string, ModelParameters>;
   outputFormat?: 'text' | 'json';
   outputContract?: unknown;
   allowEmptyOutputKeys?: string[];
@@ -266,6 +324,7 @@ export type AgentCollaboration = {
 };
 
 export type AgentView = {
+  modelParameters?: ModelParameters;
   subAgents?: AgentView[];
   collaboration?: AgentCollaboration | null;
   runtime?: AgentRuntimeConfiguration;
@@ -297,6 +356,7 @@ export type AgentView = {
 };
 
 export type AgentVersionView = {
+  modelParameters?: ModelParameters;
   runtime?: AgentRuntimeConfiguration;
   id: string;
   agentId: string;
@@ -496,6 +556,10 @@ export type AgentExecutionView = {
   updatedAt: string;
 };
 
+export type AgentRunActivityView =
+  | { id: string; kind: 'message'; text: string }
+  | { id: string; kind: 'tool'; toolName: string; summary?: string; status: 'running' | 'completed' | 'failed' | 'interrupted' };
+
 /** A recorded invocation, including calls delegated from Chat or another Agent. */
 export type AgentRunView = {
   id: string;
@@ -510,6 +574,8 @@ export type AgentRunView = {
   runtime?: 'native' | 'claude' | 'codex';
   commandExecutionId?: string;
   output: string;
+  /** User-visible engine messages and tool activity, loaded for run details. */
+  activities?: AgentRunActivityView[];
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
@@ -557,6 +623,7 @@ export type AnswerAgentQuestionRequest = {
 };
 
 export type CreateAgentRequest = {
+  modelParameters?: ModelParameters;
   parentAgentId?: string;
   collaboration?: AgentCollaboration | null;
   runtime?: AgentRuntimeConfiguration;
@@ -1150,11 +1217,13 @@ export type CreateRunRequest = {
 };
 
 export type RerunWorkflowNodeRequest = {
+  modelParameters?: ModelParameters;
   modelOverride?: string;
   confirmSideEffects?: boolean;
 };
 
 export type WorkflowNodeRerunEvidence = {
+  modelParameters?: ModelParameters;
   sourceNodeRunId: string;
   requestedBy: string;
   requestedAt: string;
@@ -1430,6 +1499,7 @@ export type ModelProviderTestResult =
   };
 
 export type TestModelProviderRequest = {
+  modelParameters?: ModelParameters;
   model: string;
 };
 

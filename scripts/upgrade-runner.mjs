@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs only after an operator installation command or a server-bound Chat redeploy request.
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -227,6 +227,7 @@ async function build(root, log) {
       ['--filter', '@worklite/api', 'exec', 'nest', 'build', '--builder', 'webpack', '--webpackPath', 'webpack.config.js'],
       ['--filter', '@worklite/web', 'exec', 'vite', 'build'],
     ]) await new Promise((done, fail) => {
+      process.stderr.write(`[WorkLite] pnpm ${argv.join(' ')}\n`);
       const child = spawn('pnpm', argv, { cwd: root, env: process.env, stdio: ['ignore', log, log] });
       child.once('error', fail); child.once('exit', (code) => code === 0 ? done() : fail(new Error('Project compilation failed; see the deployment log.')));
     });
@@ -605,14 +606,18 @@ async function install(profile) {
   const runtime = { projectRoot, dataDirectory, stateDirectory, version: read(join(projectRoot, 'apps/web/package.json')).version, ports: [23390, 23391, 23392], gatewayHash: null };
   const logDirectory = join(stateDirectory, 'deployments');
   mkdirSync(logDirectory, { recursive: true });
-  const log = openSync(join(logDirectory, `${randomUUID()}.log`), 'a', 0o600);
+  const logPath = join(logDirectory, `${randomUUID()}.log`);
+  const log = openSync(logPath, 'a', 0o600);
+  process.stderr.write(`[WorkLite] Deployment log: ${logPath}\n`);
   try {
     await build(projectRoot, log);
     await freeTargetPorts(runtime);
     runtime.gateway = launchGateway(runtime, dataDirectory, runtime.ports[2], false, log);
     try {
+      process.stderr.write('[WorkLite] Waiting for Gateway readiness...\n');
       await gatewayReady(runtime.gateway);
       runtime.pid = launch(runtime, dataDirectory, runtime.ports, false, log);
+      process.stderr.write('[WorkLite] Waiting for API/Web readiness...\n');
       await ready(runtime.pid, runtime.ports, runtime.version, runtime.gateway);
       write(currentPath, runtime);
     } catch (error) {
@@ -709,13 +714,16 @@ async function deploy(profile) {
   const runtime = { projectRoot, dataDirectory, stateDirectory, version: read(join(projectRoot, 'apps/web/package.json')).version, ports: expectedPorts, gatewayHash: null };
   const logDirectory = join(stateDirectory, 'deployments');
   mkdirSync(logDirectory, { recursive: true });
-  const log = openSync(join(logDirectory, `${randomUUID()}.log`), 'a', 0o600);
+  const logPath = join(logDirectory, `${randomUUID()}.log`);
+  const log = openSync(logPath, 'a', 0o600);
+  process.stderr.write(`[WorkLite] Deployment log: ${logPath}\n`);
   let committed = false;
   try {
     await build(projectRoot, log);
 
     // Verify every existing owner before stopping any service, so a foreign listener
     // can never cause a partial stop of the recorded deployment.
+    process.stderr.write('[WorkLite] Restarting managed services...\n');
     assertCurrentOwnership(current);
     if (current.gateway) await stopGateway(current.gateway);
     if (alive(current.pid)) await stopImmediately(current);
@@ -723,8 +731,10 @@ async function deploy(profile) {
     await portsFree(expectedPorts);
 
     runtime.gateway = launchGateway(runtime, dataDirectory, runtime.ports[2], false, log);
+    process.stderr.write('[WorkLite] Waiting for Gateway readiness...\n');
     await gatewayReady(runtime.gateway);
     runtime.pid = launch(runtime, dataDirectory, runtime.ports, false, log);
+    process.stderr.write('[WorkLite] Waiting for API/Web readiness...\n');
     await ready(runtime.pid, runtime.ports, runtime.version, runtime.gateway);
 
     // current.json describes the last deployment that reached readiness.

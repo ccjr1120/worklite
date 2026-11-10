@@ -35,6 +35,13 @@ describe('ProjectExecutorService.requireModel', () => {
     await expect(service.requireModel('ws', 'codex', 'gpt-6-luna')).resolves.toBeUndefined();
   });
 
+  it('accepts codex/responses public models for the Codex engine', async () => {
+    const resources = { publicModelRuntime: async () => ({ protocol: 'codex/responses' }) };
+    const service = new ProjectExecutorService({} as never, {} as never, resources as never);
+    await expect(service.requireModel('ws', 'codex', 'codex/gpt-test')).resolves.toBeUndefined();
+    await expect(service.requireModel('ws', 'claude', 'codex/gpt-test')).rejects.toThrow('anthropic/messages');
+  });
+
   it('still validates Claude Code against the Gateway protocol', async () => {
     const resources = { publicModelRuntime: async () => ({ protocol: 'openai/chat' }) };
     const service = new ProjectExecutorService({} as never, {} as never, resources as never);

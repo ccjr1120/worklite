@@ -107,7 +107,7 @@ Agent 的 `runtime` 配置独立于 `providerId` 和 `model`。省略 `runtime` 
 
 每个会话固定 Agent 指令、运行时、目录、模型和选定资源；草稿修改只影响新会话。后续执行传入原生 session/thread ID 和新增用户消息，不重发整段业务历史。资源目录默认为 `~/.worklite/agent-sessions`，可以通过 `WORKLITE_AGENT_RUNTIME_DIR` 修改；同一会话的资源路径跨轮保持稳定。
 
-`agent_runtime_sessions`、`agent_runtime_runs`、`agent_runtime_interactions` 和 `agent_runtime_events` 分别保存映射、执行状态、交互和必要事件。活动归档只保留阶段与条目标识，不保存原始 SDK 消息或完整工具输入输出。产品 UI 使用既有消息、问题和状态，不新增执行卡片字段。
+`agent_runtime_sessions`、`agent_runtime_runs`、`agent_runtime_interactions` 和 `agent_runtime_events` 分别保存映射、执行状态、交互和必要事件。活动归档保留用户可见消息、工具名称、操作摘要与状态，不保存推理内容、原始 SDK 消息或完整工具输入输出。Agent 运行记录详情展示这些消息与执行过程，支持主 Agent 和子 Agent；事件过期后仍可查看已保存的最终回复。
 
 服务重启将丢失的运行和交互标记为中断，并将业务执行标记为失败；不会自动重放。用户检查已有操作后，可以发送新消息继续保存的原生会话。普通引擎 Agent 的失败轮次拒绝 `/retry`，避免把重试当作恢复。丢失资源目录、关闭会话或后端返回不同会话 ID 时，继续操作会明确失败。
 

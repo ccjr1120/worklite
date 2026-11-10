@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { WechatLoginView } from '@worklite/contracts';
-import { artifacts, chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
+import { agentPendingActions, artifacts, chatSubmissions, externalChats, wechatEvents, type Database } from '@worklite/db';
 import { DATABASE } from '../../../infrastructure/database.module';
 import { assertRuntimeAdmission, runtimeAdmissionClosed, runtimeWritesFrozen, upgradePhase } from '../../../infrastructure/runtime-upgrade-state';
 import { AgentExecutionsService } from '../../agents/agent-executions.service';
@@ -589,6 +589,17 @@ export class WechatService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       text = reference.dispatchNotice;
+      terminal = true;
+    } else if (reference?.kind === 'conversation' && reference.authorizationNotice) {
+      const notice = reference.authorizationNotice;
+      const action = this.db.select().from(agentPendingActions).where(and(eq(agentPendingActions.id, notice.actionId), eq(agentPendingActions.workspaceId, submission.workspaceId))).get();
+      // A delayed delivery must not send an expired or replaced QR image.
+      if (action?.status === 'pending' && action.expiresAt && action.expiresAt.getTime() > Date.now() && action.expiresAt.toISOString() === notice.expiresAt) {
+        text = `${notice.markdown}\n\n二维码有效期至 ${action.expiresAt.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' })}。`;
+      } else if (action?.status === 'completed' || action?.status === 'cancelled' || !action) {
+        await this.db.update(chatSubmissions).set({ settled: true }).where(eq(chatSubmissions.id, submission.id));
+        return;
+      } else text = `二维码已过期，可打开授权页面刷新：${notice.scanUrl}`;
       terminal = true;
     } else if (reference?.kind === 'conversation') {
       const execution = await this.executions.get(request, 'personal', CHAT_AGENT_ID, reference.executionId);

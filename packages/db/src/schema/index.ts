@@ -1,3 +1,5 @@
+import type { ModelParameters } from '@worklite/contracts';
+import { packedJson, packedText, packedEventJson } from '../packed-json';
 import { sql } from 'drizzle-orm';
 import { index, integer, primaryKey, sqliteTable, text, unique, uniqueIndex, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 
@@ -53,7 +55,7 @@ export type StoredChatTarget =
   | { kind: 'coder'; coderId: string; projectDirectory: string; role?: string }
   | { kind: 'workflow'; workflowId: string };
 export type StoredChatTaskReference =
-  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null; dispatchNotice?: string }
+  | { kind: 'conversation'; executionId: string; afterMessageId: string | null; afterSequence: number; untilMessageId?: string | null; completionStatus?: string; completionError?: string | null; dispatchNotice?: string; authorizationNotice?: { actionId: string; markdown: string; scanUrl: string; expiresAt: string | null } }
   | { kind: 'coder'; coderId: string; runId: string }
   | { kind: 'workflow'; runId: string; workflowVersionId: string }
   | { kind: 'upgrade'; jobId: string };
@@ -129,6 +131,7 @@ export type StoredAgentCollaboration = {
   privateTools?: Array<{ name: string; description: string; inputSchema: Record<string, unknown>; handler: { kind: 'capability'; capabilityId: string } | { kind: 'command'; command: string; workingDirectory: string } }>;
   capabilities: Array<{ id: string; type: string; typeVersion: string; config: Record<string, unknown> }>;
   publicModels?: string[];
+  modelParameters?: Record<string, ModelParameters>;
   outputFormat?: 'text' | 'json';
   outputContract?: unknown;
   allowEmptyOutputKeys?: string[];
@@ -144,6 +147,7 @@ export const agentFileCatalogMigrations = sqliteTable('agent_file_catalog_migrat
 });
 
 export const agents = sqliteTable('agents', {
+  modelParameters: text('model_parameters', { mode: 'json' }).$type<ModelParameters>(),
   collaboration: text('collaboration', { mode: 'json' }).$type<StoredAgentCollaboration | null>(),
   runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), kind: text('kind').$type<'system' | 'custom'>().notNull().default('custom'), name: text('name').notNull(), responsibility: text('responsibility').notNull(), model: text('model').notNull(), providerId: text('provider_id'),
@@ -151,6 +155,7 @@ export const agents = sqliteTable('agents', {
 });
 
 export const agentVersions = sqliteTable('agent_versions', {
+  modelParameters: text('model_parameters', { mode: 'json' }).$type<ModelParameters>(),
   runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'restrict' }), version: integer('version').notNull(), name: text('name').notNull(), responsibility: text('responsibility').notNull(), systemPrompt: text('system_prompt').notNull(), providerId: text('provider_id'), model: text('model').notNull(), skillIds: text('skill_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>().notNull().default([]), createdAt: timestamp('created_at'),
 }, (table) => [unique().on(table.agentId, table.version)]);
@@ -234,6 +239,7 @@ export type StoredWorkflowDefinition = {
 };
 
 export type StoredWorkflowNodeRerunEvidence = {
+  modelParameters?: ModelParameters;
   sourceNodeRunId: string;
   requestedBy: string;
   requestedAt: string;
@@ -472,12 +478,14 @@ export type StoredProjectExecutor = 'codex' | 'claude';
 
 export type StoredChatCapabilities = {
   revision: number;
-  agent: { id: string; providerId: string | null; model: string; systemPrompt: string; runtime?: StoredAgentRuntimeConfiguration };
+  agent: { id: string; providerId: string | null; model: string; modelParameters?: ModelParameters; systemPrompt: string; runtime?: StoredAgentRuntimeConfiguration; collaboration?: StoredAgentCollaboration | null };
   skills: Array<{ id: string; name: string; instructions: string; files: Array<{ path: string; content: string }> }>;
   mcpServers: Array<{ id: string; name: string; endpoint: string; authSecret: string | null; allowedTools: string[] }>;
 };
 
 export const chatConfigurations = sqliteTable('chat_bot_configurations', {
+  runtime: text('runtime', { mode: 'json' }).$type<StoredAgentRuntimeConfiguration>().notNull().default({ kind: 'native' }),
+  modelParameters: text('model_parameters', { mode: 'json' }).$type<ModelParameters>(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   revision: integer('revision').notNull(),
   extensionPrompt: text('extension_prompt').notNull().default(''),
@@ -519,14 +527,15 @@ export type StoredChatExecutionAuthorization = {
 export const agentExecutions = sqliteTable('agent_executions', {
   projectDirectory: text('project_directory'),
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),
-  capabilitySnapshot: text('capability_snapshot', { mode: 'json' }).$type<StoredChatCapabilities | null>(),
+  capabilitySnapshot: packedJson<StoredChatCapabilities | null>('capability_snapshot'),
   id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), phase: text('phase').$type<'model' | 'skill' | 'recovery'>().notNull().default('model'), errorCode: text('error_code').$type<'provider' | 'provider_request' | 'invalid_request' | 'invalid_tool_request' | 'incomplete_tool_request' | 'missing_tool_results' | 'too_many_tool_calls' | 'skill' | 'mcp' | 'restarted' | 'internal'>(), modelMessages: text('model_messages', { mode: 'json' }).$type<StoredAgentModelMessage[]>().notNull().default([]), displayMessages: text('display_messages', { mode: 'json' }).$type<StoredAgentDisplayMessage[]>().notNull().default([]), plan: text('plan', { mode: 'json' }).$type<StoredAgentPlanStep[]>().notNull().default([]), pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(), contextDropped: integer('context_dropped').notNull().default(0), error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('agent_executions_workspace_agent_updated_idx').on(table.workspaceId, table.agentId, table.updatedAt)]);
 
 export const agentExecutionEvents = sqliteTable('agent_execution_events', {
   executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
   sequence: integer('sequence').notNull(),
-  data: text('data', { mode: 'json' }).$type<unknown>().notNull(),
+  kind: text('kind').notNull().default(''),
+  data: packedEventJson('data').notNull(),
   createdAt: timestamp('created_at'),
 }, (table) => [primaryKey({ columns: [table.executionId, table.sequence] })]);
 
@@ -550,7 +559,7 @@ export type StoredChatShellCall = {
 
 export const agentToolCalls = sqliteTable('agent_tool_calls', {
   shell: text('shell', { mode: 'json' }).$type<StoredChatShellCall | null>(),
-  id: text('id').primaryKey(), executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), toolCallId: text('tool_call_id').notNull(), toolName: text('tool_name').$type<'skill_script' | 'builtin' | 'mcp'>().notNull(), workingDirectory: text('working_directory').notNull(), skillId: text('skill_id'), skillName: text('skill_name'), scriptPath: text('script_path'), mcpServerId: text('mcp_server_id'), mcpToolName: text('mcp_tool_name'), arguments: text('arguments', { mode: 'json' }).$type<string[]>().notNull().default([]), input: text('input', { mode: 'json' }).$type<unknown>(), packageFiles: text('package_files', { mode: 'json' }).$type<Array<{ path: string; content: string }>>().notNull().default([]), commandExecutionId: text('command_execution_id').references(() => commandExecutions.id, { onDelete: 'set null' }), status: text('status').$type<'running' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), output: text('output').notNull().default(''), result: text('result', { mode: 'json' }).$type<StoredWorkliteScriptResult>(), exitCode: integer('exit_code'), resultAppended: integer('result_appended', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+  id: text('id').primaryKey(), executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), agentId: text('agent_id').notNull().references(() => agents.id, { onDelete: 'cascade' }), toolCallId: text('tool_call_id').notNull(), toolName: text('tool_name').$type<'skill_script' | 'builtin' | 'mcp'>().notNull(), workingDirectory: text('working_directory').notNull(), skillId: text('skill_id'), skillName: text('skill_name'), scriptPath: text('script_path'), mcpServerId: text('mcp_server_id'), mcpToolName: text('mcp_tool_name'), arguments: text('arguments', { mode: 'json' }).$type<string[]>().notNull().default([]), input: text('input', { mode: 'json' }).$type<unknown>(), packageFiles: packedJson<Array<{ path: string; content: string }>>('package_files').notNull().default([]), commandExecutionId: text('command_execution_id').references(() => commandExecutions.id, { onDelete: 'set null' }), status: text('status').$type<'running' | 'completed' | 'failed' | 'cancelled'>().notNull().default('running'), output: packedText('output').notNull().default(''), result: text('result', { mode: 'json' }).$type<StoredWorkliteScriptResult>(), exitCode: integer('exit_code'), resultAppended: integer('result_appended', { mode: 'boolean' }).notNull().default(false), createdAt: timestamp('created_at'), finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 }, (table) => [index('agent_tool_calls_execution_idx').on(table.executionId)]);
 
 // Captured launch of a project executor. With no model, Codex launches the `codex` command and can use a
@@ -604,7 +613,7 @@ export const chatProjectTasks = sqliteTable('chat_codex_tasks', {
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   executionId: text('execution_id').notNull().references(() => agentExecutions.id, { onDelete: 'cascade' }),
   goal: text('goal').notNull(), projectDirectory: text('project_directory').notNull(), model: text('model').notNull(),
-  snapshot: text('snapshot', { mode: 'json' }).$type<StoredChatProjectTaskSnapshot>().notNull(),
+  snapshot: packedJson<StoredChatProjectTaskSnapshot>('snapshot').notNull(),
   status: text('status').$type<'running' | 'waiting_for_input' | 'waiting_for_recovery' | 'succeeded' | 'failed' | 'cancelled'>().notNull(),
   answers: text('answers', { mode: 'json' }).$type<Array<{ question: string; answer: string }>>().notNull().default([]),
   pendingQuestion: text('pending_question', { mode: 'json' }).$type<StoredAgentPendingQuestion | null>(),
@@ -994,7 +1003,7 @@ export const coderOperations = sqliteTable('coder_operations', {
 ]);
 
 export const modelProviders = sqliteTable('model_providers', {
-  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'anthropic/messages' | 'codex/responses'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
+  id: text('id').primaryKey(), workspaceId: text('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }), name: text('name').notNull(), baseURL: text('base_url'), protocol: text('protocol').$type<'openai/chat' | 'openai/responses' | 'codex/responses' | 'anthropic/messages'>().notNull().default('openai/chat'), status: text('status').$type<'connected' | 'unconfigured' | 'invalid'>().notNull().default('unconfigured'), maskedKey: text('masked_key').notNull().default(''), models: text('models', { mode: 'json' }).$type<string[]>().notNull().default([]), apiKey: text('api_key'), headers: text('headers'), updatedAt: timestamp('updated_at'),
 });
 
 export const artifacts = sqliteTable('artifacts', {
@@ -1081,6 +1090,7 @@ export const agentRuntimeRuns = sqliteTable('agent_runtime_runs', {
   id: text('id').primaryKey(),
   sessionId: text('session_id').notNull().references(() => agentRuntimeSessions.id, { onDelete: 'cascade' }),
   status: text('status').$type<'running' | 'waiting_for_input' | 'completed' | 'failed' | 'cancelled' | 'interrupted'>().notNull(),
+  usage: text('usage', { mode: 'json' }).$type<Extract<StoredAgentRuntimeEvent, { kind: 'activity' }>['usage'] | null>(),
   error: text('error'), createdAt: timestamp('created_at'), updatedAt: timestamp('updated_at'),
 }, (table) => [index('agent_runtime_runs_session_idx').on(table.sessionId)]);
 
@@ -1095,7 +1105,8 @@ export const agentRuntimeInteractions = sqliteTable('agent_runtime_interactions'
 
 export type StoredAgentRuntimeEvent =
   | { kind: 'text_delta'; delta: string }
-  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string; usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null } }
+  | { kind: 'message_stream'; messageId: string }
+  | { kind: 'activity'; phase: string; itemId?: string; itemType?: string; summary?: string; text?: string; status?: 'running' | 'completed' | 'failed'; usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null } }
   | { kind: 'question'; interactionId: string }
   | { kind: 'settled'; status: string };
 

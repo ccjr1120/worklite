@@ -1,7 +1,8 @@
+import { displayMessagesColumn, projectTaskColumns, agentExecutions, auditLogs, coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflowVersions, workflows, type Database } from '@worklite/db';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
-import { agentExecutions, auditLogs, coderRuns, chatProjectTasks, chatSubmissions, workflowRuns, workflowVersions, workflows, type Database } from '@worklite/db';
+
 import type { AgentTeamRunProgress } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { AgentTeamRuntimeService } from '../coders/coder-runtime.service';
@@ -157,7 +158,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
     return this.db.select({
       executionId: sql<string>`json_extract(${auditLogs.metadata}, '$.conversationId')`, workspaceId: auditLogs.workspaceId,
       id: agentExecutions.id, agentId: agentExecutions.agentId, status: agentExecutions.status, phase: agentExecutions.phase,
-      messages: agentExecutions.displayMessages, updatedAt: agentExecutions.updatedAt,
+      messages: displayMessagesColumn, updatedAt: agentExecutions.updatedAt,
       agentName: sql<string>`json_extract(${auditLogs.metadata}, '$.agentName')`,
       runId: sql<string>`coalesce(json_extract(${auditLogs.metadata}, '$.invocationId'), ${agentExecutions.id})`,
     }).from(auditLogs).innerJoin(agentExecutions, and(eq(agentExecutions.id, auditLogs.resource), eq(agentExecutions.workspaceId, auditLogs.workspaceId)))
@@ -168,7 +169,7 @@ export class ChatProgressReportsService implements OnModuleInit, OnModuleDestroy
 
   private async collectActiveWork(target: ConversationTarget): Promise<ActiveWorkItem[]> {
     const [tasks, teamRows, workflowRows, agentRows] = await Promise.all([
-      this.db.select().from(chatProjectTasks)
+      this.db.select(projectTaskColumns).from(chatProjectTasks)
         .where(and(eq(chatProjectTasks.executionId, target.executionId), eq(chatProjectTasks.status, 'running'))),
       this.db.select({ runId: coderRuns.id, intent: coderRuns.intent, status: coderRuns.status, updatedAt: coderRuns.updatedAt })
         .from(chatSubmissions)

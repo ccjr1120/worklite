@@ -58,6 +58,37 @@ collaboration:
 
 ## 运行时与微信配置
 
-Codex App Server 和 Claude Agent SDK 是内置 Agent 运行时，无需插件配置。Codex 使用主机上可用的 `codex` 命令和 `CODEX_HOME`（默认 `~/.codex`）配置；显式选择 Gateway 模型时注入本次执行的 Responses Provider。旧会话保留已捕获的启动配置。
+Chat 配置可选择原生模型、Codex App Server 或 Claude Agent SDK；运行时选择对新会话生效，已有会话继续使用捕获的运行时。引擎版 Chat 在 `~/.worklite/chat/session-*/` 中工作，禁止指向 `.worklite` 根目录。每轮从 Chat 配置捕获 Skills，重建 `.agents/skills` 和 `.claude/skills`，并从同一份内容生成 `AGENTS.md`、`CLAUDE.md`。平台操作通过只绑定当前轮次的本机 MCP 服务执行；项目事务仍委派给 Agent，任务卡片、提问、计划、流式输出及微信报告沿用现有通道。
+
+Codex App Server 和 Claude Agent SDK 也是内置 Agent 运行时，无需插件配置。Codex 使用主机上可用的 `codex` 命令和 `CODEX_HOME`（默认 `~/.codex`）配置；显式选择 Gateway 模型时注入本次执行的 Responses Provider。旧会话保留已捕获的启动配置。Codex 的 `service_tier = "fast"` 会在本次进程中覆盖为上游接受的 `priority`，不会修改用户的 `config.toml`。Claude 默认配置位于 `~/.worklite/claude`；也可直接选择 `anthropic/messages` 的 Gateway 模型。
+
+`codex/responses` Provider 反代与 Codex App Server / Claude Agent SDK 引擎运行时共存。Provider 页面可创建该协议，也可通过 Codex 账号池登录或导入 OAuth 账号；账号连接后会自动同步默认 `codex` Provider 及模型目录。反代转发 Responses、模型发现和图片生成，在上游边界把 `service_tier: "fast"` 转为 `priority`。已存在及新建的活动 Provider 不会再被启动迁移删除或强制切换运行时；旧退役身份、已完成的迁移标记和已经切换到引擎的配置继续保留。尚未完成的退役身份迁移仍修正 Chat、Agent、版本、执行快照及 Agent 文件配置；保留历史消息、工具证据及引擎支持的推理强度/服务档位；旧 Provider 请求 JSON 参数不适用于引擎，迁移时移除。拥有子 Agent 或能力工具的旧 Agent 通过受限 MCP 保留其委派与工具能力。没有默认项目目录的 Agent 仍须在派发时提供绝对项目目录。
+
+验证：`pnpm typecheck`；构建使用 `pnpm --filter @portkey-ai/gateway build`、API 的 `nest build --builder webpack --webpackPath webpack.config.js` 和 Web 的 `vite build`。可选真实引擎冒烟：设置 `WORKLITE_LIVE_CODEX_SMOKE=1` 运行 `chat-runtime-live.smoke.test.ts`；设置 `WORKLITE_LIVE_CLAUDE_MODEL=<Provider名>/<模型>` 运行 `chat-runtime-claude-live.smoke.test.ts`。两者均只调用临时 MCP 工具，不改项目代码。
 
 微信私聊在 Chat 的“渠道”中配置。公众号登录在具备 `wechat-official-account/publish` 能力的 Agent 配置页管理，公众号会话仍由工作区共享。数据库升级会将微信凭据和连接状态从旧插件表迁移到渠道表，保留公众号会话和历史记录；独立 Codex CLI Chat 已移除。
+
+公众号授权等待时，Agent 会返回当前会话的二维码图片附件和可复制的扫码页链接；微信渠道按原生图片发送。扫码页展示同一会话，二维码过期后可在页内刷新，授权完成后返回对话续接原调用。默认入口通过独立的临时端口提供给同一局域网内的手机，只能访问带随机令牌的扫码页，不开放管理 API；没有局域网地址时仅本机可访问。跨网络使用需将 `WORKLITE_PUBLIC_URL` 配为可访问的 WorkLite 根地址，并代理 `/api/agent-actions/scan/`（GET、POST）。入口 15 分钟后失效，需从对话重新获取；API 重启后旧入口失效。旧二维码过期、浏览器关闭或监控失败会释放账号占用。
+
+
+## 数据保留与空间回收
+
+默认每 15 分钟由独立 worker 清理一次；有积压时每 5 秒继续一批。删除每批最多 500 条，空间回收每次写锁最多移动 16 页，每轮最多 1024 页。清理、存量压缩、增量 vacuum 和 WAL 截断均不在 API / Gateway 主线程执行。
+
+| 记录 | 默认策略 | 配置 |
+| --- | --- | --- |
+| 命令输出 | 3 天后仅保留 stdout/stderr 合计末尾 16 KiB | `COMMAND_STREAM_RETENTION_DAYS`、`COMMAND_STREAM_TAIL_KILOBYTES` |
+| 已结束命令及其事件 | 30 天后删除，工具结果仍保留 | `COMMAND_HISTORY_RETENTION_DAYS` |
+| 执行、运行时事件与已结束项目任务活动 | 7 天；保留最新快照、会话重连序号和任务轮次/steer 记录 | `RUN_EVENT_RETENTION_DAYS` |
+| 已成功消费的工具包副本 | 所属执行完成后，清除超过 7 天的副本；失败和活跃执行保留以供重试 | `TOOL_PACKAGE_RETENTION_DAYS` |
+| API 请求日志 | 1 天 | `API_REQUEST_LOG_RETENTION_DAYS` |
+| Gateway 请求和响应正文 | 12 小时 | `GATEWAY_REQUEST_LOG_RETENTION_HOURS` |
+| Gateway 请求统计 | 90 天 | `GATEWAY_STATS_RETENTION_DAYS` |
+
+所有保留期设为 `0` 均可关闭对应清理。清除频率由 `SQLITE_MAINTENANCE_INTERVAL_MINUTES` 设置，积压重试间隔由 `SQLITE_MAINTENANCE_CATCH_UP_SECONDS` 设置，批量大小由 `SQLITE_MAINTENANCE_BATCH_ROWS` 设置。完整默认值见 `.env.example`。过期的回放和请求明细不等于没有发生过请求；Agent 历史、保存的对话、结果、产物和运行时用量摘要继续保留。超过 Gateway 统计保留期的用量应以已保存的运行时摘要为准，两者不能相加。
+
+旧数据会在后台分批处理：会话消息和项目活动迁到逐条存储，Skill 包、能力快照、工具输出和大事件正文无损压缩；兼容读取原有 JSON。迁移不会自动重试任务。新安装在建表前启用增量空间回收；历史 `auto_vacuum=NONE` 数据库不会在线执行全库 `VACUUM`，需要安排停机转换；已有 `INCREMENTAL` 数据库会自动归还空闲页。
+
+需要立即处理存量时，可在仓库根目录运行 `node scripts/sqlite-maintenance.cjs .data/deployment/worklite.db --catch-up`，Gateway 使用 `node scripts/sqlite-maintenance.cjs .data/deployment/worklite-gateway.db --gateway --catch-up`。使用新存储格式前应先启动已升级版本以完成迁移；仍在运行旧版本时加 `--legacy-safe`，仅执行旧格式兼容的过期清理和空间回收。命令使用独立连接，遵循相同保留期，不启动或重启服务。不要同时对同一数据库运行多个维护命令。
+
+本地全量回归使用 `pnpm test`，覆盖工作区测试与 Gateway 的 WorkLite/纯工具单元测试。Gateway 也可单独运行 `pnpm --filter @portkey-ai/gateway test:gateway`。第三方上游 Jest 测试保留在 `test:upstream`、`test:plugins` 中，真实服务集成测试需配置各自凭据；不会混入本地 Vitest 回归。真实 Codex/Claude 冒烟仍需显式设置对应环境变量。

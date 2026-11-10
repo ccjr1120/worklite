@@ -40,6 +40,18 @@
   "copyRunIdFailed": "复制失败，点击重试",
   "currentModel": "正在生成回复或规划下一步…",
   "currentTool": "正在调用 {{tool}}…",
+  "engineActivity": "消息与执行过程",
+  "activityInterrupted": "已中断",
+  "engineTools": {
+    "commandExecution": "执行命令",
+    "fileChange": "修改文件",
+    "mcpToolCall": "调用 MCP 工具",
+    "dynamicToolCall": "调用工具",
+    "webSearch": "搜索网页",
+    "imageView": "查看图片",
+    "imageGeneration": "生成图片",
+    "collabAgentToolCall": "调用 Agent"
+  },
   "runs": "运行记录",
   "runsEmpty": "暂无运行记录",
   "historyFailed": "无法加载运行记录。",

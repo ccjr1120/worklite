@@ -1,3 +1,4 @@
+import { agentExecutionColumns, agentExecutions, agentRuntimeRuns, createDb, initializeDatabase, type Database } from '@worklite/db';
 // @vitest-environment node
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,10 +6,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
 import { eq } from 'drizzle-orm';
-import { agentExecutions, agentRuntimeRuns, createDb, initializeDatabase, type Database } from '@worklite/db';
+
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 import { AgentRuntimeService } from './agent-runtime.service';
+import { AgentHistoryService } from './agent-history.service';
 import { WorkspaceService } from '../teams/teams.service';
 import type { ProjectExecutorRequest } from './project-executor.types';
 
@@ -27,7 +29,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function setup(execute: (request: ProjectExecutorRequest) => Promise<string>) {
+async function setup(execute: (request: ProjectExecutorRequest) => Promise<string>, runtimeKind: 'codex' | 'claude' = 'codex') {
   root = await mkdtemp(join(tmpdir(), 'worklite-agent-test-'));
   vi.stubEnv('WORKLITE_AGENT_RUNTIME_DIR', join(root, 'sessions'));
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] })));
@@ -36,20 +38,54 @@ async function setup(execute: (request: ProjectExecutorRequest) => Promise<strin
   const workspaces = new WorkspaceService(db);
   const resources = { reconcileWorkspaceSkills: async () => {}, agentMcpRuntimes: async () => [] };
   const agents = new AgentsService(db, workspaces, resources as never);
-  const adapter = { captureLaunch: async (executor: string, model: string | null) => ({ executor, model, commandArguments: [] }), execute: vi.fn(execute) };
+  const adapter = { requireModel: async () => {}, captureLaunch: async (executor: string, model: string | null) => ({ executor, model, commandArguments: [] }), execute: vi.fn(execute) };
   runtime = new AgentRuntimeService(db, adapter as never);
   const unused = {} as never;
   executions = new AgentExecutionsService(db, workspaces, resources as never, unused, unused, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never, runtime);
-  const agent = await agents.create(request, 'personal', { name: 'Runtime Agent', responsibility: '', systemPrompt: 'Original instructions', runtime: { kind: 'codex', projectDirectory: root }, providerId: null, model: '', skillIds: [], mcpServerIds: [] });
+  const agent = await agents.create(request, 'personal', { name: 'Runtime Agent', responsibility: '', systemPrompt: 'Original instructions', runtime: { kind: runtimeKind, projectDirectory: root }, providerId: null, model: '', skillIds: [], mcpServerIds: [] });
   return { agents, agent, adapter };
 }
 
 async function settled(id: string) {
   await vi.waitFor(() => expect((executions as unknown as { scheduledExecutions: Set<string> }).scheduledExecutions.has(id)).toBe(false));
-  return db.select().from(agentExecutions).where(eq(agentExecutions.id, id)).get()!;
+  return db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, id)).get()!;
 }
 
 describe('runtime-backed Agent execution API', () => {
+  it.each(['codex', 'claude'] as const)('exposes %s lead reply chunks and tool work before the turn completes', async (runtimeKind) => {
+    const partial = '验证结果'.repeat(1000); // Large enough to exercise the packed event column.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let notify!: () => void;
+    const emitted = new Promise<void>((resolve) => { notify = resolve; });
+    const { agent } = await setup(async (request) => {
+      await request.runtimeSession!.onSession('saved-thread');
+      await request.onTextDelta?.('我先检查测试');
+      await request.onEvent?.({ phase: runtimeKind === 'codex' ? 'codex.item_completed' : 'claude.agent_message', itemType: runtimeKind === 'codex' ? 'agentMessage' : 'agent_message', text: '我先检查测试' });
+      await request.onEvent?.({ phase: runtimeKind === 'codex' ? 'codex.item_started' : 'claude.tool_started', itemId: 'tool', itemType: runtimeKind === 'codex' ? 'commandExecution' : 'Bash', summary: 'pnpm test' });
+      await request.onTextDelta?.(partial);
+      notify();
+      await gate;
+      return '验证结果已确认';
+    }, runtimeKind);
+    const execution = await executions.create(request, 'personal', agent.id, { message: '检查测试' });
+    try {
+      await emitted;
+      const history = new AgentHistoryService(db, new WorkspaceService(db));
+      // The existing text batch flushes independently of the engine's turn completion.
+      await vi.waitFor(async () => {
+        const detail = await history.detail(request, agent.id, execution.id);
+        expect(detail.run.currentActivity).toEqual({ phase: 'tool', toolName: 'pnpm test' });
+        expect(detail.run.activities).toEqual([
+          expect.objectContaining({ kind: 'message', text: '我先检查测试' }),
+          expect.objectContaining({ kind: 'tool', summary: 'pnpm test', status: 'running' }),
+          expect.objectContaining({ kind: 'message', text: partial }),
+        ]);
+      });
+    } finally { release(); }
+    expect((await settled(execution.id)).displayMessages.at(-1)?.content).toBe('验证结果已确认');
+  });
+
   it('continues the captured backend and instructions after draft settings change', async () => {
     const { agents, agent, adapter } = await setup(async (request) => {
       await request.runtimeSession!.onSession('saved-thread');
@@ -124,7 +160,7 @@ describe('runtime-backed Agent execution API', () => {
     await executions.closeRuntimeSession(request, 'personal', agent.id, execution.id);
     await expect(executions.continue(request, 'personal', agent.id, execution.id, { message: 'again' })).rejects.toThrow('closed');
     expect(adapter.execute).toHaveBeenCalledOnce();
-    expect(db.select().from(agentExecutions).where(eq(agentExecutions.id, execution.id)).get()?.status).toBe('completed');
+    expect(db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, execution.id)).get()?.status).toBe('completed');
   });
 
   it('records runtime failures and requires a new instruction instead of replaying the failed turn', async () => {
@@ -136,4 +172,44 @@ describe('runtime-backed Agent execution API', () => {
     await expect(executions.retry(request, 'personal', agent.id, execution.id)).rejects.toThrow('cannot be replayed');
     expect(adapter.execute).toHaveBeenCalledOnce();
   });
+
+  it('retains public text streamed before a backend failure', async () => {
+    const { agent } = await setup(async (request) => {
+      await request.onTextDelta?.('已经检查了配置，准备运行测试');
+      throw new Error('Backend disconnected');
+    });
+    const execution = await executions.create(request, 'personal', agent.id, { message: '检查实现' });
+    expect((await settled(execution.id)).status).toBe('failed');
+    const detail = await new AgentHistoryService(db, new WorkspaceService(db)).detail(request, agent.id, execution.id);
+    expect(detail.run.activities).toEqual([expect.objectContaining({ kind: 'message', text: '已经检查了配置，准备运行测试' })]);
+    expect(detail.run.currentActivity).toBeNull();
+  });
+});
+
+it('captures the selected model parameters for a runtime invocation and its continuation', async () => {
+  const { agents, agent, adapter } = await setup(async (request) => {
+    await request.runtimeSession!.onSession('saved-thread');
+    return 'Done';
+  });
+  const modelParameters = { reasoningEffort: 'high' as const, serviceTier: 'fast' as const };
+  await agents.update(request, 'personal', agent.id, { modelParameters });
+  const execution = await executions.create(request, 'personal', agent.id, { message: 'Work' });
+  expect((await settled(execution.id)).status).toBe('completed');
+  expect(adapter.execute.mock.calls[0]?.[0].modelParameters).toEqual(modelParameters);
+  await agents.update(request, 'personal', agent.id, { modelParameters: { reasoningEffort: 'low' } });
+  await executions.continue(request, 'personal', agent.id, execution.id, { message: 'Continue' });
+  expect((await settled(execution.id)).status).toBe('completed');
+  expect(adapter.execute.mock.calls[1]?.[0].modelParameters).toEqual(modelParameters);
+  const next = await executions.create(request, 'personal', agent.id, { message: 'New task' });
+  expect((await settled(next.id)).status).toBe('completed');
+  expect(adapter.execute.mock.calls[2]?.[0].modelParameters).toEqual({ reasoningEffort: 'low' });
+});
+
+it('captures a runtime model candidate and its own parameters from collaboration settings', async () => {
+  const { agents, agent, adapter } = await setup(async () => 'Done');
+  const parameters = { reasoningEffort: 'high' as const, serviceTier: 'fast' as const };
+  await agents.update(request, 'personal', agent.id, { collaboration: { subAgentIds: [], capabilities: [], publicModels: ['provider/model'], modelParameters: { 'provider/model': parameters } } });
+  const execution = await executions.create(request, 'personal', agent.id, { message: 'Work' });
+  expect((await settled(execution.id)).status).toBe('completed');
+  expect(adapter.execute.mock.calls[0]?.[0]).toMatchObject({ model: 'provider/model', modelParameters: parameters });
 });

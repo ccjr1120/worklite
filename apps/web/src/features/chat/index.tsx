@@ -1,3 +1,4 @@
+import type { ModelParameters } from '@worklite/contracts';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { Brain, ChevronRight, Radio, ScrollText, Settings, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CompositionEvent as ReactCompositionEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -15,6 +16,7 @@ import { queryClient } from '@/lib/query-client';
 import { cn } from '@/lib/utils';
 import { Composer, SLASH_COMMANDS, type SlashCommand } from './composer';
 import { clearNewConversationDraft, readChatDraft, writeChatDraft } from './draft-storage';
+import { useChatSuggestion } from './use-chat-suggestion';
 import { Configuration } from './configuration';
 import { Memories } from './memories';
 import { downloadExecutionLog } from './execution-log';
@@ -120,6 +122,7 @@ function ChatWorkspace() {
   const [settingsOpen, setSettingsOpen] = useState(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(locationSearch.view === 'channels' || locationSearch.view === 'configuration' || locationSearch.view === 'memories' ? locationSearch.view : 'configuration');
   const [configSelection, setConfigSelection] = useState('');
+  const [configModelParameters, setConfigModelParameters] = useState<ModelParameters>({});
   const [configSaving, setConfigSaving] = useState(false);
   const [extensionPrompt, setExtensionPrompt] = useState('');
   const [summarizePrompt, setSummarizePrompt] = useState('');
@@ -154,11 +157,14 @@ function ChatWorkspace() {
   const mainRequestGenerationRef = useRef(0);
   const observedEventRef = useRef({ executionId: '', sequence: 0 });
   const imeCompositionRef = useRef({ active: false, endedAt: -Infinity });
-  const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data?.model);
+  const [configRuntime, setConfigRuntime] = useState<'native' | 'codex' | 'claude'>('native');
+  const isConfigured = Boolean(agentQuery.data && (agentQuery.data.runtime?.kind && agentQuery.data.runtime.kind !== 'native' || agentQuery.data.providerId && agentQuery.data.model));
 
   useEffect(() => {
     if (!agentQuery.data) return;
-    setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+    setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : agentQuery.data.model && (agentQuery.data.runtime?.kind ?? 'native') !== 'native' ? `__runtime::${agentQuery.data.model}` : '');
+    setConfigModelParameters(agentQuery.data.modelParameters ?? {});
+    setConfigRuntime(agentQuery.data.runtime?.kind ?? 'native');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
@@ -166,15 +172,16 @@ function ChatWorkspace() {
     setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, summarize = summarizePrompt, skillIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, summarize = summarizePrompt, skillIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }, modelParameters = configModelParameters, runtime = configRuntime) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
     setConfigError('');
     try {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
-        providerId: separator >= 0 ? selection.slice(0, separator) : null,
+        providerId: separator >= 0 && !selection.startsWith('__runtime::') ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
+        modelParameters, runtime: runtime === 'native' ? { kind: 'native' } : { kind: runtime, projectDirectory: '' },
         extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         turnNotificationsEnabled: notifications.enabled, turnNotificationSound: notifications.sound,
         ...(skillIds === undefined ? {} : { skillIds }),
@@ -183,7 +190,9 @@ function ChatWorkspace() {
     } catch (cause) {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
-        setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
+        setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : agentQuery.data.model && (agentQuery.data.runtime?.kind ?? 'native') !== 'native' ? `__runtime::${agentQuery.data.model}` : '');
+        setConfigModelParameters(agentQuery.data.modelParameters ?? {});
+    setConfigRuntime(agentQuery.data.runtime?.kind ?? 'native');
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
@@ -216,6 +225,10 @@ function ChatWorkspace() {
   }
 
   function selectConversation(id: string | null, options?: { discardDraft?: boolean }) {
+    if (id === selectedConversationId && !options?.discardDraft) {
+      setSwitcherOpen(false);
+      return;
+    }
     ++mainRequestGenerationRef.current;
     observedEventRef.current = { executionId: '', sequence: 0 };
     if (options?.discardDraft) {
@@ -381,6 +394,10 @@ function ChatWorkspace() {
     ? SLASH_COMMANDS.filter((command) => command.value.startsWith(slashQuery))
     : [];
   const commandMenuOpen = !selectedAgent && !mentionMenuOpen && slashQuery.startsWith('/') && !slashDismissed;
+  const { suggestion, dismiss: dismissSuggestion } = useChatSuggestion(selectedConversationId, visibleExecution,
+    draft === '' && !selectedAgent && !waitingForInput && !visibleExecution?.pendingQuestion && !busy && !cancelling
+    && !switcherOpen && !commandMenuOpen && !mentionMenuOpen && !settingsOpen && !recordsOpen && !loadingExecution
+    && isConfigured && attachments.length === 0 && attachmentsUploading === 0);
 
   const executionError = visibleExecution?.errorCode === 'incomplete_tool_request' || visibleExecution?.error === INCOMPLETE_SKILL_REQUEST
     ? t('assistant:execution.incompleteSkillRequest')
@@ -771,6 +788,15 @@ function ChatWorkspace() {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Tab' && !event.defaultPrevented && suggestion && event.currentTarget.value === '' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+      && !event.repeat && !isImeComposing(event) && event.nativeEvent.keyCode !== 229) {
+      event.preventDefault();
+      const input = event.currentTarget;
+      dismissSuggestion();
+      setDraft(suggestion.text);
+      requestAnimationFrame(() => { if (input.isConnected && input.value === suggestion.text) input.setSelectionRange(input.value.length, input.value.length); });
+      return;
+    }
     if (event.key === 'ArrowLeft' && event.currentTarget.value === '' && !draft && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.repeat && !isImeComposing(event) && event.nativeEvent.keyCode !== 229) {
       event.preventDefault();
       setSlashDismissed(true);
@@ -780,6 +806,7 @@ function ChatWorkspace() {
     }
     if (event.key === 'Escape') {
       if (handleEscape()) event.preventDefault();
+      else if (suggestion && !isImeComposing(event) && event.nativeEvent.keyCode !== 229) { dismissSuggestion(); event.preventDefault(); }
       return;
     }
     if (selectedAgent && !draft && event.key === 'Backspace') {
@@ -908,6 +935,10 @@ function ChatWorkspace() {
         )}
       />
       <div className="flex min-h-0 flex-1">
+        <aside aria-label={t('assistant:history.title')} className="flex min-h-0 w-28 shrink-0 flex-col border-r border-border sm:w-56 lg:w-64">
+          <h2 className="flex h-14 shrink-0 items-center border-b border-border px-3 text-sm font-semibold md:px-5">{t('assistant:history.title')}</h2>
+          <ConversationList selectedId={selectedConversationId} onSelect={selectConversation} variant="sidebar" />
+        </aside>
         <section ref={chatSurfaceRef} className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={t('assistant:title')}>
             <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3 md:px-5">
               <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={selected?.title || undefined}>{selected?.title || t(selectedConversationId ? 'assistant:history.loading' : 'assistant:history.new')}</p><p className="truncate text-xs text-muted-foreground">{selected?.channel === 'feishu' || selected?.channel === 'wechat' ? t(currentView?.channelDelivery === 'unbound' ? `assistant:channels.${selected.channel}Unbound` : currentView?.channelDelivery === 'disconnected' ? `assistant:channels.${selected.channel}Disconnected` : `assistant:channels.${selected.channel}Bound`) : 'Web'}</p></div>
@@ -950,7 +981,7 @@ function ChatWorkspace() {
             </div>
             {!recordsOpen && selectedWithoutExecution && !loadingConversation ? <p className="border-t border-border px-4 py-3 text-[13px] text-muted-foreground">{t(selected?.channel === 'feishu' || selected?.channel === 'wechat' ? 'assistant:channels.waiting' : 'assistant:history.taskRecord')}</p> : null}
             {recordsOpen ? null : loadingConversation || composerLoading ? <p className="px-4 py-3 text-[13px] text-muted-foreground" role="status">{t('assistant:composer.loading')}</p> : (
-              <Composer draft={draft} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
+              <Composer draft={draft} suggestion={suggestion?.text} onDraftChange={(value) => { setDraft(value); setSlashDismissed(false); setMentionDismissed(false); setActiveValue(''); }} onSubmit={submit} onKeyDown={handleComposerKeyDown} onFocus={() => {}}
                 switcherOpen={switcherOpen} onSwitcherOpenChange={setSwitcherOpen} switcher={<ConversationList selectedId={selectedConversationId} onSelect={selectConversation} />}
                 onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd}
                 selectedAgent={selectedAgent} onRemoveAgent={() => setSelectedAgent(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
@@ -996,8 +1027,11 @@ function ChatWorkspace() {
                 <Configuration providers={providersQuery.data ?? []} skills={skillsQuery.data ?? []} selectedSkillIds={chatSkillIds}
                   onSkillIdsChange={(ids) => { setChatSkillIds(ids); void saveConfiguration(configSelection, extensionPrompt, summarizePrompt, ids); }}
                   skillsLoading={skillsQuery.isLoading} skillsLoadFailed={skillsQuery.isError}
+                  modelParameters={configModelParameters}
+                  onModelParametersChange={(parameters) => { setConfigModelParameters(parameters); void saveConfiguration(configSelection, extensionPrompt, summarizePrompt, undefined, undefined, parameters); }}
                   selection={configSelection}
-                  onSelectionChange={(value) => { setConfigSelection(value); void saveConfiguration(value); }}
+                  onSelectionChange={(value) => { setConfigSelection(value); setConfigModelParameters({}); void saveConfiguration(value, extensionPrompt, summarizePrompt, undefined, undefined, {}); }}
+                  runtime={configRuntime} onRuntimeChange={(runtime) => { setConfigRuntime(runtime); setConfigSelection(''); setConfigModelParameters({}); void saveConfiguration('', extensionPrompt, summarizePrompt, undefined, undefined, {}, runtime); }}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   turnNotificationsEnabled={turnNotificationsEnabled} turnNotificationSound={turnNotificationSound} onTurnNotificationsChange={changeTurnNotifications}

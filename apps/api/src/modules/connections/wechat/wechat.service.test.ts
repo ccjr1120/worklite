@@ -5,7 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDb, initializeDatabase, agentExecutions, artifacts, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
+import { createDb, initializeDatabase, agentExecutions, agentPendingActions, agents, artifacts, externalChats, chatSubmissions, wechatEvents, type Database } from '@worklite/db';
 import { eq } from 'drizzle-orm';
 import type { AgentExecutionView } from '@worklite/contracts';
 import { isWechatNewConversationCommand, monitorFailureState, WECHAT_CONNECT_FAILURE_ESCALATION_MS, WECHAT_NEW_CONVERSATION_REPLY, WechatService } from './wechat.service';
@@ -578,6 +578,32 @@ describe('WechatService native reply images', () => {
   });
 
   const deliver = () => (instance as unknown as { deliver: (value: typeof submission) => Promise<void> }).deliver(submission);
+
+  it('delivers an authorization QR as a native image and preserves its browser entry in WeChat', async () => {
+    const scanUrl = 'http://192.168.1.10:23393/scan/' + 'a'.repeat(64);
+    reply = `![公众号授权二维码](/api/chat/attachments/att_good)\n\n公众号授权页面：${scanUrl}`;
+    await deliver();
+    expect(messages.map((message) => message.type)).toEqual([2, 1]);
+    expect(uploads).toEqual([image]);
+    expect(messages[1].text).toContain(scanUrl);
+    expect(messages.every((message) => message.contextToken === 'ctx-images')).toBe(true);
+    await deliver();
+    expect(uploads).toHaveLength(1);
+  });
+
+  it.each(['live', 'expired', 'replaced', 'completed'] as const)('delivers a queued %s authorization independently of the running Agent', async (state) => {
+    const expiresAt = new Date(Date.now() + (state === 'expired' ? -1 : 120_000));
+    db.insert(agents).values({ id: 'qr-agent', workspaceId, name: 'Publisher', responsibility: 'Test', systemPrompt: '', model: '' }).run();
+    db.insert(agentExecutions).values({ id: 'qr-execution', workspaceId, agentId: 'qr-agent', status: 'running' }).run();
+    db.insert(agentPendingActions).values({ id: 'qr-action', workspaceId, runId: 'qr-execution', nodeRunId: 'qr-call', type: 'wechat_login', title: 'Login', description: 'Scan', status: state === 'completed' ? 'completed' : 'pending', expiresAt }).run();
+    const scanUrl = 'http://192.168.1.10:23393/scan/' + 'b'.repeat(64);
+    submission.reference = { kind: 'conversation', executionId: 'qr-execution', afterMessageId: null, afterSequence: 0, authorizationNotice: { actionId: 'qr-action', markdown: `![公众号授权二维码](/api/chat/attachments/att_good)\n\n公众号授权页面：${scanUrl}`, scanUrl, expiresAt: new Date(expiresAt.getTime() - (state === 'replaced' ? 1000 : 0)).toISOString() } };
+    Object.assign(instance, { executions: { get: async () => { throw new Error('Must not wait for or inspect the running Agent'); } } });
+    await deliver();
+    if (state === 'completed') expect(messages).toEqual([]);
+    else if (state === 'live') { expect(messages.map((message) => message.type)).toEqual([2, 1]); expect(uploads).toEqual([image]); expect(messages[1].text).toContain(scanUrl); }
+    else { expect(messages.map((message) => message.type)).toEqual([1]); expect(uploads).toEqual([]); expect(messages[0].text).toContain(scanUrl); }
+  });
 
   it('sends inline Artifacts, binary Artifacts and an attachment as files in exact source order', async () => {
     reply = '说明\n[报告](/api/artifacts/art_report/content)\n[资料](/api/artifacts/art_binary/content?download=true)\n[附件](/api/chat/attachments/att_good?download=true)\n结束';

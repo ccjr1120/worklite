@@ -4,7 +4,7 @@ import { resolve, join } from 'node:path';
 import type { Request } from 'express';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agents, agentExecutions, scheduledAgentTasks, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { agents, agentExecutions, modelProviders, scheduledAgentTasks, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentCollaborationService } from './agent-collaboration.service';
 import { initializeAgentFiles } from './agent-file-store';
 import { AgentsController } from './agents.controller';
@@ -64,7 +64,34 @@ describe('Agent ownership and transactional package lifecycle', () => {
     expect((await service.get(request, 'personal', agent.id)).runtime).toMatchObject({ kind, projectDirectory: directory });
   });
 
-  it('reads legacy empty adapter scaffolding but rejects actual owned tool files', async () => {
+  it('rewrites an existing file-backed Codex Provider reference without resurrecting it in SQL', async () => {
+    const { service, catalog, root } = await setup();
+    const agent = await service.create(request, 'personal', { ...definition, name: 'legacy' });
+    const path = join(root, 'legacy', 'AGENT.md');
+    writeFileSync(path, `---\nid: ${agent.id}\nname: legacy\nresponsibility: Work\nproviderId: codex-provider\nmodel: gpt-test\nruntime: {kind: native}\n---\n\nKeep the original instructions.`);
+    catalog.refresh(workspace);
+    const migrated = await service.get(request, 'personal', agent.id);
+    expect(migrated).toMatchObject({ providerId: null, model: 'gpt-test', runtime: { kind: 'codex' }, systemPrompt: 'Keep the original instructions.' });
+    expect(readFileSync(path, 'utf8')).not.toContain('codex-provider');
+    initializeAgentFiles(db, root);
+    expect((await service.get(request, 'personal', agent.id)).runtime?.kind).toBe('codex');
+  });
+
+  it('keeps a restored active Codex Provider selection when importing the Agent file again', async () => {
+    const { service, catalog, root } = await setup();
+    db.insert(modelProviders).values({ id: 'codex-provider', workspaceId: workspace, name: 'codex', protocol: 'codex/responses', models: ['gpt-test'] }).run();
+    const agent = await service.create(request, 'personal', { ...definition, name: 'proxy' });
+    const path = join(root, 'proxy', 'AGENT.md');
+    const content = `---\nid: ${agent.id}\nname: proxy\nresponsibility: Work\nproviderId: codex-provider\nmodel: gpt-test\nruntime: {kind: native}\ncollaboration: {publicModels: [codex/gpt-test], capabilities: []}\n---\n\nKeep using the reverse proxy.`;
+    writeFileSync(path, content);
+    catalog.refresh(workspace);
+    initializeAgentFiles(db, root);
+    const restored = await service.get(request, 'personal', agent.id);
+    expect(restored).toMatchObject({ providerId: 'codex-provider', model: 'gpt-test', runtime: { kind: 'native' }, collaboration: { publicModels: ['codex/gpt-test'] } });
+    expect(readFileSync(path, 'utf8')).toBe(content);
+  });
+
+  it('keeps engine-owned tool scripts available when migrating an adapter package', async () => {
     const { service, catalog, root } = await setup();
     const agent = await service.create(request, 'personal', { ...definition, name: 'codex', runtime: { kind: 'codex', projectDirectory: '' } });
     mkdirSync(join(root, 'codex/tools'));
@@ -72,7 +99,7 @@ describe('Agent ownership and transactional package lifecycle', () => {
     initializeAgentFiles(db, root);
     expect((await service.get(request, 'personal', agent.id)).id).toBe(agent.id);
     writeFileSync(join(root, 'codex/tools/script.mjs'), 'console.log("unsupported private tool");');
-    expect(() => catalog.refresh(workspace, root, false)).toThrow('cannot own tools/ or subagents/ contents');
+    expect(() => catalog.refresh(workspace, root, false)).not.toThrow();
   });
 
   it('cascades a private subtree, disables its schedules, retains history and updates ownership across restart', async () => {

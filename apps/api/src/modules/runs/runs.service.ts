@@ -1,3 +1,4 @@
+import { validateModelParameters, type ModelParameters } from '@worklite/contracts';
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { Lexer } from 'marked';
 import { BadRequestException, ConflictException, forwardRef, Inject, Injectable, NotFoundException } from '@nestjs/common';
@@ -178,6 +179,7 @@ export class RunsService {
             },
             { workflowId: request.context.workflowId, workflowRunId: request.context.workflowRunId, nodeRunId: request.context.nodeRunId },
             { maxToolCalls: config.maxToolCalls as number | undefined, maxToolRounds: config.maxToolRounds as number | undefined, maxToolResultChars: config.maxToolResultChars as number | undefined, maxOutputTokens: config.maxOutputTokens as number | undefined },
+            validateModelParameters(config.modelParameters),
           );
         } catch (error) {
           // A failed required channel is the cause; a model that then stops with
@@ -214,6 +216,7 @@ export class RunsService {
         if (!inputs || !Object.prototype.hasOwnProperty.call(inputs, 'state')) throw new Error('TypeSafe System One node requires a state input.');
         const output = await this.gateway.executeSystemOne({
           model: config.model,
+          modelParameters: validateModelParameters(config.modelParameters),
           state: inputs.state,
           questions: config.questions as Record<string, unknown>,
           correlation: workflowCorrelation(request.context),
@@ -256,6 +259,7 @@ export class RunsService {
             // addressed, because surplus state measurably degrades a typed judgement.
             const answer = await this.gateway.executeSystemOne({
               model: (config.model as string).trim(),
+              modelParameters: validateModelParameters(config.modelParameters),
               state: { item, context },
               questions,
               correlation: workflowCorrelation(request.context),
@@ -673,7 +677,7 @@ export class RunsService {
 
   async rerunNode(request: Request, workspaceSlug: string, runId: string, nodeRunId: string, input: RerunWorkflowNodeRequest): Promise<RunView> {
     const team = await this.workspaces.getWorkspace(request, workspaceSlug);
-    const { modelOverride, confirmSideEffects } = parseRerunRequest(input);
+    const { modelOverride, modelParameters, confirmSideEffects } = parseRerunRequest(input);
     const [run] = await this.db.select().from(workflowRuns)
       .where(and(eq(workflowRuns.id, runId), eq(workflowRuns.workspaceId, team.id))).limit(1);
     if (!run) throw new NotFoundException('Run not found');
@@ -682,7 +686,7 @@ export class RunsService {
       .where(and(eq(workflowNodeRuns.id, nodeRunId), eq(workflowNodeRuns.runId, runId), eq(workflowNodeRuns.workspaceId, team.id))).limit(1);
     if (!target) throw new NotFoundException('Node run not found');
     assertRerunNodeEligibility(target);
-    if (modelOverride && target.type !== 'worklite/agent') {
+    if ((modelOverride || modelParameters) && target.type !== 'worklite/agent') {
       throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_MODEL', message: 'A model override is only supported for Agent nodes.' });
     }
     const [version] = await this.db.select().from(workflowVersions)
@@ -752,6 +756,7 @@ export class RunsService {
         requestedBy: 'You',
         requestedAt: now.toISOString(),
         modelOverride: modelOverride ?? null,
+        ...(modelParameters ? { modelParameters } : {}),
         supersededNodeRunIds,
         sideEffectsConfirmed: confirmSideEffects,
       };
@@ -900,7 +905,8 @@ export class RunsService {
           if (!existingNodeRun) throw new Error('Workflow scheduler node run is unavailable.');
           startedAt = existingNodeRun.startedAt ?? startedAt;
           const modelOverride = existingNodeRun.rerunEvidence?.modelOverride;
-          if (modelOverride && node.type === 'worklite/agent') executionConfig = { ...(asRecord(node.config) ?? {}), model: modelOverride };
+          const modelParameters = existingNodeRun.rerunEvidence?.modelParameters;
+          if (node.type === 'worklite/agent' && (modelOverride || modelParameters)) executionConfig = { ...(asRecord(node.config) ?? {}), ...(modelOverride ? { model: modelOverride, ...(modelOverride !== asRecord(node.config)?.model ? { modelParameters: {} } : {}) } : {}), ...(modelParameters ? { modelParameters } : {}) };
           await this.db.transaction((transaction) => {
             const [updatedNodeRun] = transaction.update(workflowNodeRuns).set({ status: 'running', input: sanitizeWorkflowImages(invocation.input), error: null, finishedAt: null, startedAt }).where(and(eq(workflowNodeRuns.id, nodeRunId), inArray(workflowNodeRuns.status, ['queued', 'waiting_for_input']))).returning().all();
             const [updatedRun] = transaction.update(workflowRuns).set({ currentNodeId: node.id, executionState: state as StoredWorkflowExecutionState, updatedAt: startedAt }).where(and(eq(workflowRuns.id, runId), eq(workflowRuns.status, 'running'))).returning().all();
@@ -1427,12 +1433,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-function parseRerunRequest(input: unknown): { modelOverride?: string; confirmSideEffects: boolean } {
+function parseRerunRequest(input: unknown): { modelOverride?: string; modelParameters?: ModelParameters; confirmSideEffects: boolean } {
   const body = input === undefined ? {} : asRecord(input);
   if (!body) throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'The rerun request must be a JSON object.' });
   const keys = Object.keys(body);
-  if (keys.some((key) => key !== 'modelOverride' && key !== 'confirmSideEffects')) {
-    throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'Only modelOverride and confirmSideEffects are accepted.' });
+  if (keys.some((key) => key !== 'modelOverride' && key !== 'modelParameters' && key !== 'confirmSideEffects')) {
+    throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'Only modelOverride, modelParameters and confirmSideEffects are accepted.' });
   }
   if (body.confirmSideEffects !== undefined && typeof body.confirmSideEffects !== 'boolean') {
     throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: 'confirmSideEffects must be a boolean.' });
@@ -1440,7 +1446,11 @@ function parseRerunRequest(input: unknown): { modelOverride?: string; confirmSid
   if (body.modelOverride !== undefined && (typeof body.modelOverride !== 'string' || !body.modelOverride.trim())) {
     throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_MODEL', message: 'modelOverride must be a non-empty public provider/model id.' });
   }
+  let modelParameters: ModelParameters | undefined;
+  try { if (body.modelParameters !== undefined) modelParameters = validateModelParameters(body.modelParameters); }
+  catch (error) { throw new BadRequestException({ code: 'RUN_NODE_RERUN_INVALID_REQUEST', message: error instanceof Error ? error.message : 'Invalid model parameters.' }); }
   return {
+    ...(modelParameters ? { modelParameters } : {}),
     ...(typeof body.modelOverride === 'string' ? { modelOverride: body.modelOverride.trim() } : {}),
     confirmSideEffects: body.confirmSideEffects === true,
   };

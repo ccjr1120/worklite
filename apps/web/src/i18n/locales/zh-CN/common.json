@@ -70,5 +70,14 @@
   },
   "duration": {
     "compact": "{{minutes}}分{{seconds}}秒"
+  },
+  "modelParameters": {
+    "reasoningEffort": "推理强度",
+    "serviceTier": "服务档位",
+    "inherit": "未指定（沿用模型／运行时配置）",
+    "fast": "fast（快速模式）",
+    "requestBody": "请求参数（JSON）",
+    "hint": "仅用于此处的模型调用。按所选协议填写参数；可用值由模型决定，fast 可能增加费用。",
+    "invalidJson": "请输入有效的参数 JSON 对象，且不要覆盖模型、消息、工具或流式控制字段。"
   }
 }

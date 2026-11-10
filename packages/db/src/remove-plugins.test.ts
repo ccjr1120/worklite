@@ -40,15 +40,16 @@ describe('retiring executable plugins', () => {
       INSERT INTO feishu_registrations (plugin_id, id, status, device_code) VALUES ('feishu-bot', 'registration', 'pending', 'encrypted-device-code');
     `);
     db.insert(schema.wechatOfficialAccounts).values({ id: 'wechat_official_account_personal', workspaceId: 'workspace_personal', displayName: 'Publisher', status: 'connected', encryptedStorageState: 'encrypted-session' }).run();
-    db.insert(schema.agents).values({ id: 'agt_codex_cli_chat', workspaceId: 'workspace_personal', kind: 'system', name: 'Codex CLI Chat', responsibility: '', systemPrompt: '', model: '' }).run();
-    db.insert(schema.agentExecutions).values({ id: 'legacy-execution', workspaceId: 'workspace_personal', agentId: 'agt_codex_cli_chat', status: 'running', displayMessages: [{ id: 'message', role: 'user', content: 'Keep this history', createdAt: new Date().toISOString() }] }).run();
+    // Seed the historical schema explicitly; current ORM inserts include columns from later migrations.
+    db.$client.prepare("INSERT INTO agents (id, workspace_id, kind, name, responsibility, system_prompt, model) VALUES (?, ?, ?, ?, ?, ?, ?)").run('agt_codex_cli_chat', 'workspace_personal', 'system', 'Codex CLI Chat', '', '', '');
+    db.$client.prepare("INSERT INTO agent_executions (id, workspace_id, agent_id, status, display_messages) VALUES (?, ?, ?, ?, ?)").run('legacy-execution', 'workspace_personal', 'agt_codex_cli_chat', 'running', JSON.stringify([{ id: 'message', role: 'user', content: 'Keep this history', createdAt: new Date().toISOString() }]));
     db.$client.exec(readFileSync(resolve(migrationRoot, '0081_remove_plugins.sql'), 'utf8'));
 
     expect(db.select().from(schema.chatChannels).where(eq(schema.chatChannels.id, 'wechat')).get()).toMatchObject({ wechatBotId: 'bot', wechatBotToken: 'encrypted-token', wechatBaseUrl: 'https://example.com', wechatAllowedUserId: 'user', wechatEnabled: true, wechatStatus: 'connected', wechatSyncBuf: 'cursor' });
     expect(db.select().from(schema.chatChannels).where(eq(schema.chatChannels.id, 'feishu')).get()).toMatchObject({ feishuAppId: 'app', feishuAppSecret: 'encrypted-secret' });
     expect(db.select().from(schema.feishuRegistrations).get()).toMatchObject({ channelId: 'feishu', id: 'registration', deviceCode: 'encrypted-device-code' });
     expect(db.select().from(schema.wechatOfficialAccounts).get()).toMatchObject({ status: 'connected', encryptedStorageState: 'encrypted-session' });
-    expect(db.select().from(schema.agentExecutions).get()).toMatchObject({ status: 'failed', displayMessages: [expect.objectContaining({ content: 'Keep this history' })] });
+    expect(db.select({ status: schema.agentExecutions.status, displayMessages: schema.agentExecutions.displayMessages }).from(schema.agentExecutions).get()).toMatchObject({ status: 'failed', displayMessages: [expect.objectContaining({ content: 'Keep this history' })] });
     expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });

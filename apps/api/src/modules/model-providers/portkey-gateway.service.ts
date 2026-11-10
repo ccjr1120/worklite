@@ -1,3 +1,4 @@
+import { modelRequestParameters, type ModelParameters } from '@worklite/contracts';
 import { agentFiles } from '../agents/agent-file-store';
 import { createRequire } from 'node:module';
 import { request as httpRequest, type IncomingMessage } from 'node:http';
@@ -375,7 +376,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     // protocols, so it is matched exactly instead of through the general rules.
     const operationSupported = configuredProtocol === 'typesafe/systemone' || operation === 'systemone'
       ? configuredProtocol === 'typesafe/systemone' && operation === 'systemone'
-      : operation === 'models' || operation === configuredOperation || (configuredProtocol === 'codex/responses' && operation === 'images/generations');
+      : operation === 'models' || operation === configuredOperation || ((configuredProtocol === 'codex/responses' || configuredProtocol.startsWith('openai/')) && operation === 'images/generations');
     if (!operationSupported) throw new BadRequestException(`Provider protocol ${configuredProtocol} does not support ${operation}.`);
     const bodyValue = selectedModel && request.body && typeof request.body === 'object' && !Array.isArray(request.body)
       ? { ...request.body, model }
@@ -432,10 +433,10 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
     const providerName = separator > 0 ? model.slice(0, separator) : '';
     const modelId = separator > 0 ? model.slice(separator + 1) : '';
     if (!prompt) throw new BadRequestException('Image node requires a prompt.');
-    if (model !== 'codex/gpt-image-2' || !providerName || !modelId) throw new BadRequestException('Image node requires the codex/gpt-image-2 model.');
+    if (!providerName || !modelId) throw new BadRequestException('Image node requires a Provider/model id.');
     const provider = (await this.providers()).find((candidate) => candidate.name === providerName);
     if (!provider) throw new BadRequestException('Model provider not found.');
-    if (provider.protocol !== 'codex/responses' || !provider.models.includes(modelId)) throw new BadRequestException('The Codex Provider does not support this image model.');
+    if (!(provider.protocol === 'codex/responses' || provider.protocol.startsWith('openai/')) || !provider.models.includes(modelId)) throw new BadRequestException('The Provider does not support this image model.');
 
     const payload = await this.gatewayJson<{ data?: unknown }>(
       '/worklite/proxy/images/generations',
@@ -462,6 +463,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async executeSystemOne(input: SystemOneWorkflowRequest & {
+    modelParameters?: ModelParameters;
     correlation: GatewayCorrelation;
     signal?: AbortSignal;
   }): Promise<SystemOneWorkflowOutput> {
@@ -482,7 +484,7 @@ export class PortkeyGatewayService implements OnModuleInit, OnModuleDestroy {
         'x-worklite-log-id': `glog_${randomUUID()}`,
         ...gatewayAttributionHeaders(input.correlation),
       },
-      body: JSON.stringify({ model: modelId, state: input.state, questions: input.questions }),
+      body: JSON.stringify({ model: modelId, state: input.state, questions: input.questions, ...modelRequestParameters('typesafe/systemone', input.modelParameters) }),
       signal: input.signal,
     });
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new BadRequestException('TypeSafe provider returned an invalid System One response.');

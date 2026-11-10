@@ -1,3 +1,4 @@
+import { StreamBatch } from '../../infrastructure/stream-batch';
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -228,10 +229,21 @@ export class CommandsService {
 
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
-    let eventQueue = Promise.resolve();
+    type Chunk = { type: 'stdout' | 'stderr'; data: string };
+    const batches = new StreamBatch<Chunk[]>(
+      (chunks) => this.persistEvents(commandId, chunks),
+      (left, right) => {
+        const last = left.at(-1)!;
+        if (last.type === right[0].type) last.data += right[0].data;
+        else left.push(...right);
+        return left;
+      },
+      (chunks) => chunks.reduce((bytes, chunk) => bytes + Buffer.byteLength(chunk.data) + 64, 0),
+      stdioProcess ? 10 : 50,
+    );
     const enqueue = (type: 'stdout' | 'stderr', data: string) => {
       if (!data) return;
-      eventQueue = eventQueue.then(() => this.persistEvent(commandId, type, data)).then(() => undefined);
+      batches.push([{ type, data }]);
     };
     child.stdout?.on('data', (chunk: Buffer) => enqueue('stdout', stdoutDecoder.write(chunk)));
     child.stderr?.on('data', (chunk: Buffer) => enqueue('stderr', stderrDecoder.write(chunk)));
@@ -249,7 +261,7 @@ export class CommandsService {
         settled = true;
         enqueue('stdout', stdoutDecoder.end());
         enqueue('stderr', stderrDecoder.end());
-        await eventQueue;
+        await batches.flush();
 
         const cancelled = this.cancellationRequested.has(commandId);
         const status = cancelled ? 'cancelled' : spawnError || exitCode !== 0 ? 'failed' : 'succeeded';
@@ -273,10 +285,16 @@ export class CommandsService {
   }
 
   private async persistEvent(commandId: string, type: 'stdout' | 'stderr' | 'lifecycle', data: string): Promise<void> {
-    const [row] = await this.db.insert(commandExecutionEvents).values({ commandId, type, data }).returning();
-    const event = toEventView(row);
-    this.stdioProcesses.get(commandId)?.onEvent(event);
-    for (const listener of this.listeners) listener(event);
+    await this.persistEvents(commandId, [{ type, data }]);
+  }
+
+  private async persistEvents(commandId: string, chunks: Array<{ type: 'stdout' | 'stderr' | 'lifecycle'; data: string }>): Promise<void> {
+    const rows = this.db.insert(commandExecutionEvents).values(chunks.map((chunk) => ({ commandId, ...chunk }))).returning().all();
+    for (const row of rows.sort((left, right) => left.sequence - right.sequence)) {
+      const event = toEventView(row);
+      this.stdioProcesses.get(commandId)?.onEvent(event);
+      for (const listener of this.listeners) listener(event);
+    }
   }
 }
 

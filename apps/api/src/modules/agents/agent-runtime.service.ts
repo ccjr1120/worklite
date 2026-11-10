@@ -7,13 +7,17 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { agentExecutions, agentRuntimeEvents, agentRuntimeInteractions, agentRuntimeRuns, agentRuntimeSessions, type Database, type StoredAgentRuntimeEvent } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { ProjectExecutorService } from './project-executor.service';
+import { openChatRuntimeMcp, type ChatRuntimeTools, type ChatRuntimeQuestion } from './chat-runtime-mcp';
 import type { ProjectExecutorRequest, ProjectExecutorSteerPort } from './project-executor.types';
 
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type RuntimeTurnRequest = Omit<ProjectExecutorRequest, 'launch' | 'runtimeSession' | 'resourceDirectory' | 'onQuestion' | 'onApproval' | 'owner'> & {
+  owner?: 'agent' | 'chat';
+  platformTools?: ChatRuntimeTools;
   sessionId: string;
   runtime: 'claude' | 'codex';
-  onInteraction: (id: string, question: string) => Promise<void>;
+  messageId?: string;
+  onInteraction: (id: string, question: string, details?: ChatRuntimeQuestion) => Promise<void>;
 };
 type ActiveRun = { controller: AbortController; done: Promise<void>; steerPort: ProjectExecutorSteerPort };
 
@@ -21,7 +25,7 @@ type ActiveRun = { controller: AbortController; done: Promise<void>; steerPort: 
 @Injectable()
 export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
   private readonly active = new Map<string, ActiveRun>();
-  private readonly answers = new Map<string, { sessionId: string; resolve: (answer: string) => void }>();
+  private readonly answers = new Map<string, { sessionId: string; question: string; answer: Promise<string>; resolve: (answer: string) => void }>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -66,6 +70,19 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async summarize(workspaceId: string, sessionId: string, systemPrompt: string, input: string): Promise<string> {
+    if (this.active.has(sessionId)) throw new ConflictException('The Chat session is still running.');
+    const session = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, sessionId), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
+    if (!session || session.status === 'closed') throw new ConflictException('Run one Chat turn before summarizing this runtime session.');
+    const directory = await mkdtemp(join(session.resourceDirectory, 'summary-'));
+    try {
+      return await this.executors.execute({ owner: 'chat', workspaceId, launch: session.launch, model: session.launch.model,
+        projectDirectory: directory, resourceDirectory: directory, systemPrompt, input, skills: [], mcpServers: [],
+        signal: new AbortController().signal, correlation: { surface: 'chat', conversationId: sessionId },
+      });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }
+
   async waitForStop(sessionId: string): Promise<void> {
     await this.active.get(sessionId)?.done;
   }
@@ -85,7 +102,7 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
       const session = tx.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, sessionId), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
       if (!session) throw new NotFoundException('Agent runtime session not found.');
       const updated = tx.update(agentRuntimeInteractions).set({ status: 'answered', answer, updatedAt: new Date() }).where(and(eq(agentRuntimeInteractions.id, interactionId), eq(agentRuntimeInteractions.status, 'pending'))).returning().get();
-      if (!updated) throw new ConflictException('This runtime question has already been answered.');
+      if (!updated) throw new ConflictException('This runtime question is no longer pending.');
       tx.update(agentRuntimeRuns).set({ status: 'running', updatedAt: new Date() }).where(eq(agentRuntimeRuns.id, updated.runId)).run();
       accept(tx);
     });
@@ -113,7 +130,7 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (request.model) await this.executors.requireModel(request.workspaceId, request.runtime, request.model);
       const launch = await this.executors.captureLaunch(request.runtime, request.model);
       request.signal.throwIfAborted();
-      const root = process.env.WORKLITE_AGENT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'agent-sessions');
+      const root = request.owner === 'chat' ? process.env.WORKLITE_CHAT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'chat') : process.env.WORKLITE_AGENT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'agent-sessions');
       await mkdir(root, { recursive: true, mode: 0o700 });
       const resourceDirectory = await mkdtemp(join(root, 'session-'));
       try {
@@ -136,21 +153,30 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
     const event = (data: StoredAgentRuntimeEvent) => {
       this.db.insert(agentRuntimeEvents).values({ id: `are_${randomUUID()}`, runId, sequence: ++sequence, data }).run();
     };
+    let platform: Awaited<ReturnType<typeof openChatRuntimeMcp>> | undefined;
     try {
       request.signal.throwIfAborted();
-      const output = await this.executors.execute({
-        ...request, model: session.launch.model, owner: 'agent', launch: session.launch, resourceDirectory: session.resourceDirectory,
+      if (request.platformTools) platform = await openChatRuntimeMcp(request.platformTools, (question, details) => this.ask(request, runId, question, event, 'question', details));
+        // Link to the owning execution's canonical text stream without duplicating its chunks.
+        if (request.messageId) event({ kind: 'message_stream', messageId: request.messageId });
+      const execute = (input: string) => this.executors.execute({
+        ...request, model: session.launch.model, owner: request.owner ?? 'agent', launch: session.launch, resourceDirectory: session.resourceDirectory,
+        input,
+        ...(request.owner === 'chat' ? { projectDirectory: session.resourceDirectory } : {}),
+        mcpServers: [...request.mcpServers, ...(platform ? [platform.runtime] : [])],
         runtimeSession: {
-          ...(session.externalSessionId ? { resumeId: session.externalSessionId } : {}),
+          ...(externalSessionId ? { resumeId: externalSessionId } : {}),
           onSession: async (id) => {
             if (externalSessionId && externalSessionId !== id) throw new ConflictException('The backend returned a different session. Continuation stopped.');
             externalSessionId = id;
             this.db.update(agentRuntimeSessions).set({ externalSessionId: id, updatedAt: new Date() }).where(eq(agentRuntimeSessions.id, session!.id)).run();
           },
         },
-        onTextDelta: async (delta) => { event({ kind: 'text_delta', delta }); await request.onTextDelta?.(delta); },
+        // The owning execution stores the canonical text replay. Avoid a second copy.
+        onTextDelta: async (delta) => { if (request.onTextDelta) await request.onTextDelta(delta); else event({ kind: 'text_delta', delta }); },
         onEvent: async (activity) => {
-          event({ kind: 'activity', phase: activity.phase, ...(activity.usage ? { usage: activity.usage } : {}), ...(activity.itemId ? { itemId: activity.itemId } : {}), ...(activity.itemType ? { itemType: activity.itemType } : {}) });
+            event({ kind: 'activity', phase: activity.phase, ...(activity.usage ? { usage: activity.usage } : {}), ...(activity.itemId ? { itemId: activity.itemId } : {}), ...(activity.itemType ? { itemType: activity.itemType } : {}),
+              ...(activity.summary ? { summary: activity.summary } : {}), ...(activity.text ? { text: activity.text } : {}), ...(activity.status ? { status: activity.status } : {}) });
           await request.onEvent?.(activity);
         },
         onQuestion: (question) => this.ask(request, runId, question, event),
@@ -159,6 +185,19 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
           return ['approve', 'yes', '同意', '确认', '允许'].includes(answer.trim().toLowerCase());
         },
       });
+      let output = await execute(request.input);
+      // Some engines end the native turn while an asynchronous MCP question is still open.
+      // Keep WorkLite's waiter alive, then send only the answer into the same native history.
+      // Settling here would cancel the interaction and leave the owning execution unanswerable.
+      for (;;) {
+        request.signal.throwIfAborted();
+        const pending = [...this.answers.values()].find((entry) => entry.sessionId === request.sessionId);
+        if (!pending) break;
+        if (!externalSessionId) throw new ConflictException('The runtime ended with a pending question but no resumable session.');
+        const answer = await pending.answer;
+        request.signal.throwIfAborted();
+        output = await execute(`User answer to the pending question ${JSON.stringify(pending.question)}:\n${answer}\n\nContinue from this answer. Do not repeat completed operations.`);
+      }
       request.signal.throwIfAborted();
       this.settle(session.id, runId, 'completed');
       event({ kind: 'settled', status: 'completed' });
@@ -170,21 +209,26 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.settle(session.id, runId, status, error instanceof Error ? error.message : 'Agent runtime failed.');
       event({ kind: 'settled', status });
       throw error;
+    } finally {
+      await platform?.close();
     }
   }
 
-  private async ask(request: RuntimeTurnRequest, runId: string, question: string, event: (event: StoredAgentRuntimeEvent) => void, kind: 'question' | 'approval' = 'question'): Promise<string> {
+  private async ask(request: RuntimeTurnRequest, runId: string, question: string, event: (event: StoredAgentRuntimeEvent) => void, kind: 'question' | 'approval' = 'question', details?: ChatRuntimeQuestion): Promise<string> {
     request.signal.throwIfAborted();
+    if ([...this.answers.values()].some((entry) => entry.sessionId === request.sessionId)) throw new ConflictException('Only one runtime question may be active.');
     const id = `ari_${randomUUID()}`;
     this.db.transaction((tx) => {
       tx.insert(agentRuntimeInteractions).values({ id, runId, question, kind, status: 'pending' }).run();
       tx.update(agentRuntimeRuns).set({ status: 'waiting_for_input', updatedAt: new Date() }).where(eq(agentRuntimeRuns.id, runId)).run();
     });
     let rejectAnswer!: (reason: unknown) => void;
+    let resolveAnswer!: (answer: string) => void;
     const answer = new Promise<string>((resolve, reject) => {
       rejectAnswer = reject;
-      this.answers.set(id, { sessionId: request.sessionId, resolve });
+      resolveAnswer = resolve;
     });
+    this.answers.set(id, { sessionId: request.sessionId, question, answer, resolve: resolveAnswer });
     // Attach a rejection observer before any async publication or cancellation can occur.
     void answer.catch(() => undefined);
     const abort = () => rejectAnswer(request.signal.reason ?? new Error('Agent question cancelled.'));
@@ -192,7 +236,7 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
     if (request.signal.aborted) abort();
     try {
       event({ kind: 'question', interactionId: id });
-      await request.onInteraction(id, question);
+      await request.onInteraction(id, question, details);
       return await answer;
     } finally {
       request.signal.removeEventListener('abort', abort);

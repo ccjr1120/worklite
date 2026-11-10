@@ -19,6 +19,26 @@ async function runScript(path: string, input: unknown, data: unknown, status = 2
 }
 
 describe('packaged protected tool result contracts', () => {
+  it.each([
+    [{ agentId: 'agent/one', executionId: 'aex_one' }, '/agents/agent%2Fone/executions/aex_one/cancel'],
+    [{ agentId: 'agent', executionId: 'aex_one', runId: 'air_child' }, '/agents/agent/executions/aex_one/sub-agents/air_child/cancel'],
+  ])('cancels the exact Agent execution or child through the protected script', async (input, route) => {
+    const data = { id: 'aex_one', status: 'cancelled' };
+    const { result, fetch } = await runScript('scripts/cancel-agent-execution.mjs', input, data);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`http://worklite.test/api${route}`, expect.objectContaining({ method: 'POST', body: '{}' }));
+    expect(result).toMatchObject({ worklite: { type: 'snapshot' }, data });
+    expect(JSON.parse(files.get('scripts/tools.json')!)['scripts/cancel-agent-execution.mjs']).toMatchObject({ name: 'cancel_agent_execution', inputSchema: { required: ['agentId', 'executionId'] } });
+  });
+
+  it.each([
+    { agentId: 'agent' },
+    { agentId: 'agent', executionId: '' },
+    { agentId: 'agent', executionId: 'execution', runId: '' },
+    { agentId: 'agent', executionId: 'execution', action: 'restart' },
+  ])('rejects invalid cancellation input before sending a request', async (input) => {
+    await expect(runScript('scripts/cancel-agent-execution.mjs', input, {})).rejects.toThrow();
+  });
+
   it('forwards a 201 API image result without worklite/data wrapping', async () => {
     const images = [{ id: 'art_one', name: '截图', mimeType: 'image/png', sizeBytes: 10, width: 1, height: 1,
       contentUrl: '/api/artifacts/art_one/content', markdown: '![截图](/api/artifacts/art_one/content)' }];

@@ -158,7 +158,12 @@ const transformToProviderRequestJSON = (
     throw new GatewayError(`${fn} is not supported by ${provider}`);
   }
 
-  return transformUsingProviderConfig(providerConfig, params, providerOptions);
+  const transformed = transformUsingProviderConfig(providerConfig, params, providerOptions);
+  // WorkLite uses each provider's native protocol. Preserve request-level parameters
+  // unknown to this Portkey version (effort, speed, and future protocol extensions).
+  const nativeProtocol = (provider === 'openai' && ['chatComplete', 'createModelResponse'].includes(fn))
+    || (provider === 'anthropic' && fn === 'messages');
+  return nativeProtocol ? { ...params, ...transformed } : transformed;
 };
 
 const transformToProviderRequestFormData = (

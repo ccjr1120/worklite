@@ -24,6 +24,53 @@ beforeEach(async () => {
 afterEach(() => db.$client.close());
 
 describe('Agent history', () => {
+  it.each(['codex', 'claude'] as const)('shows %s lead messages and active tools across resumed turns without leaking other executions', async (runtime) => {
+    const launch = runtime === 'claude' ? { executor: 'claude' as const, commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null } : { executor: 'codex' as const, commandArguments: [], model: null };
+    db.insert(agentRuntimeSessions).values({ id: 'execution', workspaceId, runtime, launch, resourceDirectory: '/tmp/session' }).run();
+    const createdAt = new Date('2026-11-09T00:00:00Z');
+    db.insert(agentRuntimeRuns).values([{ id: 'previous', sessionId: 'execution', status: 'failed', createdAt }, { id: 'current', sessionId: 'execution', status: 'running', createdAt }]).run();
+    const toolStart = runtime === 'codex' ? 'codex.item_started' : 'claude.tool_started';
+    const toolEnd = runtime === 'codex' ? 'codex.item_completed' : 'claude.tool_completed';
+    const toolType = runtime === 'codex' ? 'commandExecution' : 'Bash';
+    db.insert(agentRuntimeEvents).values([
+      { id: 'interrupted-tool', runId: 'previous', sequence: 1, data: { kind: 'activity', phase: toolStart, itemId: 'reused-id', itemType: toolType, summary: 'old command' } },
+      { id: 'commentary', runId: 'current', sequence: 1, data: { kind: 'activity', phase: runtime === 'codex' ? 'codex.item_completed' : 'claude.agent_message', itemId: 'message', itemType: runtime === 'codex' ? 'agentMessage' : 'agent_message', text: '我正在检查测试结果' } },
+      { id: 'finished-start', runId: 'current', sequence: 2, data: { kind: 'activity', phase: toolStart, itemId: 'finished-tool', itemType: toolType, summary: 'pnpm build' } },
+      { id: 'finished-end', runId: 'current', sequence: 3, data: { kind: 'activity', phase: toolEnd, itemId: 'finished-tool', itemType: toolType, status: 'failed' } },
+      { id: 'current-tool', runId: 'current', sequence: 4, data: { kind: 'activity', phase: toolStart, itemId: 'reused-id', itemType: toolType, summary: 'pnpm test' } },
+      { id: 'reasoning', runId: 'current', sequence: 5, data: { kind: 'activity', phase: 'codex.item_completed', itemType: 'reasoning', itemId: 'private', text: 'private reasoning' } },
+    ]).run();
+    db.insert(agentExecutions).values({ id: 'other-execution', workspaceId, agentId: 'sibling' }).run();
+    db.insert(agentRuntimeSessions).values({ id: 'other-execution', workspaceId, runtime, launch, resourceDirectory: '/tmp/other' }).run();
+    db.insert(agentRuntimeRuns).values({ id: 'other-turn', sessionId: 'other-execution', status: 'running' }).run();
+    db.insert(agentRuntimeEvents).values({ id: 'other-message', runId: 'other-turn', sequence: 1, data: { kind: 'activity', phase: 'claude.agent_message', text: 'other execution reply' } }).run();
+    db.update(agentExecutions).set({ status: 'running' }).where(eq(agentExecutions.id, 'execution')).run();
+    const detail = await service.detail(request, 'lead', 'execution');
+    expect(detail.run.runtime).toBe(runtime);
+    expect(detail.run.currentActivity).toEqual({ phase: 'tool', toolName: 'pnpm test' });
+    expect(detail.run.activities).toEqual([
+      expect.objectContaining({ kind: 'tool', summary: 'old command', status: 'interrupted' }),
+      expect.objectContaining({ kind: 'message', text: '我正在检查测试结果' }),
+      expect.objectContaining({ kind: 'tool', summary: 'pnpm build', status: 'failed' }),
+      expect.objectContaining({ kind: 'tool', summary: 'pnpm test', status: 'running' }),
+    ]);
+    expect(new Set(detail.run.activities!.map((activity) => activity.id)).size).toBe(4);
+    expect(detail.invocations[0]).toEqual(detail.run);
+    expect(JSON.stringify(detail)).not.toContain('private reasoning');
+    expect(JSON.stringify(detail)).not.toContain('other execution reply');
+    expect((await service.list(request, 'lead')).items[0].activities).toBeUndefined();
+    db.update(agentExecutions).set({ status: 'cancelled' }).where(eq(agentExecutions.id, 'execution')).run();
+    const cancelled = await service.detail(request, 'lead', 'execution');
+    expect(cancelled.run.currentActivity).toBeNull();
+    expect(cancelled.run.activities?.at(-1)).toMatchObject({ status: 'interrupted' });
+  });
+
+  it('keeps saved replies available after runtime events expire', async () => {
+    db.insert(agentRuntimeSessions).values({ id: 'execution', workspaceId, runtime: 'claude', launch: { executor: 'claude', commandArguments: [], baseUrl: 'http://127.0.0.1:23392', model: null }, resourceDirectory: '/tmp/session' }).run();
+    db.update(agentExecutions).set({ displayMessages: [{ id: 'reply', role: 'assistant', content: '最终回复', createdAt: new Date().toISOString() }] }).where(eq(agentExecutions.id, 'execution')).run();
+    expect((await service.detail(request, 'lead', 'execution')).run).toMatchObject({ output: '最终回复', activities: [], currentActivity: null });
+  });
+
   it('shows the latest Codex thread snapshot across resumed turns without Gateway traffic or double counting', async () => {
     db.insert(agentRuntimeSessions).values({ id: 'execution', workspaceId, runtime: 'codex', launch: { executor: 'codex', commandArguments: ['codex'], model: null }, resourceDirectory: '/tmp/session' }).run();
     const createdAt = new Date('2026-11-05T00:00:00Z');

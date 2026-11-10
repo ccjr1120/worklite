@@ -1,3 +1,6 @@
+// @vitest-environment node
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { BuiltinAgentToolsService } from './builtin-agent-tools.service';
 import { realpath } from 'node:fs/promises';
 import type { ProjectExecutorService } from './project-executor.service';
@@ -9,6 +12,11 @@ import type { WorkspaceResourcesService } from '../teams/team-resources.service'
 import type { AgentCapabilitiesService } from './agent-capabilities.service';
 import type { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
 import { AgentCollaborationService } from './agent-collaboration.service';
+import { AgentActionsService } from './agent-actions.service';
+import { ConfigService } from '@nestjs/config';
+import type { WechatOfficialAccountService } from '../connections/wechat-official-account.service';
+import type { ChatAttachmentsService } from './chat-attachments.service';
+import { createCanvas } from '@napi-rs/canvas';
 
 let db: Database;
 afterEach(() => db?.$client.close());
@@ -25,11 +33,35 @@ async function setup() {
   const executors = { captureLaunch: async () => ({ executor: 'codex', model: 'provider/model', commandArguments: [] }), execute: executeEngine } as unknown as ProjectExecutorService;
   const builtinTools = { start: vi.fn(async () => ({ id: 'command-private' })), wait: vi.fn(async () => ({ execution: { exitCode: 0 }, output: 'Saved' })), cancel: vi.fn(async () => ({})) };
   const executeAssignedTool = vi.fn<IsolatedAgentInvocationService['executeAssignedTool']>(async () => ({ type: 'text', value: 'Existing evidence' }));
-  const newService = () => new AgentCollaborationService(db, resources, { execute, executeAssignedTool } as unknown as IsolatedAgentInvocationService, { execute: capability } as unknown as AgentCapabilitiesService, executors, builtinTools as unknown as BuiltinAgentToolsService);
+  const actions = new AgentActionsService(db, { hasSession: () => true } as unknown as WechatOfficialAccountService, { create: async () => ({ id: 'att_qr', markdown: '![公众号授权二维码](/api/chat/attachments/att_qr)', expiresAt: new Date(Date.now() + 120_000).toISOString() }) } as unknown as ChatAttachmentsService, new ConfigService({ WORKLITE_PUBLIC_URL: 'https://worklite.example' }));
+  const newService = () => new AgentCollaborationService(db, resources, { execute, executeAssignedTool } as unknown as IsolatedAgentInvocationService, { execute: capability } as unknown as AgentCapabilitiesService, executors, builtinTools as unknown as BuiltinAgentToolsService, actions);
   return { service: newService(), newService, execute, capability, executeEngine, builtinTools, executeAssignedTool };
 }
 
 describe('Agent-selected collaboration', () => {
+  it.each(['codex', 'claude'] as const)('records %s child public messages and live tool summaries', async (runtime) => {
+    const { service, execute, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind: runtime, projectDirectory: process.cwd() }, collaboration: { subAgentIds: [], capabilities: [], publicModels: [] } }).where(eq(agents.id, 'researcher')).run();
+    let childRunId = '';
+    executeEngine.mockImplementationOnce(async (request) => {
+      childRunId = request.correlation!.agentRunId!;
+      await request.onEvent?.({ phase: runtime === 'codex' ? 'codex.item_completed' : 'claude.agent_message', itemId: 'message', itemType: runtime === 'codex' ? 'agentMessage' : 'agent_message', text: '正在检查实现' });
+      await request.onEvent?.({ phase: runtime === 'codex' ? 'codex.item_started' : 'claude.tool_started', itemId: 'tool', itemType: runtime === 'codex' ? 'commandExecution' : 'Bash', summary: 'pnpm test' });
+      expect(db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()?.metadata).toMatchObject({
+        currentActivity: { phase: 'tool', toolName: 'pnpm test' },
+        activities: [expect.objectContaining({ kind: 'message', text: '正在检查实现' }), expect.objectContaining({ kind: 'tool', summary: 'pnpm test', status: 'running' })],
+      });
+      await request.onEvent?.({ phase: runtime === 'codex' ? 'codex.item_completed' : 'claude.tool_completed', itemId: 'tool', itemType: runtime === 'codex' ? 'commandExecution' : 'Bash', status: 'completed' });
+      return '检查完成';
+    });
+    execute.mockImplementationOnce(async (request) => {
+      await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', task: '检查实现' }));
+      return 'Done';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', '检查实现', new AbortController().signal);
+    expect(db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()?.metadata).toMatchObject({ output: '检查完成', currentActivity: null, activities: [expect.anything(), expect.objectContaining({ summary: 'pnpm test', status: 'completed' })] });
+  });
+
   it('binds specialist tool schemas to owned stable ids and recovers from a display-name request', async () => {
     const { service, execute } = await setup();
     db.update(agents).set({ name: 'im-codex' }).where(eq(agents.id, 'writer')).run();
@@ -86,7 +118,7 @@ describe('Agent-selected collaboration', () => {
 
   it('keeps the Codex command attribution and unknown usage if startup fails before any token report', async () => {
     const { service, executeEngine } = await setup();
-    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() } }).where(eq(agents.id, 'lead')).run();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() }, collaboration: { subAgentIds: [], capabilities: [], publicModels: [] } }).where(eq(agents.id, 'lead')).run();
     executeEngine.mockImplementationOnce(async (request) => {
       await request.onEvent?.({ phase: 'codex.started', commandExecutionId: 'command-startup' });
       throw new Error('No usage reported');
@@ -229,11 +261,14 @@ describe('Agent-selected collaboration', () => {
   it('resumes a private capability with the original operation and arguments', async () => {
     const { service, execute, capability } = await setup();
     db.update(agents).set({ collaboration: { subAgentIds: [], capabilities: [{ id: 'publish', type: 'wechat-official-account/publish', typeVersion: '2', config: {} }], publicModels: ['provider/model'], privateTools: [{ name: 'publish_private', description: 'Publish article', inputSchema: { type: 'object', properties: { input: {}, resumeCallId: { type: 'string' } } }, handler: { kind: 'capability', capabilityId: 'publish' } }] } }).where(eq(agents.id, 'lead')).run();
-    capability.mockResolvedValueOnce({ status: 'waiting_for_input', pendingAction: { id: 'action-private', type: 'wechat_login', title: 'Login', description: 'Scan to log in', qrCode: 'private-qr' } }).mockResolvedValueOnce({ status: 'completed' });
+    const png = createCanvas(128, 128).toBuffer('image/png');
+    capability.mockResolvedValueOnce({ status: 'waiting_for_input', pendingAction: { id: 'action-private', type: 'wechat_login', title: 'Login', description: 'Scan to log in', qrCode: `data:image/png;base64,${png.toString('base64')}`, expiresAt: new Date(Date.now() + 120_000) } }).mockResolvedValueOnce({ status: 'completed' });
     execute.mockImplementation(async (request) => {
       const first = JSON.parse(await request.executeManagedTool!(tool('publish_private', { input: { article: 'Original' } })));
       expect(first.result.status).toBe('waiting_for_input');
-      expect(first.result).not.toHaveProperty('qrCode');
+      expect(first.result.qrImage.markdown).toBe('![公众号授权二维码](/api/chat/attachments/att_qr)');
+      expect(first.result.scanUrl).toMatch(/^https:\/\/worklite\.example\/api\/agent-actions\/scan\//);
+      expect(first.result.markdown).toContain(first.result.scanUrl);
       const second = JSON.parse(await request.executeManagedTool!(tool('publish_private', { input: { article: 'Changed' }, resumeCallId: first.result.callId })));
       expect(second.result.status).toBe('completed');
       return 'Complete';
@@ -391,6 +426,29 @@ describe('Agent-selected collaboration', () => {
     expect(execute).toHaveBeenCalledTimes(1); expect(capability).not.toHaveBeenCalled();
   });
 
+  it('preserves a migrated engine lead’s assigned sub-Agents and capabilities through MCP', async () => {
+    const { service, execute, capability, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: process.cwd() }, model: 'gpt-test', collaboration: { subAgentIds: ['writer'], capabilities: [{ id: 'image', type: 'worklite/image', typeVersion: '1', config: {} }], publicModels: [] } }).where(eq(agents.id, 'lead')).run();
+    execute.mockResolvedValue('Written');
+    capability.mockResolvedValue({ complete: true });
+    executeEngine.mockImplementation(async (request) => {
+      const server = request.mcpServers.find((server) => server.id === 'agent_tools')!;
+      const client = new Client({ name: 'engine-test', version: '1' });
+      await client.connect(new StreamableHTTPClientTransport(new URL(server.endpoint), { requestInit: { headers: { authorization: `Bearer ${server.authToken}` } } }));
+      try {
+        expect((await client.listTools()).tools.map((tool) => tool.name)).toContain('run_sub_agent');
+        const child = await client.callTool({ name: 'run_sub_agent', arguments: { agentId: 'writer', task: 'Write' } });
+        expect(child).toMatchObject({ content: [{ type: 'text', text: expect.stringContaining('Written') }] });
+        const result = await client.callTool({ name: 'use_capability', arguments: { capabilityId: 'image', input: {} } });
+        expect(result).toMatchObject({ content: [{ type: 'text', text: expect.stringContaining('true') }] });
+      } finally { await client.close(); }
+      return 'Complete';
+    });
+    expect(await service.run('workspace_personal', 'execution', 'lead', 'Goal', new AbortController().signal)).toBe('Complete');
+    expect(execute).toHaveBeenCalledOnce();
+    expect(capability).toHaveBeenCalledOnce();
+  });
+
   it('lets a native lead call an engine-backed sub-Agent in the task project directory', async () => {
     const { service, execute, executeEngine } = await setup();
     db.update(agents).set({ runtime: { kind: 'codex', projectDirectory: '' } }).where(eq(agents.id, 'writer')).run();
@@ -401,7 +459,7 @@ describe('Agent-selected collaboration', () => {
       return 'Complete';
     });
     await service.run('workspace_personal', 'execution', 'lead', 'Goal', controller.signal, undefined, '/tmp');
-    expect(executeEngine).toHaveBeenCalledWith(expect.objectContaining({ owner: 'agent', projectDirectory: await realpath('/tmp'), signal: controller.signal, model: 'provider/model' }));
+    expect(executeEngine).toHaveBeenCalledWith(expect.objectContaining({ owner: 'agent', projectDirectory: await realpath('/tmp'), signal: expect.any(AbortSignal), model: 'provider/model' }));
   });
 
   it.each(['claude', 'codex'] as const)('pauses one %s instance and resumes its saved engine session without stopping a sibling', async (kind) => {
@@ -416,7 +474,8 @@ describe('Agent-selected collaboration', () => {
         expect(request.input).toContain('Continue the interrupted task');
         return 'Resumed result';
       }
-      const index = signals.push(request.signal) - 1;
+      const index = request.input.includes('First') ? 0 : 1;
+      signals[index] = request.signal;
       await request.runtimeSession!.onSession(`session-${index}`);
       ready[index]!();
       if (index === 1) return 'Sibling result';
@@ -448,6 +507,32 @@ describe('Agent-selected collaboration', () => {
     const childRuns = db.select().from(auditLogs).where(eq(auditLogs.action, 'agent.invocation')).all().filter((row) => (row.metadata as { parentRunId: string | null }).parentRunId);
     expect(childRuns).toHaveLength(2);
     expect(childRuns.every((row) => (row.metadata as { status: string }).status === 'completed')).toBe(true);
+  });
+
+  it.each(['claude', 'codex'] as const)('cancels a paused %s child without replaying its engine session', async (kind) => {
+    const { service, execute, executeEngine } = await setup();
+    db.update(agents).set({ runtime: { kind, projectDirectory: process.cwd() } }).where(eq(agents.id, 'writer')).run();
+    let childRunId = '';
+    executeEngine.mockImplementation(async (request) => {
+      await request.runtimeSession!.onSession('saved-session');
+      return new Promise<string>((_, reject) => {
+        const abort = () => reject(request.signal.reason);
+        request.signal.addEventListener('abort', abort, { once: true });
+        if (request.signal.aborted) abort();
+      });
+    });
+    execute.mockImplementation(async (request) => {
+      const launch = JSON.parse(await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'writer', task: 'Work', background: true })));
+      childRunId = launch.result.runId;
+      await vi.waitFor(() => expect(executeEngine).toHaveBeenCalledOnce());
+      await service.controlInstance('workspace_personal', 'execution', childRunId, 'pause');
+      expect(await service.controlInstance('workspace_personal', 'execution', childRunId, 'cancel')).toMatchObject({ status: 'cancelled' });
+      await expect(service.controlInstance('workspace_personal', 'execution', childRunId, 'resume')).rejects.toThrow('Only a paused');
+      return 'Stopped child';
+    });
+    await service.run('workspace_personal', 'execution', 'lead', 'Work', new AbortController().signal, undefined, process.cwd());
+    expect(executeEngine).toHaveBeenCalledOnce();
+    expect(db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()!.metadata).toMatchObject({ status: 'cancelled', finishedAt: expect.any(String) });
   });
 
   it('propagates cancellation to the active model and does not commit a tool result afterwards', async () => {
@@ -623,4 +708,21 @@ describe('Agent-selected collaboration', () => {
     await service.run('workspace_personal', 'execution', 'lead', 'Goal', new AbortController().signal);
   });
 
+});
+
+it('keeps the lead and child model parameter selections independent', async () => {
+  const { service, execute } = await setup();
+  db.update(agents).set({ modelParameters: { reasoningEffort: 'high', serviceTier: 'fast' } }).where(eq(agents.id, 'lead')).run();
+  db.update(agents).set({ collaboration: { subAgentIds: [], capabilities: [], publicModels: ['provider/model'], modelParameters: { 'provider/model': { reasoningEffort: 'low' } } } }).where(eq(agents.id, 'researcher')).run();
+  execute.mockImplementationOnce(async (request) => {
+    expect(request.modelParameters).toEqual({ reasoningEffort: 'high', serviceTier: 'fast' });
+    await request.executeManagedTool!(tool('run_sub_agent', { agentId: 'researcher', task: 'Research' }));
+    return 'Done';
+  }).mockImplementationOnce(async (request) => {
+    expect(request.modelParametersByModel).toEqual({ 'provider/model': { reasoningEffort: 'low' } });
+    expect(request.modelParameters).toBeUndefined();
+    return 'Evidence';
+  });
+  expect(await service.run('workspace_personal', 'execution', 'lead', 'Work', new AbortController().signal)).toBe('Done');
+  expect(execute).toHaveBeenCalledTimes(2);
 });

@@ -4,6 +4,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "node",
+    "rewriteRelativeImportExtensions": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "lib": ["esnext"],

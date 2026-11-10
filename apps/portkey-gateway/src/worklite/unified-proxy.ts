@@ -33,12 +33,10 @@ export function resolveUnifiedModel(model: unknown, operation: UnifiedProxyOpera
     ? operation === 'systemone'
     : provider.protocol === 'anthropic/messages'
       ? operation === 'messages'
-      : provider.protocol === 'codex/responses'
-        ? operation === 'responses' || operation === 'images/generations'
-        : provider.protocol === 'openai/responses'
-          ? operation === 'responses'
+        : provider.protocol === 'codex/responses' || provider.protocol === 'openai/responses'
+          ? operation === 'responses' || operation === 'images/generations'
           : provider.protocol === 'openai/chat'
-            ? operation === 'chat/completions'
+            ? operation === 'chat/completions' || operation === 'images/generations'
             : false;
   if (!supported) throw new UnifiedProxyError(`Provider protocol ${provider.protocol} does not support ${operation}.`);
   return { providerId: provider.id, providerName, modelId };

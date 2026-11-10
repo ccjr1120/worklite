@@ -20,6 +20,7 @@ import type {
   AgentTeamGroupView,
   AgentTeamGroupControlRequest,
   AgentExecutionView,
+  ChatSuggestionResponse,
   AgentRunListView,
   AgentRunDetailView,
   AnswerAgentQuestionRequest,
@@ -203,6 +204,7 @@ export const api = {
     return apiGet<ChatConversationList>(`/api/chat/conversations${search.size ? `?${search}` : ''}`);
   },
   chatConversation: (id: string) => apiGet<ChatConversationView>(`/api/chat/conversations/${encodeURIComponent(id)}`),
+  chatSuggestions: (id: string, contextVersion: string, signal?: AbortSignal) => apiRequest<ChatSuggestionResponse>(`/api/chat/conversations/${encodeURIComponent(id)}/suggestions`, { method: 'POST', body: JSON.stringify({ contextVersion }), signal }),
   chatConversationRecords: (id: string) => apiGet<ChatConversationRecords>(`/api/chat/conversations/${encodeURIComponent(id)}/records`),
   summarizeChatConversation: (id: string) => apiPost<SummarizeChatConversationResponse>(`/api/chat/conversations/${encodeURIComponent(id)}/summarize`),
   chatProjectTask: (taskId: string, activities?: 'full') => apiGet<ChatProjectTaskView>(`/api/chat/project-tasks/${encodeURIComponent(taskId)}${activities === 'full' ? '?activities=full' : ''}`),

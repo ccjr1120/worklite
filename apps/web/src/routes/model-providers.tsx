@@ -1,3 +1,5 @@
+import { ModelParametersFields } from '@/components/model-parameters-fields';
+import type { ModelParameters } from '@worklite/contracts';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { BarChart3, Bot, ChevronDown, Copy, GripVertical, KeyRound, LoaderCircle, LogIn, Pencil, Plus, RefreshCw, ScrollText, Trash2, Upload, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -206,6 +208,8 @@ function ModelProvidersPage() {
   const [apiKey, setApiKey] = useState('');
   const [protocol, setProtocol] = useState<ModelProviderProtocol | ''>('');
   const [baseURL, setBaseURL] = useState('');
+  const [testParameters, setTestParameters] = useState<ModelParameters>({});
+  const [testParametersValid, setTestParametersValid] = useState(true);
   const [modelIds, setModelIds] = useState<string[]>([]);
   const [modelsBusy, setModelsBusy] = useState(false);
   const [modelsError, setModelsError] = useState('');
@@ -442,21 +446,23 @@ function ModelProvidersPage() {
   }
 
   function openProviderTest(provider: ModelProviderView) {
+    setTestParameters({});
     const remembered = window.localStorage.getItem(`${PROVIDER_TEST_MODEL_KEY}${provider.id}`);
     const model = remembered && provider.models.includes(remembered) ? remembered : provider.models[0] ?? '';
     setTestDialog({ provider, model, status: 'idle' });
   }
 
   function selectTestModel(model: string) {
+    setTestParameters({});
     setTestDialog((current) => current ? { provider: current.provider, model, status: 'idle' } : current);
     if (testDialog) window.localStorage.setItem(`${PROVIDER_TEST_MODEL_KEY}${testDialog.provider.id}`, model);
   }
 
   function startProviderTest(provider: ModelProviderView, model: string) {
     window.localStorage.setItem(`${PROVIDER_TEST_MODEL_KEY}${provider.id}`, model);
-    const startedAt = currentTime();
+    const startedAt = Date.now();
     setTestDialog({ provider, model, status: 'loading', startedAt, elapsedSeconds: 0 });
-    void api.testModelProvider(workspaceSlug, provider.id, { model }).then((result) => {
+    void api.testModelProvider(workspaceSlug, provider.id, { model, modelParameters: testParameters }).then((result) => {
       setTestDialog((current) => current?.provider.id === provider.id ? { provider, model, status: 'success', result, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1_000) } : current);
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : t('providers.testFailed');
@@ -469,7 +475,7 @@ function ModelProvidersPage() {
   }
 
   function runProviderTest() {
-    if (!testDialog || !testDialog.model || testDialog.status === 'loading') return;
+    if (!testDialog || !testDialog.model || !testParametersValid || testDialog.status === 'loading') return;
     startProviderTest(testDialog.provider, testDialog.model);
   }
 
@@ -616,7 +622,7 @@ function ModelProvidersPage() {
                 <SelectItem value="openai/responses">openai/responses</SelectItem>
                 <SelectItem value="anthropic/messages">anthropic/messages</SelectItem>
                 <SelectItem value="typesafe/systemone">typesafe/systemone</SelectItem>
-                {dialog?.mode === 'edit' && protocol === 'codex/responses' ? <SelectItem value="codex/responses">codex/responses</SelectItem> : null}
+                <SelectItem value="codex/responses">codex/responses</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -662,6 +668,7 @@ function ModelProvidersPage() {
               <SelectContent>{testDialog?.provider.models.map((model) => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
+          {testDialog ? <ModelParametersFields key={`${testDialog.provider.id}:${testDialog.model}`} value={testParameters} onChange={setTestParameters} onValidityChange={setTestParametersValid} protocol={testDialog.provider.protocol} disabled={testDialog.status === 'loading'} /> : null}
           {testDialog && testDialog.status !== 'idle' ? testDialog.provider.protocol === 'typesafe/systemone' ? <div className="flex min-h-52 flex-col gap-4 py-2">
             <div className="rounded-md border border-border bg-surface-subtle px-4 py-3 text-sm">
               <p className="text-xs font-medium text-muted-foreground">{t('providers.testInputLabel')}</p>
@@ -698,7 +705,7 @@ function ModelProvidersPage() {
               </div>
             </div>
           </div> : null}
-          <DialogFooter><Button variant="secondary" onClick={() => setTestDialog(null)}>{t('common:actions.close')}</Button><Button onClick={runProviderTest} disabled={!testDialog?.model || testDialog?.status === 'loading'}>{testDialog?.status === 'loading' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('providers.runTest')}</Button></DialogFooter>
+          <DialogFooter><Button variant="secondary" onClick={() => setTestDialog(null)}>{t('common:actions.close')}</Button><Button onClick={runProviderTest} disabled={!testDialog?.model || !testParametersValid || testDialog?.status === 'loading'}>{testDialog?.status === 'loading' ? <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : null}{t('providers.runTest')}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -835,8 +842,4 @@ function maskAccountId(value: string): string {
 
 function Detail({ label, value }: { label: string; value: string }) {
   return <div><p className="text-xs font-medium text-muted-foreground">{label}</p><p className="mt-1 break-words font-mono text-xs">{value}</p></div>;
-}
-
-function currentTime(): number {
-  return Date.now();
 }

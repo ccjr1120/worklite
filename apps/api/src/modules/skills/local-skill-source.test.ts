@@ -151,7 +151,7 @@ describe('scanLocalSkillRoot', () => {
     const result = await scanLocalSkillRoot(root);
 
     expect(result.packages).toEqual([]);
-    expect(result.skipped).toEqual([{ directory: 'not-a-skill', reason: 'The Skill package has no root SKILL.md.' }]);
+    expect(result.skipped).toEqual([{ root: 'agents', rootPath: root, directory: 'not-a-skill', reason: 'The Skill package has no root SKILL.md.' }]);
   });
 
   it('rejects unsupported top-level package paths with a clear reason', async () => {
@@ -176,7 +176,7 @@ describe('scanLocalSkillRoot', () => {
     const result = await scanLocalSkillRoot(root);
 
     expect(result.packages).toEqual([]);
-    expect(result.skipped).toEqual([{ directory: 'escaping-skill', reason: 'Symbolic links are not supported as Skill packages.' }]);
+    expect(result.skipped).toEqual([{ root: 'agents', rootPath: root, directory: 'escaping-skill', reason: 'Symbolic links are not supported as Skill packages.' }]);
   });
 
   it('refuses a symbolic-link file inside a package', async () => {

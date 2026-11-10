@@ -29,6 +29,7 @@ export class SubAgentInstance {
           parentSignal.throwIfAborted();
           try {
             const result = await execute(AbortSignal.any([parentSignal, this.controller.signal]));
+            parentSignal.throwIfAborted();
             this.status = 'completed';
             return result;
           } catch (error) {

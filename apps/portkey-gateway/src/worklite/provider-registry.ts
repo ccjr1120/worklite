@@ -1,9 +1,11 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import BetterSqlite3 from 'better-sqlite3';
 import { codexAuthStatus } from './codex-auth';
 import { codexModels } from './codex-transport';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
+import { deflateSync, inflateSync } from 'node:zlib';
+import { dirname, resolve } from 'node:path';
+import BetterSqlite3 from 'better-sqlite3';
 import { freshPromptTokens, type InputTokenSemantics } from './token-usage';
 import { isStatsGroupBy, UNATTRIBUTED_SURFACE, type GatewayAttribution, type GatewayStatsGroupBy, type GatewaySurface } from './attribution';
 
@@ -33,7 +35,7 @@ export type GatewayTimeRangeQuery = {
 
 /**
  * Filters that select one platform surface's traffic. They apply to both the
- * permanent statistics and the 12-hour request details, so the same question can be
+ * retained statistics and request details, so the same question can be
  * asked of either store.
  */
 export type GatewayAttributionQuery = {
@@ -140,11 +142,12 @@ type ProviderRow = {
 
 const VALID_PROTOCOLS: GatewayProviderProtocol[] = ['openai/chat', 'openai/responses', 'anthropic/messages', 'codex/responses', 'typesafe/systemone'];
 const GATEWAY_PROVIDER_ID = 'gateway-provider';
+let database: BetterSqlite3.Database | null = null;
+
 const CODEX_PROVIDER_ID = 'codex-provider';
 const CODEX_PROVIDER_NAME = 'codex';
 const CODEX_PROVIDER_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 const CODEX_IMAGE_MODEL_ID = 'gpt-image-2';
-let database: BetterSqlite3.Database | null = null;
 let codexSyncPromise: Promise<void> | null = null;
 let codexSyncedAt = 0;
 
@@ -160,6 +163,7 @@ function getDatabase(): BetterSqlite3.Database {
   database = new BetterSqlite3(path);
   // WAL keeps /logs and stats reads off the write lock that every captured request
   // body insert takes; rollback mode serialized all gateway traffic behind them.
+  if (database.pragma('page_count', { simple: true }) === 0) database.pragma('auto_vacuum = INCREMENTAL');
   database.pragma('journal_mode = WAL');
   database.pragma('busy_timeout = 5000');
   // Captured request and response bodies are large, so the journal outgrows the database
@@ -180,6 +184,7 @@ function getDatabase(): BetterSqlite3.Database {
       updated_at INTEGER
     );
     CREATE UNIQUE INDEX IF NOT EXISTS gateway_providers_name_idx ON gateway_providers(name);
+    CREATE TABLE IF NOT EXISTS retired_codex_providers (id TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS gateway_request_stats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       occurred_at INTEGER NOT NULL,
@@ -245,11 +250,10 @@ function getDatabase(): BetterSqlite3.Database {
   `);
   addMissingRequestStatColumns(database);
   addMissingRequestLogColumns(database);
-  pruneRequestLogs(database);
   return database;
 }
 
-// Attribution columns the two tables share. Statistics are kept forever, so this is
+// Attribution columns the two tables share. Statistics have their own configured retention window, so this is
 // where a surface's token totals have to land for a question asked after the 12-hour
 // detail window to still have an answer.
 const ATTRIBUTION_COLUMNS: Array<[string, string]> = [
@@ -317,7 +321,7 @@ function addMissingRequestStatColumns(database: BetterSqlite3.Database): void {
     ...ATTRIBUTION_COLUMNS,
   ];
   for (const [name, type] of additions) {
-    if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_stats ADD COLUMN ${name} ${type}`).run();
+    if (!columns.has(name)) { database.prepare(`ALTER TABLE gateway_request_stats ADD COLUMN ${name} ${type}`).run(); columns.add(name); }
   }
   // Rows recorded before attribution existed stay NULL rather than being backfilled
   // to a surface nobody observed; `requestStats` reports them as 'unattributed'.
@@ -347,7 +351,7 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
     ...ATTRIBUTION_COLUMNS,
   ];
   for (const [name, type] of additions) {
-    if (!columns.has(name)) database.prepare(`ALTER TABLE gateway_request_logs ADD COLUMN ${name} ${type}`).run();
+    if (!columns.has(name)) { database.prepare(`ALTER TABLE gateway_request_logs ADD COLUMN ${name} ${type}`).run(); columns.add(name); }
   }
   database.exec(`
     CREATE INDEX IF NOT EXISTS gateway_request_logs_team_run_idx ON gateway_request_logs(team_run_id);
@@ -359,108 +363,59 @@ function addMissingRequestLogColumns(database: BetterSqlite3.Database): void {
   `);
 }
 
-const REQUEST_LOG_RETENTION_HOURS = 12;
-const REQUEST_LOG_RETENTION_MS = REQUEST_LOG_RETENTION_HOURS * 60 * 60 * 1000;
-const AUTO_VACUUM_INCREMENTAL = 2;
-
-/**
- * Switches the database to incremental auto-vacuum with one full rewrite, or returns
- * accumulated free pages when it already uses it. Called from the Node entry point
- * before the listener starts, because a full VACUUM holds an exclusive lock.
- */
-export function prepareGatewayDatabase(): void {
-  const target = getDatabase();
-  if (target.pragma('auto_vacuum', { simple: true }) !== AUTO_VACUUM_INCREMENTAL) {
-    target.pragma('auto_vacuum = INCREMENTAL');
-    target.exec('VACUUM');
-    return;
-  }
-  target.pragma('incremental_vacuum');
-}
-
-// Pruning runs at most once per minute: it previously ran after every captured
-// request, adding a second write transaction (and fsync) to each LLM call.
-const REQUEST_LOG_PRUNE_INTERVAL_MS = 60_000;
-// Rows one prune may remove. A database that accumulated logs while retention was not
-// running would otherwise delete the whole backlog inside a single request's transaction.
-const REQUEST_LOG_PRUNE_BATCH_ROWS = 5_000;
-let requestLogsPrunedAt = 0;
-
-function pruneRequestLogs(target: BetterSqlite3.Database, limit = REQUEST_LOG_PRUNE_BATCH_ROWS): number {
-  const now = Date.now();
-  if (now - requestLogsPrunedAt < REQUEST_LOG_PRUNE_INTERVAL_MS) return 0;
-  requestLogsPrunedAt = now;
-  return target
-    .prepare('DELETE FROM gateway_request_logs WHERE id IN (SELECT id FROM gateway_request_logs WHERE occurred_at < ? ORDER BY occurred_at LIMIT ?)')
-    .run(now - REQUEST_LOG_RETENTION_MS, limit).changes;
-}
-
-function configuredBound(name: string, fallback: number): number {
+function configuredBound(name: string, fallback: number, allowZero = false): number {
   const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  const value = raw ? Number(raw) : NaN;
+  return Number.isFinite(value) && (allowZero ? value >= 0 : value > 0) ? value : fallback;
 }
-
+const REQUEST_LOG_RETENTION_HOURS = configuredBound('GATEWAY_REQUEST_LOG_RETENTION_HOURS', 12, true);
+const REQUEST_LOG_RETENTION_MS = REQUEST_LOG_RETENTION_HOURS * 3_600_000;
 const WAL_SIZE_LIMIT_BYTES = configuredBound('SQLITE_WAL_SIZE_LIMIT_MEGABYTES', 64) * 1024 * 1024;
 const MAINTENANCE_INTERVAL_MS = configuredBound('SQLITE_MAINTENANCE_INTERVAL_MINUTES', 15) * 60_000;
-const MAINTENANCE_VACUUM_PAGES = Math.floor(configuredBound('SQLITE_INCREMENTAL_VACUUM_PAGES', 16_384));
-// While a backlog remains, passes run on this shorter cadence and move this much more per
-// pass. Both bounds stay finite, so no single pass holds the write lock for long.
-const MAINTENANCE_CATCH_UP_FACTOR = 4;
-const MAINTENANCE_CATCH_UP_INTERVAL_MS = Math.min(60_000, MAINTENANCE_INTERVAL_MS);
-const MAINTENANCE_CATCH_UP_FREE_PAGES = 4_096;
-let maintenanceTimer: ReturnType<typeof setTimeout> | null = null;
-let maintenanceStopped = false;
-let maintenanceCatchingUp = false;
+const MAINTENANCE_CATCH_UP_INTERVAL_MS = configuredBound('SQLITE_MAINTENANCE_CATCH_UP_SECONDS', 5) * 1000;
 
+/** Opening a legacy file never performs a full, blocking rewrite on the Gateway thread. */
+export function prepareGatewayDatabase(): void { getDatabase(); }
+let maintenanceTimer: ReturnType<typeof setTimeout> | null = null;
+let maintenanceWorker: Worker | null = null;
+let maintenanceStopped = true;
 function scheduleGatewayMaintenance(delayMs: number): void {
   if (maintenanceTimer) clearTimeout(maintenanceTimer);
-  if (maintenanceStopped) { maintenanceTimer = null; return; }
-  maintenanceTimer = setTimeout(gatewayMaintenancePass, delayMs);
+  if (maintenanceStopped) return;
+  maintenanceTimer = setTimeout(() => {
+    maintenanceTimer = null;
+    maintenanceWorker?.postMessage('run');
+  }, delayMs);
   maintenanceTimer.unref();
 }
-
-/**
- * One pass: expire log rows, hand the pages they freed back to the filesystem, then fold the
- * WAL into the database and truncate it. Expiring rows only moves their pages onto the free
- * list, and the retention delete itself is what grows the WAL, so both reclamation steps have
- * to run on a schedule rather than once at startup.
- */
-function gatewayMaintenancePass(): void {
-  try {
-    const target = getDatabase();
-    const factor = maintenanceCatchingUp ? MAINTENANCE_CATCH_UP_FACTOR : 1;
-    const batch = REQUEST_LOG_PRUNE_BATCH_ROWS * factor;
-    requestLogsPrunedAt = 0;
-    const removed = pruneRequestLogs(target, batch);
-    target.pragma(`incremental_vacuum(${MAINTENANCE_VACUUM_PAGES * factor})`);
-    // TRUNCATE waits for the readers a passive checkpoint gives up on; a busy result
-    // is expected under load and simply leaves the work for the next pass.
-    target.pragma('wal_checkpoint(TRUNCATE)');
-    const freePages = target.pragma('freelist_count', { simple: true });
-    // A full batch means more expired rows are waiting, and free pages beyond one pass'
-    // budget mean the database is still holding space it no longer uses.
-    maintenanceCatchingUp = removed >= batch || (typeof freePages === 'number' && freePages > MAINTENANCE_CATCH_UP_FREE_PAGES);
-  } catch {
-    // Maintenance is best effort; a locked database must never take the Gateway down.
-    maintenanceCatchingUp = false;
-  } finally {
-    scheduleGatewayMaintenance(maintenanceCatchingUp ? MAINTENANCE_CATCH_UP_INTERVAL_MS : MAINTENANCE_INTERVAL_MS);
-  }
-}
-
-/** Starts the periodic pass. The first one runs shortly after boot so a backlog is not left waiting a full interval. */
 export function startGatewayDatabaseMaintenance(): void {
-  if (maintenanceTimer) return;
+  if (maintenanceWorker || process.env.WORKLITE_PREFLIGHT === '1') return;
+  getDatabase();
+  const script = ['scripts/sqlite-maintenance.cjs', '../../scripts/sqlite-maintenance.cjs'].map((path) => resolve(process.cwd(), path)).find(existsSync);
+  if (!script) throw new Error('SQLite maintenance worker script could not be located.');
   maintenanceStopped = false;
+  maintenanceWorker = new Worker(script, { workerData: { path: databasePath(), kind: 'gateway' } });
+  maintenanceWorker.unref();
+  maintenanceWorker.on('message', (value: { report?: { backlog: boolean }; error?: string }) => {
+    if (value.error) console.warn(`Gateway database maintenance failed: ${value.error}`);
+    scheduleGatewayMaintenance(value.report?.backlog || /locked|busy/i.test(value.error ?? '') ? MAINTENANCE_CATCH_UP_INTERVAL_MS : MAINTENANCE_INTERVAL_MS);
+  });
+  maintenanceWorker.on('error', (error) => console.warn(`Gateway database maintenance worker failed: ${error.message}`));
+  maintenanceWorker.on('exit', () => {
+    maintenanceWorker = null;
+    if (!maintenanceStopped) {
+      maintenanceTimer = setTimeout(startGatewayDatabaseMaintenance, MAINTENANCE_INTERVAL_MS);
+      maintenanceTimer.unref();
+    }
+  });
   scheduleGatewayMaintenance(MAINTENANCE_CATCH_UP_INTERVAL_MS);
 }
-
 export function stopGatewayDatabaseMaintenance(): void {
   maintenanceStopped = true;
   if (maintenanceTimer) clearTimeout(maintenanceTimer);
   maintenanceTimer = null;
+  void maintenanceWorker?.terminate();
+  maintenanceWorker = null;
 }
 
 function secretKey(): Buffer {
@@ -930,7 +885,7 @@ function attributionConditions(query: GatewayAttributionQuery): { conditions: st
 }
 
 /**
- * Aggregates one attribution dimension in SQL. Statistics are retained forever, so a
+ * Aggregates one attribution dimension in SQL. Statistics have a longer retention window, so a
  * wide range can cover far more rows than a page of details; grouping in the database
  * keeps a conversation-level question from materializing every row in the range.
  */
@@ -1002,69 +957,133 @@ function attributionGroups(
   }));
 }
 
-export function requestStats(query: GatewayTimeRangeQuery & GatewayAttributionQuery & { groupBy?: string } = {}): GatewayStats {
+export function requestStats(
+  query: GatewayTimeRangeQuery & GatewayAttributionQuery & { groupBy?: string } = {},
+): GatewayStats {
   const { fromMs, toMs } = resolveTimeRange(query);
   const groupBy = isStatsGroupBy(query.groupBy) ? query.groupBy : 'surface';
   const database = getDatabase();
-  const filters = attributionConditions(query);
-  const where = ['occurred_at >= ?', 'occurred_at <= ?', ...filters.conditions].join(' AND ');
-  const records = database.prepare(`SELECT provider_name, model, endpoint, status, duration_ms, prompt_tokens, input_token_semantics, cache_read_tokens, cache_creation_tokens, completion_tokens, total_tokens FROM gateway_request_stats WHERE ${where} ORDER BY occurred_at DESC`).all(fromMs, toMs, ...filters.values) as Array<{ provider_name: string; model: string; endpoint: string; status: number; duration_ms: number; prompt_tokens: number | null; input_token_semantics: InputTokenSemantics | null; cache_read_tokens: number | null; cache_creation_tokens: number | null; completion_tokens: number | null; total_tokens: number | null }>;
-  const freshInput = (record: typeof records[number]) => freshPromptTokens(record.prompt_tokens, record.input_token_semantics, record.cache_read_tokens, record.cache_creation_tokens);
-  const successful = records.filter((record) => record.status >= 200 && record.status < 400).length;
-  const summaryTokens = {
-    promptTokens: nullableTotal(records.map(freshInput)),
-    completionTokens: nullableTotal(records.map((record) => record.completion_tokens)),
-    cacheReadTokens: nullableTotal(records.map((record) => record.cache_read_tokens)),
-    cacheCreationTokens: nullableTotal(records.map((record) => record.cache_creation_tokens)),
-    totalTokens: nullableTotal(records.map((record) => record.total_tokens)),
-  };
-  const groups = new Map<string, typeof records>();
-  for (const record of records) {
-    const key = `${record.provider_name}\u0000${record.model}`;
-    const group = groups.get(key) ?? [];
-    group.push(record);
-    groups.set(key, group);
-  }
-  const breakdown = [...groups.values()].map((group) => {
-    const groupSuccessful = group.filter((record) => record.status >= 200 && record.status < 400).length;
-    const endpointCounts = new Map<string, number>();
-    const statusCounts = new Map<number, number>();
-    for (const record of group) {
-      endpointCounts.set(record.endpoint, (endpointCounts.get(record.endpoint) ?? 0) + 1);
-      statusCounts.set(record.status, (statusCounts.get(record.status) ?? 0) + 1);
-    }
-    return {
-      provider: group[0].provider_name,
-      model: group[0].model,
-      requests: group.length,
-      successful: groupSuccessful,
-      failed: group.length - groupSuccessful,
-      averageLatencyMs: Math.round(group.reduce((total, record) => total + record.duration_ms, 0) / group.length),
-      promptTokens: nullableTotal(group.map(freshInput)),
-      completionTokens: nullableTotal(group.map((record) => record.completion_tokens)),
-      cacheReadTokens: nullableTotal(group.map((record) => record.cache_read_tokens)),
-      cacheCreationTokens: nullableTotal(group.map((record) => record.cache_creation_tokens)),
-      totalTokens: nullableTotal(group.map((record) => record.total_tokens)),
-      usageRequests: group.filter((record) => record.total_tokens !== null).length,
-      endpoints: [...endpointCounts.entries()].map(([endpoint, requests]) => ({ endpoint, requests })),
-      statuses: [...statusCounts.entries()].map(([status, requests]) => ({ status, requests })),
+  return database.transaction(() => {
+    const filters = attributionConditions(query);
+    const where = ['occurred_at >= ?', 'occurred_at <= ?', ...filters.conditions].join(' AND ');
+    const aggregation = `COUNT(*) AS requests, SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS successful,
+    SUM(duration_ms) AS duration_total, SUM(${FRESH_INPUT_SQL}) AS prompt_tokens, SUM(completion_tokens) AS completion_tokens,
+    SUM(cache_read_tokens) AS cache_read_tokens, SUM(cache_creation_tokens) AS cache_creation_tokens, SUM(total_tokens) AS total_tokens,
+    SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END) AS usage_requests`;
+    type Totals = {
+      requests: number;
+      successful: number | null;
+      duration_total: number | null;
+      prompt_tokens: number | null;
+      completion_tokens: number | null;
+      cache_read_tokens: number | null;
+      cache_creation_tokens: number | null;
+      total_tokens: number | null;
+      usage_requests: number | null;
     };
-  }).sort((a, b) => b.requests - a.requests || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
-  return {
-    from: new Date(fromMs).toISOString(),
-    to: new Date(toMs).toISOString(),
-    summary: {
-      requests: records.length,
-      successful,
-      failed: records.length - successful,
-      successRate: records.length ? Math.round((successful / records.length) * 1000) / 10 : null,
-      averageLatencyMs: records.length ? Math.round(records.reduce((total, record) => total + record.duration_ms, 0) / records.length) : null,
-      ...summaryTokens,
-      usageRequests: records.filter((record) => record.total_tokens !== null).length,
-    },
-    breakdown,
-    attribution: { groupBy, groups: attributionGroups(database, fromMs, toMs, groupBy, filters) },
-  };
+    const values = [fromMs, toMs, ...filters.values];
+    const rows = database
+      .prepare(
+        `SELECT provider_name, model, endpoint, status, ${aggregation} FROM gateway_request_stats WHERE ${where} GROUP BY provider_name, model, endpoint, status`,
+      )
+      .all(...values) as Array<
+      Totals & { provider_name: string; model: string; endpoint: string; status: number }
+    >;
+    const empty = (): Totals => ({
+      requests: 0,
+      successful: 0,
+      duration_total: 0,
+      prompt_tokens: null,
+      completion_tokens: null,
+      cache_read_tokens: null,
+      cache_creation_tokens: null,
+      total_tokens: null,
+      usage_requests: 0,
+    });
+    const tokens = [
+      'prompt_tokens',
+      'completion_tokens',
+      'cache_read_tokens',
+      'cache_creation_tokens',
+      'total_tokens',
+    ] as const;
+    const add = (target: Totals, row: Totals) => {
+      target.requests += row.requests;
+      target.successful = (target.successful ?? 0) + (row.successful ?? 0);
+      target.duration_total = (target.duration_total ?? 0) + (row.duration_total ?? 0);
+      target.usage_requests = (target.usage_requests ?? 0) + (row.usage_requests ?? 0);
+      for (const token of tokens)
+        if (row[token] !== null) target[token] = (target[token] ?? 0) + row[token]!;
+    };
+    const total = empty();
+    const grouped = new Map<
+      string,
+      {
+        provider: string;
+        model: string;
+        totals: Totals;
+        endpoints: Map<string, number>;
+        statuses: Map<number, number>;
+      }
+    >();
+    // SQL returns one row per dimension combination, never the individual requests.
+    for (const row of rows) {
+      add(total, row);
+      const key = `${row.provider_name}\u0000${row.model}`;
+      let group = grouped.get(key);
+      if (!group) {
+        group = {
+          provider: row.provider_name,
+          model: row.model,
+          totals: empty(),
+          endpoints: new Map(),
+          statuses: new Map(),
+        };
+        grouped.set(key, group);
+      }
+      add(group.totals, row);
+      group.endpoints.set(row.endpoint, (group.endpoints.get(row.endpoint) ?? 0) + row.requests);
+      group.statuses.set(row.status, (group.statuses.get(row.status) ?? 0) + row.requests);
+    }
+    const view = (row: Totals): GatewayUsageTotals => ({
+      requests: row.requests,
+      successful: row.successful ?? 0,
+      failed: row.requests - (row.successful ?? 0),
+      averageLatencyMs: row.requests ? Math.round((row.duration_total ?? 0) / row.requests) : null,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      cacheReadTokens: row.cache_read_tokens,
+      cacheCreationTokens: row.cache_creation_tokens,
+      totalTokens: row.total_tokens,
+      usageRequests: row.usage_requests ?? 0,
+    });
+    const breakdown = [...grouped.values()]
+      .map((group) => ({
+        ...view(group.totals),
+        provider: group.provider,
+        model: group.model,
+        endpoints: [...group.endpoints].map(([endpoint, requests]) => ({ endpoint, requests })),
+        statuses: [...group.statuses].map(([status, requests]) => ({ status, requests })),
+      }))
+      .sort(
+        (a, b) =>
+          b.requests - a.requests ||
+          a.provider.localeCompare(b.provider) ||
+          a.model.localeCompare(b.model),
+      );
+    return {
+      from: new Date(fromMs).toISOString(),
+      to: new Date(toMs).toISOString(),
+      summary: {
+        ...view(total),
+        successRate: total.requests
+          ? Math.round(((total.successful ?? 0) / total.requests) * 1000) / 10
+          : null,
+      },
+      breakdown,
+      attribution: { groupBy, groups: attributionGroups(database, fromMs, toMs, groupBy, filters) },
+    };
+  })();
 }
 
 export type GatewayRequestLogResponse =
@@ -1163,16 +1182,24 @@ export function recordRequestLog(input: {
     input.cacheCreationTokens ?? null,
     input.completionTokens ?? null,
     input.totalTokens ?? null,
-    safeJsonText(input.request),
+    packBody(safeJsonText(input.request)),
     input.response.kind,
-    responseBodyText(input.response),
+    packBody(responseBodyText(input.response)),
     attribution?.agentRunId ?? null,
     attribution?.agentExecutionId ?? null,
   );
-  pruneRequestLogs(database);
   return id;
 }
 
+const PACKED_BODY_PREFIX = 'worklite:z1:';
+function packBody(value: string | null): string | null {
+  if (!value || (value.length < 2048 && !value.startsWith(PACKED_BODY_PREFIX))) return value;
+  const packed = PACKED_BODY_PREFIX + deflateSync(value).toString('base64');
+  return packed.length < value.length || value.startsWith(PACKED_BODY_PREFIX) ? packed : value;
+}
+function unpackBody(value: string | null): string | null {
+  return value?.startsWith(PACKED_BODY_PREFIX) ? inflateSync(new Uint8Array(Buffer.from(value.slice(PACKED_BODY_PREFIX.length), 'base64'))).toString() : value;
+}
 function safeJsonText(value: unknown): string | null {
   if (value === undefined) return null;
   try {
@@ -1192,15 +1219,15 @@ function responseBodyText(response: GatewayRequestLogResponse): string | null {
 function parseStoredJson(value: string | null): unknown {
   if (value === null) return null;
   try {
-    return JSON.parse(value);
+    return JSON.parse(unpackBody(value)!);
   } catch {
     return null;
   }
 }
 
 function requestLogResponse(row: GatewayRequestLogRow): GatewayRequestLogResponse {
-  if (row.response_kind === 'text') return { kind: 'text', body: row.response_body ?? '' };
-  if (row.response_kind === 'unavailable') return { kind: 'unavailable', reason: row.response_body ?? 'The response was not captured.' };
+  if (row.response_kind === 'text') return { kind: 'text', body: unpackBody(row.response_body) ?? '' };
+  if (row.response_kind === 'unavailable') return { kind: 'unavailable', reason: unpackBody(row.response_body) ?? 'The response was not captured.' };
   if (row.response_kind === 'stream') {
     const events = parseStoredJson(row.response_body);
     return { kind: 'stream', events: Array.isArray(events) ? events : [] };
@@ -1253,13 +1280,12 @@ export function requestLogs(query: GatewayTimeRangeQuery & GatewayAttributionQue
   cursor?: string;
 }) {
   const database = getDatabase();
-  pruneRequestLogs(database);
   const { fromMs, toMs } = resolveTimeRange(query);
-  // Details live for 12 hours while statistics live forever, so a range that
+  // Details and statistics use their configured retention windows, so a range that
   // reaches further back is served as its intersection with the retention window.
   // The reader is told what was actually covered instead of being handed a
   // rejection for a range that is valid against the other store.
-  const retainedFromMs = Date.now() - REQUEST_LOG_RETENTION_MS;
+  const retainedFromMs = REQUEST_LOG_RETENTION_MS ? Date.now() - REQUEST_LOG_RETENTION_MS : 0;
   const servedFromMs = Math.max(fromMs, retainedFromMs);
   const conditions: string[] = ['occurred_at >= ?', 'occurred_at <= ?'];
   const values: Array<string | number> = [servedFromMs, toMs];
@@ -1313,9 +1339,8 @@ const REQUEST_LOG_TIMELINE_LIMIT = 20_000;
  */
 export function requestLogTimeline(query: GatewayTimeRangeQuery & Pick<GatewayAttributionQuery, 'teamRunId' | 'nodeRunId'>) {
   const database = getDatabase();
-  pruneRequestLogs(database);
   const { fromMs, toMs } = resolveTimeRange(query);
-  const retainedFromMs = Date.now() - REQUEST_LOG_RETENTION_MS;
+  const retainedFromMs = REQUEST_LOG_RETENTION_MS ? Date.now() - REQUEST_LOG_RETENTION_MS : 0;
   const servedFromMs = Math.max(fromMs, retainedFromMs);
   const attribution = attributionConditions({ teamRunId: query.teamRunId, nodeRunId: query.nodeRunId });
   // Without an id filter the timeline would be every request in the window.
@@ -1343,8 +1368,7 @@ export function requestLogTimeline(query: GatewayTimeRangeQuery & Pick<GatewayAt
 
 export function requestLog(requestLogId: string) {
   const database = getDatabase();
-  pruneRequestLogs(database);
-  const row = database.prepare('SELECT * FROM gateway_request_logs WHERE id = ?').get(requestLogId) as GatewayRequestLogRow | undefined;
+  const row = database.prepare('SELECT * FROM gateway_request_logs WHERE id = ? AND occurred_at >= ?').get(requestLogId, REQUEST_LOG_RETENTION_MS ? Date.now() - REQUEST_LOG_RETENTION_MS : 0) as GatewayRequestLogRow | undefined;
   if (!row) return null;
   return { ...requestLogListItem(row), request: parseStoredJson(row.request_body), response: requestLogResponse(row) };
 }

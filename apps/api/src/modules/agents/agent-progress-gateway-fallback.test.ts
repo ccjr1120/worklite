@@ -1,7 +1,8 @@
+import { agentExecutionColumns, agentExecutions, createDb, initializeDatabase } from '@worklite/db';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { agentExecutions, createDb, initializeDatabase } from '@worklite/db';
+
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProgressReport } from '@worklite/contracts';
 import { executionFailure } from './agent-execution-failure';
@@ -17,7 +18,7 @@ describe('progress reports when the Gateway is unavailable', () => {
       const service = new AgentExecutionsService(db, { getWorkspace: async () => ({ id: 'workspace_personal' }) } as never, { providerRuntime: async () => { throw new ServiceUnavailableException('Portkey Gateway is unavailable.'); } } as never, unused, { discover: async () => [] } as never, unused, unused, unused, { list: () => [] } as never, unused, unused, { notify: () => {} } as never, unused);
       const report = { items: [{ kind: 'coder' as const, id: 'run_1', title: 'Coding task', status: 'running' }] };
       await (service as unknown as { advance(request: unknown, slug: string, id: string, report: ChatProgressReport): Promise<unknown> }).advance({}, 'personal', id, report);
-      const row = db.select().from(agentExecutions).where(eq(agentExecutions.id, id)).get()!;
+      const row = db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, id)).get()!;
       expect(row.status).toBe('completed');
       expect(row.error).toBeNull();
       expect(row.displayMessages.at(-1)?.content).toContain('Coding task：running');

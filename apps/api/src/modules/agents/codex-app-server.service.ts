@@ -1,3 +1,4 @@
+import { validateModelParameters } from '@worklite/contracts';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -39,6 +40,8 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
   async execute(request: ProjectExecutorRequest, prepared: PreparedProjectExecution): Promise<string> {
     request.signal.throwIfAborted();
     const launch = request.launch as CodexLaunch;
+    const parameters = validateModelParameters(request.modelParameters);
+    if (Object.keys(parameters.requestBody ?? {}).length) throw new BadRequestException('Codex runtime supports reasoning effort and service tier; request JSON parameters require a native Agent.');
     const controller = new AbortController();
     const session = new CodexAppServerSession(request, (error) => controller.abort(error));
     let process: CommandStdioProcess | undefined;
@@ -57,6 +60,9 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
       const model = request.model ?? launch.model;
       const gatewayModel = isGatewayPublicModel(model);
       const mcp = codexMcpServers(prepared, gatewayModel, attributionHeaders(request));
+      if (parameters.reasoningEffort) mcp.config.model_reasoning_effort = parameters.reasoningEffort;
+      if (parameters.serviceTier) mcp.config.service_tier = codexServiceTier(parameters.serviceTier);
+      else if (await configuredFastTier(launch)) mcp.config.service_tier = 'priority';
       if (!gatewayModel) Object.assign(mcp.config, await nativeGatewayHeaderConfig(launch, attributionHeaders(request)));
       process = await this.commands.openStdioProcess(
         appServerArguments(launch, mcp.config, request.approvalPolicy), request.projectDirectory, mcp.env,
@@ -93,6 +99,8 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
       await session.activity('codex.thread_started');
       const turn = await session.call('turn/start', {
         threadId: session.threadId,
+        ...(parameters.reasoningEffort ? { effort: parameters.reasoningEffort } : {}),
+        ...(parameters.serviceTier ? { serviceTier: codexServiceTier(parameters.serviceTier) } : {}),
         input: [{ type: 'text', text: request.input, text_elements: [] }],
       });
       session.turnId = turn.turn.id;
@@ -214,7 +222,7 @@ class CodexAppServerSession {
     await Promise.race([this.requestQueue, this.failure]);
     await Promise.race([this.eventQueue, this.failure]);
     if (this.failed) throw this.failed;
-    if (!text.trim()) throw new Error('Codex App Server returned an empty task result.');
+    if (!text.trim() && !(this.request.owner === 'chat' && this.request.runtimeSession)) throw new Error('Codex App Server returned an empty task result.');
     return text.trim();
   }
 
@@ -228,6 +236,7 @@ class CodexAppServerSession {
       ...(typeof item?.id === 'string' ? { itemId: item.id } : {}),
       ...(typeof item?.type === 'string' ? { itemType: item.type } : {}),
       ...(summary ? { summary } : {}),
+      ...(phase === 'codex.item_completed' ? { status: item?.status === 'failed' || item?.status === 'declined' || (typeof item?.exitCode === 'number' && item.exitCode !== 0) ? 'failed' as const : 'completed' as const } : {}),
       ...(phase === 'codex.item_completed' && item?.type === 'agentMessage' && typeof item.text === 'string' ? { text: item.text } : {}),
     };
     return Promise.resolve(this.request.onEvent?.(activity));
@@ -268,6 +277,14 @@ class CodexAppServerSession {
           threadId: params.threadId ?? this.threadId, turnId: params.turnId ?? this.turnId };
         this.eventQueue = this.eventQueue.then(() => this.request.onEvent?.(activity)).then(() => undefined).catch((error) => this.fail(error));
       }
+    }
+    if (message.method === 'turn/plan/updated' && Array.isArray(params.plan)) {
+      const plan = params.plan.flatMap((entry: { step?: unknown; status?: unknown }) => {
+        const status = entry.status === 'inProgress' ? 'in_progress' : entry.status;
+        return typeof entry.step === 'string' && ['pending', 'in_progress', 'completed'].includes(String(status))
+          ? [{ step: entry.step, status: status as 'pending' | 'in_progress' | 'completed' }] : [];
+      });
+      this.eventQueue = this.eventQueue.then(() => this.request.onEvent?.({ phase: 'codex.plan_updated', plan })).then(() => undefined).catch((error) => this.fail(error));
     }
     if (message.method === 'turn/started') this.turnId = params.turn?.id;
     if (message.method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
@@ -447,6 +464,9 @@ function codexItemSummary(item: Record<string, any>): string | undefined {
     return item.changes.map((change: { path?: unknown }) => change.path).filter((path: unknown): path is string => typeof path === 'string').join(', ') || undefined;
   }
   if (item.type === 'mcpToolCall' && typeof item.tool === 'string') return [item.server, item.tool].filter((part) => typeof part === 'string').join(' · ');
+  if (item.type === 'webSearch' && typeof item.query === 'string') return item.query;
+  if (item.type === 'imageView' && typeof item.path === 'string') return item.path;
+  if (item.type === 'dynamicToolCall' && typeof item.tool === 'string') return item.tool;
   return undefined;
 }
 
@@ -466,4 +486,20 @@ function codexApprovalDescription(method: string, params: Record<string, unknown
   const changes = item?.changes ? JSON.stringify(item.changes, null, 2) : undefined;
   const grantRoot = typeof params.grantRoot === 'string' ? `Requested root: ${params.grantRoot}` : undefined;
   return [`Codex requests permission to ${description}.`, command, changes, grantRoot, reason].filter(Boolean).join('\n');
+}
+
+// Codex's fast UI setting must use the Responses wire value; ChatGPT rejects literal "fast".
+export function codexServiceTier(value: string): string { return value === 'fast' ? 'priority' : value; }
+
+async function configuredFastTier(launch: CodexLaunch): Promise<boolean> {
+  const directory = launch.configDirectory ?? process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  try {
+    const config = parseToml(await readFile(join(directory, 'config.toml'), 'utf8'));
+    const profile = typeof config.profile === 'string' && config.profiles && typeof config.profiles === 'object'
+      ? (config.profiles as Record<string, TomlTable>)[config.profile] : undefined;
+    return (profile?.service_tier ?? config.service_tier) === 'fast';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new BadRequestException('Cannot read the native Codex service tier configuration.');
+  }
 }

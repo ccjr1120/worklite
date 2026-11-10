@@ -1,3 +1,4 @@
+import { validateModelParameters } from '@worklite/contracts';
 import { WechatDraftRevisionService } from '../connections/wechat-draft-revision.service';
 import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { Lexer } from 'marked';
@@ -75,6 +76,7 @@ this.registry.register({
         if (!inputs || !Object.prototype.hasOwnProperty.call(inputs, 'state')) throw new Error('TypeSafe System One node requires a state input.');
         const output = await this.gateway.executeSystemOne({
           model: config.model,
+          modelParameters: validateModelParameters(config.modelParameters),
           state: inputs.state,
           questions: config.questions as Record<string, unknown>,
           correlation: capabilityCorrelation(request.context),
@@ -117,6 +119,7 @@ this.registry.register({
             // addressed, because surplus state measurably degrades a typed judgement.
             const answer = await this.gateway.executeSystemOne({
               model: (config.model as string).trim(),
+              modelParameters: validateModelParameters(config.modelParameters),
               state: { item, context },
               questions,
               correlation: capabilityCorrelation(request.context),

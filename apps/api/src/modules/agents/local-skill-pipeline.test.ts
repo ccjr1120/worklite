@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Request } from 'express';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { coders, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { eq } from 'drizzle-orm';
+import { agents, agentSkills, chatConfigurations, skills, coders, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { AgentTeamConfigurationService } from '../coders/coder-configuration.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
@@ -124,7 +125,7 @@ describe('Local directory Skill pipeline', () => {
 
     const team = await configuration.update('workspace_personal', 'company_coder', {
       roles: [
-        role('dispatcher', []),
+        role('router', []),
         role('test_designer', []),
         role('test_runner', [skillId]),
       ],
@@ -168,11 +169,43 @@ describe('Local directory Skill pipeline', () => {
     expect(referenceResult).toEqual({ type: 'text', value: expect.stringContaining('account login -e <email>') });
   });
 
-  it('keeps existing local Skills when the configured source directory is unavailable', async () => {
+  it('keeps cached Skills and assignments while their root is missing, then reconciles a readable root', async () => {
     const { resources, root } = await setup();
+    const skillId = localSkillId('workspace_personal', 'dino-account');
     expect((await resources.skills({} as Request, 'personal')).map((skill) => skill.name)).toContain('dino-account');
+    const cached = db!.select().from(skills).where(eq(skills.id, skillId)).get()!;
+    db!.insert(agents).values({ id: 'assigned-agent', workspaceId: 'workspace_personal', name: 'Assigned', responsibility: '', model: '' }).run();
+    db!.insert(agentSkills).values({ agentId: 'assigned-agent', skillId }).run();
+    db!.update(chatConfigurations).set({ skillIds: [skillId] }).run();
 
     process.env.WORKLITE_LOCAL_SKILLS_DIR = join(root!, 'does-not-exist');
     expect((await resources.skills({} as Request, 'personal')).map((skill) => skill.name)).toContain('dino-account');
+    expect(db!.select().from(skills).where(eq(skills.id, skillId)).get()).toEqual(cached);
+    expect(db!.select().from(agentSkills).all()).toEqual([{ agentId: 'assigned-agent', skillId }]);
+    expect(db!.select().from(chatConfigurations).get()?.skillIds).toEqual([skillId]);
+
+    // An empty, readable root does establish deletion; restoring it must still clean stale references.
+    process.env.WORKLITE_LOCAL_SKILLS_DIR = root!;
+    await rm(join(root!, 'dino-account'), { recursive: true });
+    expect((await resources.skills({} as Request, 'personal')).map((skill) => skill.id)).not.toContain(skillId);
+    expect(db!.select().from(agentSkills).all()).toEqual([]);
+    expect(db!.select().from(chatConfigurations).get()?.skillIds).toEqual([]);
   });
+  it('preserves a missing platform root across repeated syncs while updating the readable agents root', async () => {
+    const { resources, root } = await setup();
+    const skill = await resources.importSkill({} as Request, 'personal', { name: 'platform-check', files: [{ path: 'SKILL.md', content: '# Platform check' }] });
+    const cached = db!.select().from(skills).where(eq(skills.id, skill.id)).get()!;
+    const missing = join(root!, 'missing-platform');
+    process.env.WORKLITE_PLATFORM_SKILLS_DIR = missing;
+    await writeFile(join(root!, 'dino-account', 'references', 'commands.md'), 'Updated instructions');
+
+    for (let pass = 0; pass < 2; pass++) {
+      expect((await resources.skills({} as Request, 'personal')).map((item) => item.id)).toContain(skill.id);
+      expect(db!.select().from(skills).where(eq(skills.id, skill.id)).get()).toEqual(cached);
+      await expect(stat(missing)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+    const readable = await resources.skill({} as Request, 'personal', localSkillId('workspace_personal', 'dino-account'));
+    expect(readable.files.find((file) => file.path === 'references/commands.md')?.content).toBe('Updated instructions');
+  });
+
 });

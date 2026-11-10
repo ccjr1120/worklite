@@ -2,6 +2,7 @@ import { ArtifactPreviewController } from './artifact-preview.controller';
 import { ChatProgressReportsService } from './chat-progress-reports.service';
 import { AgentHistoryService } from './agent-history.service';
 import { AgentActionsController } from './agent-actions.controller';
+import { AgentActionsService } from './agent-actions.service';
 import { AgentSchedulesService } from './agent-schedules.service';
 import { AgentCollaborationService } from './agent-collaboration.service';
 import { AgentCapabilitiesService } from './agent-capabilities.service';
@@ -31,5 +32,5 @@ import { ChatHostCommandService } from './chat-host-command.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LocalProjectsModule } from '../local-projects/local-projects.module';
 
-@Module({ imports: [LocalProjectsModule, ModelProvidersModule, ArtifactsModule, WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, NotificationsModule, forwardRef(() => ConnectionsModule)], controllers: [ArtifactPreviewController, AgentActionsController, AgentsController, ChatAttachmentsController], providers: [ChatProgressReportsService, AgentHistoryService, AgentCapabilitiesService, AgentSchedulesService, AgentCollaborationService, AgentRuntimeService, AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ClaudeCodeService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService, ChatHostCommandService], exports: [AgentRuntimeService, AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService] })
+@Module({ imports: [LocalProjectsModule, ModelProvidersModule, ArtifactsModule, WorkspaceModule, SkillsModule, CommandsModule, McpServersModule, NotificationsModule, forwardRef(() => ConnectionsModule)], controllers: [ArtifactPreviewController, AgentActionsController, AgentsController, ChatAttachmentsController], providers: [AgentActionsService, ChatProgressReportsService, AgentHistoryService, AgentCapabilitiesService, AgentSchedulesService, AgentCollaborationService, AgentRuntimeService, AgentsService, AgentExecutionsService, McpRuntimeService, BuiltinAgentToolsService, IsolatedAgentInvocationService, CodexAppServerService, ClaudeCodeService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService, ChatHostCommandService], exports: [AgentRuntimeService, AgentsService, AgentExecutionsService, IsolatedAgentInvocationService, ProjectExecutorService, ChatProjectTasksService, ChatMemoriesService, ChatAttachmentsService] })
 export class AgentsModule {}

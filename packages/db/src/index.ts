@@ -3,3 +3,7 @@ export * from './client';
 export * from './maintenance';
 export * from './platform-failure';
 export * from './schema';
+export * from './packed-json';
+export * from './stored-arrays';
+export * from './maintenance-worker';
+export * from './migrate-codex-providers';

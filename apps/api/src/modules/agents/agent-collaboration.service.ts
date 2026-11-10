@@ -1,3 +1,8 @@
+import { openChatRuntimeMcp } from './chat-runtime-mcp';
+import { platformInputIssues } from './platform-failure';
+import { encodeMessageState, patchExecutionMessages, executionUpdates, agentExecutionColumns, normalizeAgentModelMessages, agentCapabilityResults, artifacts, auditLogs, agentExecutions, agentMcpServers, agentPendingActions, agents, agentSkills, agentToolCalls, skillFiles, skills, type Database } from '@worklite/db';
+
+import { AgentActionsService } from './agent-actions.service';
 import { agentFiles } from './agent-file-store';
 import { SubAgentInstance } from './sub-agent-instance';
 import { delegationOverrides, delegationOverridesSchema, DelegationFailure, TASK_OWNERSHIP_PROMPT, type DelegationOverrides } from './agent-delegation';
@@ -11,17 +16,19 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { AgentRunView } from '@worklite/contracts';
 import type { Request } from 'express';
-import { normalizeAgentModelMessages, agentCapabilityResults, artifacts, auditLogs, agentExecutions, agentMcpServers, agentPendingActions, agents, agentSkills, agentToolCalls, skillFiles, skills, type Database } from '@worklite/db';
+
 import type { GatewayAgentMessage, GatewayToolDefinition } from '@worklite/model-gateway';
 import { DATABASE } from '../../infrastructure/database.module';
 import { WorkspaceResourcesService } from '../teams/team-resources.service';
 import { resolveWorkflowNodeCapability, readWorkflowOutputPath } from '@worklite/workflow-engine';
 import { AgentCapabilitiesService, assertRequiredSkillScriptCalls, assertWorkflowAgentOutputContract, type SkillScriptCallRecord, workflowAgentFailure } from './agent-capabilities.service';
 import { IsolatedAgentInvocationService } from './isolated-agent-invocation.service';
+import { appendRuntimeActivity, runtimeCurrentActivity, settleRuntimeActivities } from './agent-runtime-activity';
+import type { ProjectExecutorActivity } from './project-executor.types';
 
 const invocationSchema = { type: 'object', additionalProperties: false, required: ['agentId', 'task'], properties: { agentId: { type: 'string' }, task: { description: 'The complete task and relevant context, or {$result: resultRef, path?: "$.field"}.' } } };
 export const CHAT_AGENT_TOOLS: GatewayToolDefinition[] = [
-  { name: 'control_agent_instance', description: 'Pause or resume one existing engine-backed sub-Agent instance inside an active lead execution. Read the lead history to identify the exact child runId; never guess or start replacement work. Other instances continue. Pause requires a saved engine session; resume continues that same session. Controls last only for the owning execution lifetime, not across API restarts.', inputSchema: { type: 'object', additionalProperties: false, required: ['agentId', 'executionId', 'runId', 'action'], properties: { agentId: { type: 'string', description: 'Owning top-level Agent id.' }, executionId: { type: 'string' }, runId: { type: 'string', description: 'Exact child invocation id from the lead history.' }, action: { type: 'string', enum: ['pause', 'resume'] } } } },
+  { name: 'control_agent_instance', description: 'Cancel one native or engine-backed child invocation and its descendants, or pause/resume one engine-backed sub-Agent instance inside an active lead execution. Read the lead history to identify the exact child runId; never guess or start replacement work. Other instances continue. Pause requires a saved engine session; resume continues that same session. Controls last only for the owning execution lifetime, not across API restarts.', inputSchema: { type: 'object', additionalProperties: false, required: ['agentId', 'executionId', 'runId', 'action'], properties: { agentId: { type: 'string', description: 'Owning top-level Agent id.' }, executionId: { type: 'string' }, runId: { type: 'string', description: 'Exact child invocation id from the lead history.' }, action: { type: 'string', enum: ['pause', 'resume', 'cancel'] } } } },
   { name: 'inspect_agents', description: 'List the user-facing Agents and their responsibilities. Only top-level Agents are listed and counted. Sub-Agents are private implementation details of their owning Agent; do not enumerate them or classify Agents as built-in or Teams.', inputSchema: { type: 'object', additionalProperties: false, properties: {} } },
   { name: 'run_agent', description: 'Delegate the original user request and explicit constraints; the selected Agent decides how to fulfill the goal. Do not add extra research requirements or deliverables. Start or continue actual work, never a status/explanation query or stop request. mode=new starts an independent task with only necessary context. mode=continue appends new requirements to the exact same task; supply executionId and continuationReason. Same Agent, same project or an instance mention alone does not imply continuation. Read saved records to answer progress/failure questions; use cancellation APIs to stop. Cancelled tasks require an explicit user request to resume and resumeCancelled=true. Running or pending-input tasks must be controlled or answered, not relaunched. Inspect failed/uncertain external effects before retrying. A launch receipt is not completion; results are reported automatically.', inputSchema: { ...invocationSchema, required: ['agentId', 'task', 'mode'], properties: { ...invocationSchema.properties, mode: { type: 'string', enum: ['new', 'continue'] }, continuationReason: { type: 'string', description: 'For continue: identify the same task and the new requirement or supplied information. Do not use for status queries or unrelated goals.' }, resumeCancelled: { type: 'boolean', description: 'True only when the user explicitly asks to resume a cancelled task.' }, executionId: { type: 'string', description: 'Exact existing task for mode=continue only.' }, projectDirectory: { type: 'string', description: 'Absolute existing project directory; resolve names with search_local_projects.' } } } },
 ];
@@ -61,11 +68,45 @@ function required(value: unknown, name: string): string { if (typeof value !== '
 export class AgentCollaborationService {
   private readonly instances = new Map<string, SubAgentInstance>();
 
-  async controlInstance(workspaceId: string, executionId: string, runId: string, action: 'pause' | 'resume', parentRunId?: string) {
+  async controlInstance(workspaceId: string, executionId: string, runId: string, action: 'pause' | 'resume' | 'cancel', parentRunId?: string) {
+    if (action === 'cancel') return this.cancelInvocation(workspaceId, executionId, runId, parentRunId);
     const instance = this.instance(workspaceId, executionId, runId, parentRunId);
     if (action === 'pause') await instance.pause();
     else instance.resume();
     return { runId, agentId: instance.agentId, status: instance.status };
+  }
+
+  private readonly activeInvocations = new Map<string, { controller: AbortController; done: Promise<void> }>();
+
+  private async cancelInvocation(workspaceId: string, executionId: string, runId: string, parentRunId?: string) {
+    const row = this.db.select().from(auditLogs).where(and(eq(auditLogs.id, runId), eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).get();
+    const run = row?.metadata as AgentRunView | undefined;
+    if (!run?.parentRunId || (parentRunId !== undefined && run.parentRunId !== parentRunId)) throw new NotFoundException('Sub-Agent invocation not found.');
+    const history = this.db.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).all();
+    const descendants = new Set([runId]);
+    let count: number;
+    do {
+      count = descendants.size;
+      for (const row of history) {
+        if (typeof row.metadata?.parentRunId === 'string' && descendants.has(row.metadata.parentRunId)) descendants.add(row.id);
+      }
+    } while (descendants.size !== count);
+    const active = [...descendants].flatMap((id) => this.activeInvocations.get(id) ?? []);
+    // Abort every live descendant, including those whose parent stopped before this request.
+    for (const entry of active) entry.controller.abort(new Error('Sub-Agent cancelled by the user. Inspect saved effects before continuing.'));
+    await Promise.all(active.map((entry) => entry.done));
+    this.db.transaction((tx) => {
+      for (const row of tx.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, workspaceId), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).all()) {
+        if (!descendants.has(row.id) || !['running', 'paused', 'waiting_for_input'].includes(String(row.metadata?.status))) continue;
+        tx.update(auditLogs).set({ metadata: { ...row.metadata, status: 'cancelled', currentActivity: null, finishedAt: new Date().toISOString() } }).where(eq(auditLogs.id, row.id)).run();
+      }
+      for (const call of tx.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.workspaceId, workspaceId), eq(agentToolCalls.status, 'running'))).all()) {
+        if (!descendants.has(String(object(call.input).__agentRunId))) continue;
+        tx.update(agentToolCalls).set({ status: 'cancelled', output: call.output || 'Sub-Agent tool cancelled. Inspect saved effects before continuing.', finishedAt: new Date(), resultAppended: true }).where(eq(agentToolCalls.id, call.id)).run();
+      }
+    });
+    const saved = this.db.select().from(auditLogs).where(eq(auditLogs.id, runId)).get()!.metadata as AgentRunView;
+    return { runId, agentId: saved.agentId, status: saved.status };
   }
 
   private instance(workspaceId: string, executionId: string, runId: string, parentRunId?: string) {
@@ -75,7 +116,7 @@ export class AgentCollaborationService {
   }
 
   private readonly activeCapabilities = new Set<string>();
-  constructor(@Inject(DATABASE) private readonly db: Database, private readonly resources: WorkspaceResourcesService, private readonly invocations: IsolatedAgentInvocationService, private readonly capabilities: AgentCapabilitiesService, private readonly executors?: ProjectExecutorService, private readonly builtinTools?: BuiltinAgentToolsService) {}
+  constructor(@Inject(DATABASE) private readonly db: Database, private readonly resources: WorkspaceResourcesService, private readonly invocations: IsolatedAgentInvocationService, private readonly capabilities: AgentCapabilitiesService, private readonly executors?: ProjectExecutorService, private readonly builtinTools?: BuiltinAgentToolsService, private readonly actions?: AgentActionsService) {}
 
   list(workspaceId: string) {
     const catalog = agentFiles(this.db);
@@ -86,7 +127,7 @@ export class AgentCollaborationService {
   }
 
   async run(workspaceId: string, executionId: string, agentId: string, task: unknown, signal: AbortSignal, onTextDelta?: (delta: string) => void | Promise<void>, projectDirectory?: string, rootToolCallId?: string, preferredRootRunId?: string): Promise<string> {
-    const owner = this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).get();
+    const owner = this.db.select(agentExecutionColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).get();
     if (!owner) throw new NotFoundException('Agent execution not found.');
     const cleaned = normalizeAgentModelMessages(owner.modelMessages);
     if (JSON.stringify(cleaned) !== JSON.stringify(owner.modelMessages)) {
@@ -95,10 +136,11 @@ export class AgentCollaborationService {
       const messages = [{ role: 'user' as const, content: `Original history before recovery repair: resultRef ${resultRef}. Use read_result only when needed.` }, ...cleaned];
       this.db.transaction((tx) => {
         tx.insert(agentCapabilityResults).values({ id: resultRef, executionId, value: { kind: 'conversation-history', messages: owner.modelMessages } }).run();
-        tx.update(agentExecutions).set({ modelMessages: messages }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
+        tx.update(agentExecutions).set(executionUpdates(executionId, { modelMessages: messages })).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
       });
       owner.modelMessages = messages;
     }
+    let persistedOwnerState = encodeMessageState(owner.modelMessages);
     const catalog = agentFiles(this.db);
     catalog?.refresh(workspaceId);
     // Freeze the complete reachable directory before invoking any model or tool.
@@ -108,7 +150,6 @@ export class AgentCollaborationService {
       if (directory.has(id)) return;
       const agent = this.db.select().from(agents).where(and(eq(agents.id, id), eq(agents.workspaceId, workspaceId), eq(agents.kind, 'custom'))).get();
       if (!agent || (catalog && !catalog.get(id))) throw new BadRequestException('The selected Agent must be available in this workspace.');
-      if (agent.runtime.kind !== 'native' && ((agent.collaboration?.subAgentIds.length ?? 0) > 0 || (agent.collaboration?.capabilities.length ?? 0) > 0 || (agent.collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate engine-backed sub-Agents.');
       const assigned = this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation }).from(agentSkills).innerJoin(skills, eq(skills.id, agentSkills.skillId)).where(and(eq(agentSkills.agentId, id), eq(skills.workspaceId, workspaceId))).all();
       if (!catalog && assigned.some((skill) => skill.validation !== 'valid')) throw new BadRequestException('An assigned Skill is invalid.');
       const fileEntry = catalog?.get(id);
@@ -160,6 +201,7 @@ export class AgentCollaborationService {
       const run: AgentRunView = { id: runId, executionId, agentId: id, agentName: directory.get(id)?.agent.name ?? id, parentRunId,
         runtime: savedRun?.runtime ?? directory.get(id)!.agent.runtime.kind,
         ...(savedRun?.commandExecutionId ? { commandExecutionId: savedRun.commandExecutionId } : {}),
+        ...(savedRun?.activities ? { activities: settleRuntimeActivities(savedRun.activities) } : {}),
         task: savedRun?.task ?? invocationTask(context), currentActivity: { phase: 'model' }, status: 'running', usage: savedRun?.usage ?? null, output: '', error: null, createdAt: savedRun?.createdAt ?? new Date().toISOString(), finishedAt: null };
       if (parentRunId === null && rootToolCallId) {
         const call = this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, rootToolCallId), eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.workspaceId, workspaceId))).get();
@@ -168,30 +210,43 @@ export class AgentCollaborationService {
       const persist = () => this.db.update(auditLogs).set({ metadata: { ...run, overrides } }).where(eq(auditLogs.id, runId)).run();
       if (previous) persist();
       else this.db.insert(auditLogs).values({ id: runId, workspaceId, action: 'agent.invocation', resource: executionId, metadata: { ...run, overrides } }).run();
+      const controller = new AbortController();
+      invocationSignal = AbortSignal.any([invocationSignal, controller.signal]);
+      let stopped!: () => void;
+      this.activeInvocations.set(runId, { controller, done: new Promise<void>((resolve) => { stopped = resolve; }) });
       try {
-        const execute = (attemptSignal: AbortSignal) => perform(id, context, ancestors, runId, overrides, (usage, cumulative = false, commandExecutionId) => {
-          if (!usage) {
-            if (commandExecutionId && run.commandExecutionId !== commandExecutionId) { run.commandExecutionId = commandExecutionId; persist(); }
-            return;
-          }
-          if (commandExecutionId) run.commandExecutionId = commandExecutionId;
-          run.usage = cumulative || !run.usage ? {
-            inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens,
-            ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-            ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
-          } : {
-            inputTokens: sumUsage(run.usage.inputTokens, usage.inputTokens),
-            outputTokens: sumUsage(run.usage.outputTokens, usage.outputTokens),
-            totalTokens: sumUsage(run.usage.totalTokens, usage.totalTokens),
-            ...(run.usage.cacheReadTokens !== undefined || usage.cacheReadTokens !== undefined ? { cacheReadTokens: sumUsage(run.usage.cacheReadTokens ?? null, usage.cacheReadTokens ?? null) } : {}),
-            ...(run.usage.cacheCreationTokens !== undefined || usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: sumUsage(run.usage.cacheCreationTokens ?? null, usage.cacheCreationTokens ?? null) } : {}),
-          };
-          persist();
-        }, attemptSignal, state, saveState, (activity, output) => {
-          run.currentActivity = activity;
-          if (output !== undefined) run.output = output;
-          persist();
-        });
+        invocationSignal.throwIfAborted();
+        const execute = (attemptSignal: AbortSignal) => {
+          const activityPrefix = randomUUID();
+          if (run.activities) run.activities = settleRuntimeActivities(run.activities);
+          return perform(id, context, ancestors, runId, overrides, (usage, cumulative = false, commandExecutionId) => {
+            if (!usage) {
+              if (commandExecutionId && run.commandExecutionId !== commandExecutionId) { run.commandExecutionId = commandExecutionId; persist(); }
+              return;
+            }
+            if (commandExecutionId) run.commandExecutionId = commandExecutionId;
+            run.usage = cumulative || !run.usage ? {
+              inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalTokens: usage.totalTokens,
+              ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+              ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+            } : {
+              inputTokens: sumUsage(run.usage.inputTokens, usage.inputTokens),
+              outputTokens: sumUsage(run.usage.outputTokens, usage.outputTokens),
+              totalTokens: sumUsage(run.usage.totalTokens, usage.totalTokens),
+              ...(run.usage.cacheReadTokens !== undefined || usage.cacheReadTokens !== undefined ? { cacheReadTokens: sumUsage(run.usage.cacheReadTokens ?? null, usage.cacheReadTokens ?? null) } : {}),
+              ...(run.usage.cacheCreationTokens !== undefined || usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: sumUsage(run.usage.cacheCreationTokens ?? null, usage.cacheCreationTokens ?? null) } : {}),
+            };
+            persist();
+          }, attemptSignal, state, saveState, (activity, output, event) => {
+            if (event) {
+              run.activities ??= [];
+              appendRuntimeActivity(run.activities, event, activityPrefix);
+              run.currentActivity = runtimeCurrentActivity(run.activities);
+            } else run.currentActivity = activity;
+            if (output !== undefined) run.output = output;
+            persist();
+          });
+        };
         let result: unknown;
         if (parentRunId && directory.get(id)!.agent.runtime.kind !== 'native') {
           // Defer execution until the instance has been registered for session callbacks.
@@ -199,6 +254,7 @@ export class AgentCollaborationService {
           this.instances.set(runId, instance);
           result = await instance.done;
         } else result = await execute(invocationSignal);
+        invocationSignal.throwIfAborted();
         if (parentRunId) {
           const content = typeof result === 'string' ? result : JSON.stringify(result);
           const artifactId = `art_${randomUUID()}`;
@@ -210,17 +266,22 @@ export class AgentCollaborationService {
           });
         }
         if (!parentRunId) await Promise.allSettled([...this.instances.values()].filter((instance) => instance.executionId === executionId && instance.workspaceId === workspaceId).map((instance) => instance.done));
+        invocationSignal.throwIfAborted();
         run.status = 'completed';
         run.output = typeof result === 'string' ? result : JSON.stringify(result) ?? '';
         return result;
       } catch (error) {
-        run.status = signal.aborted ? 'cancelled' : 'failed';
+        run.status = invocationSignal.aborted ? 'cancelled' : 'failed';
         run.error = error instanceof Error ? error.message : String(error);
         if (error instanceof DelegationFailure) run.output = error.details.rawOutput;
         throw error;
-      } finally { run.currentActivity = null; run.finishedAt = new Date().toISOString(); persist(); }
+      } finally {
+        run.currentActivity = null; run.finishedAt = new Date().toISOString(); persist();
+        this.activeInvocations.delete(runId);
+        stopped();
+      }
     };
-    const perform = async (id: string, context: unknown, ancestors: string[], runId: string, overrides: DelegationOverrides, onUsage: (usage: AgentRunView['usage'], cumulative?: boolean, commandExecutionId?: string) => void, parentSignal: AbortSignal, state: InvocationState, saveState: () => unknown, report: (activity: AgentRunView['currentActivity'], output?: string) => void): Promise<unknown> => {
+    const perform = async (id: string, context: unknown, ancestors: string[], runId: string, overrides: DelegationOverrides, onUsage: (usage: AgentRunView['usage'], cumulative?: boolean, commandExecutionId?: string) => void, parentSignal: AbortSignal, state: InvocationState, saveState: () => unknown, report: (activity: AgentRunView['currentActivity'], output?: string, event?: ProjectExecutorActivity) => void): Promise<unknown> => {
       const signal = overrides.timeoutMs ? AbortSignal.any([parentSignal, AbortSignal.timeout(overrides.timeoutMs)]) : parentSignal;
       signal.throwIfAborted();
       if (remainingCalls <= (ancestors.length ? finishReserve : 0) || ancestors.length >= 8 || ancestors.includes(id)) throw new BadRequestException('Agent collaboration limit reached.');
@@ -268,22 +329,6 @@ export class AgentCollaborationService {
           throw new DelegationFailure({ kind: 'output_contract', rawOutput: text, partialResult, skillCalls: [], toolCalls: [] }, error);
         }
       };
-      if (agent.runtime.kind !== 'native') {
-        if (!workingDirectory) throw new BadRequestException(`An existing projectDirectory is required for Agent ${agent.name}.`);
-        if (!this.executors) throw new BadRequestException('The execution engine is unavailable.');
-        const model = models[0] || agent.model || null;
-        const launch = await this.executors.captureLaunch(agent.runtime.kind, model);
-        const instance = this.instances.get(runId);
-        const result = await this.executors.execute({ owner: 'agent', workspaceId, model, launch,
-          runtimeSession: { resumeId: instance?.resumeId ?? state.resumeId, onSession: async (sessionId: string) => { state.resumeId = sessionId; saveState(); if (instance) instance.resumeId = sessionId; } }, projectDirectory: workingDirectory, systemPrompt: [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [] })}`].join('\n\n'), input: instance?.resumeId ? 'Continue the interrupted task from the saved session. Inspect the current files and tool evidence before retrying any interrupted action; do not repeat uncertain external effects.' : JSON.stringify(resolve(context)), skills: invocationSkills, mcpServers: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), signal, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId }, approvalPolicy: agent.runtime.approvalPolicy ?? 'auto', onTextDelta: ancestors.length === 0 ? onTextDelta : undefined,
-          // Bind the command as soon as Codex starts, including failures before any
-          // usage arrives. Later cumulative snapshots replace this invocation's usage.
-          onEvent: (event) => { if (event.usage || event.commandExecutionId) onUsage(event.usage ?? null, true, event.commandExecutionId); } });
-        signal.throwIfAborted();
-        return validateOutput(result);
-      }
-      if (builtinToolNames.length > 0 && !workingDirectory) throw new BadRequestException(`An existing projectDirectory is required for Agent ${agent.name}.`);
-      if (!models.length) throw new BadRequestException(`Configure a model for Agent ${agent.name}.`);
       const children = config?.subAgentIds ?? [];
       const capabilityList = config?.capabilities ?? [];
       const skillCalls: SkillScriptCallRecord[] = [];
@@ -292,47 +337,14 @@ export class AgentCollaborationService {
       const tools = [...RESULT_TOOLS, ...privateTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), ...(children.length ? assignedSubAgentTools(children) : []), ...(capabilityList.length ? [CAPABILITY_TOOL] : [])];
       if (requiredSkills.some((skillId) => !invocationSkills.some((skill) => skill.id === skillId))) throw new BadRequestException('A required Skill is not assigned to this Agent.');
       let text: string;
+      signal.throwIfAborted();
       let rawOutput = '';
       let checkpoint: GatewayAgentMessage[] = [];
       const toolActivities: unknown[] = [];
       const evidence = () => [...toolActivities, ... this.db.select().from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId)).all().filter((call) => object(call.input).__agentRunId === runId).map((call) => ({ callId: call.id, toolName: call.mcpToolName, status: call.status, output: call.output, commandExecutionId: call.commandExecutionId }))];
       let lastOutputAt = 0;
       const thinking = () => report({ phase: 'model' });
-      try { text = await this.invocations.execute({
-        onContextCheckpoint: async (checkpoint) => {
-          signal.throwIfAborted();
-          const resultRef = `acr_${randomUUID()}`;
-          this.db.insert(agentCapabilityResults).values({ id: resultRef, executionId, value: { kind: 'task-checkpoint', runId, ...checkpoint } }).run();
-          return resultRef;
-        },
-        initialMessages: ancestors.length === 0 && owner.agentId === id && owner.modelMessages.length ? owner.modelMessages as GatewayAgentMessage[] : state.messages,
-        onMessages: (messages) => {
-          signal.throwIfAborted();
-          checkpoint = messages;
-          state.messages = messages;
-          saveState();
-          if (ancestors.length === 0 && owner.agentId === id) this.db.update(agentExecutions).set({ modelMessages: messages as typeof owner.modelMessages, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
-        },
-        beforeToolCall: (call) => {
-          if (remainingCalls <= (ancestors.length ? finishReserve : 0)) return 'Shared task budget reserve reached. Do not start more work. Return existing results and missing evidence to the lead, who can take over and finish delivery.';
-          remainingCalls -= 1;
-          report({ phase: 'tool', toolName: call.toolName });
-          return undefined;
-        },
-        workspaceId, publicModelId: models, context: workingDirectory ? { task: resolve(context), projectDirectory: workingDirectory } : resolve(context), skills: invocationSkills,
-        mcpRuntimes: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), builtinToolNames, projectDirectory: workingDirectory, signal,
-        systemPrompt: [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [], allowEmptyOutputKeys: config.allowEmptyOutputKeys ?? [], requiredSkillIds: requiredSkills })}. These are the authoritative requirements for this invocation.`, privateTools.length ? 'Private tools belong only to this Agent. Capability tools accept {input: <capability arguments>, resumeCallId?: <previous callId>}; command tools receive their arguments as base64 JSON in WORKLITE_TOOL_INPUT_BASE64. Use actual tool results as evidence.' : '', children.length ? `Assigned sub-Agents: ${JSON.stringify(children.map((child) => ({ id: child, name: directory.get(child)!.agent.name, responsibility: directory.get(child)!.agent.responsibility, instructions: directory.get(child)!.agent.systemPrompt, outputFormat: directory.get(child)!.agent.collaboration?.outputFormat ?? 'text', outputContract: directory.get(child)!.agent.collaboration?.outputContract ?? [], allowEmptyOutputKeys: directory.get(child)!.agent.collaboration?.allowEmptyOutputKeys ?? [], requiredSkillIds: directory.get(child)!.agent.collaboration?.requiredSkillIds ?? [], models: directory.get(child)!.agent.collaboration?.publicModels ?? [], limits: directory.get(child)!.agent.collaboration?.limits, skills: directory.get(child)!.skills.map((skill) => ({ id: skill.id, name: skill.name })), mcpServerIds: directory.get(child)!.serverIds, builtinToolNames: directory.get(child)!.agent.collaboration?.builtinToolNames ?? [] })))}` : '', capabilityList.length ? `Available capabilities (input ports describe the tool input; saved config is applied automatically; WeChat publishing capabilities also accept input.operation list, inspect, render_image, revise, verify or publish with runId/draftId and operation-specific fields, independently of any pipeline): ${JSON.stringify(capabilityList.map((item) => ({ ...item, inputPorts: resolveWorkflowNodeCapability(item.type, item.typeVersion)?.inputs })))}` : '', 'Select each next action from actual results. A waiting_for_input result is not success: tell the user what is required, keep its callId, and resume that exact operation after the user completes it. Do not repeat a failed or uncertain publication automatically.'].filter(Boolean).join('\n\n'),
-        managedTools: tools, jsonOutput: config?.outputFormat === 'json', limits: { maxToolRounds: ancestors.length ? 20 : 40, maxToolCalls: ancestors.length ? 32 : 64, ...config.limits, budgetReminderAtRound: Math.max(1, Math.floor((config.limits.maxToolRounds ?? (ancestors.length ? 20 : 40)) * 0.7)) }, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId },
-        onTextDelta: async (delta) => {
-          rawOutput += delta;
-          if (Date.now() - lastOutputAt >= 1000) { report({ phase: 'model' }, rawOutput); lastOutputAt = Date.now(); }
-          if (ancestors.length === 0) await onTextDelta?.(delta);
-        },
-        onModelRound: (round) => { thinking(); if (round.usage) onUsage(round.usage); },
-        onSkillScript: (call) => { skillCalls.push(call); thinking(); },
-        onMcpCall: (activity) => { toolActivities.push(activity); thinking(); },
-        onBuiltinTool: (activity) => { toolActivities.push(activity); thinking(); },
-        executeManagedTool: async (call) => {
+      const executeManagedTool = async (call: { toolName: string; input: unknown }): Promise<string> => {
           signal.throwIfAborted();
           report({ phase: 'tool', toolName: call.toolName });
           const privateTool = privateTools.find((item) => item.name === call.toolName);
@@ -400,12 +412,13 @@ export class AgentCollaborationService {
               const values = await Promise.all(tasks.map(async (item: unknown) => {
                 const request = object(item);
                 const child = typeof request.agentId === 'string' ? request.agentId : '';
+                let childRunId: string | undefined;
                 try {
                   required(child, 'agentId');
                   if (!children.includes(child)) throw new BadRequestException(`This sub-Agent is not assigned to its parent. Use an exact assigned agentId, not a name. Available ids: ${JSON.stringify(children)}.`);
                   if (request.background !== undefined && typeof request.background !== 'boolean') throw new BadRequestException('background must be a boolean.');
                   const followUpRunId = request.runId === undefined ? undefined : required(request.runId, 'runId');
-                  const childRunId = followUpRunId ?? `air_${randomUUID()}`;
+                  childRunId = followUpRunId ?? `air_${randomUUID()}`;
                   const previousInstance = this.instances.get(childRunId);
                   const work = invoke(child, request.task, [...ancestors, id], runId, delegationOverrides(request.overrides), signal, childRunId, followUpRunId);
                   if (request.background === true) {
@@ -416,7 +429,11 @@ export class AgentCollaborationService {
                     return { agentId: child, runId: childRunId, status: 'running', background: true };
                   }
                   return { agentId: child, runId: childRunId, status: 'completed', result: await work }; }
-                catch (error) { if (signal.aborted) throw error; return { agentId: child, status: 'failed', error: error instanceof Error ? error.message : 'Sub-Agent failed.', ...(error instanceof DelegationFailure ? error.details : { kind: 'execution' }), recovery: 'Reuse available output and evidence; repair, adjust this invocation or take over. Do not repeat uncertain external operations.' };  }
+                catch (error) {
+                  if (signal.aborted) throw error;
+                  const cancelled = childRunId && this.db.select().from(auditLogs).where(eq(auditLogs.id, childRunId)).get()?.metadata?.status === 'cancelled';
+                  return { agentId: child, ...(childRunId ? { runId: childRunId } : {}), status: cancelled ? 'cancelled' : 'failed', error: error instanceof Error ? error.message : 'Sub-Agent failed.', ...(error instanceof DelegationFailure ? error.details : { kind: 'execution' }), recovery: cancelled ? 'The user stopped this invocation. Retain its evidence and do not restart it unless the user explicitly asks.' : 'Reuse available output and evidence; repair, adjust this invocation or take over. Do not repeat uncertain external operations.' };
+                }
               }));
               output = call.toolName === 'run_sub_agent' ? values[0] : values;
             } else if (call.toolName === 'use_capability' || privateHandler?.kind === 'capability') {
@@ -439,9 +456,9 @@ export class AgentCollaborationService {
               finally { this.activeCapabilities.delete(operationKey); }
               if (object(output).status === 'waiting_for_input') {
                 const action = object(object(output).pendingAction);
-                this.db.insert(agentPendingActions).values({ id: String(action.id), workspaceId, runId: executionId, nodeRunId: operationId, type: action.type as 'wechat_login' | 'wechat_publish_confirmation', title: String(action.title), description: String(action.description), qrCode: action.qrCode as string | null, expiresAt: action.expiresAt as Date | null, externalOperationId: action.externalOperationId as string | undefined }).onConflictDoUpdate({ target: agentPendingActions.id, set: { status: 'pending', updatedAt: new Date() } }).run();
-                // QR display is user initiated; the normal tool result contains no QR image.
-                output = { status: 'waiting_for_input', callId: operationId, actionId: action.id, title: action.title, description: action.description };
+                if (!this.actions) throw new Error('Agent action delivery is unavailable.');
+                const delivery = await this.actions.save(workspaceId, executionId, operationId, action as unknown as Parameters<AgentActionsService['save']>[3]);
+                output = { status: 'waiting_for_input', callId: operationId, actionId: action.id, title: action.title, description: action.description, expiresAt: delivery.expiresAt, qrCode: delivery.qrCode, qrImage: delivery.qrImage, channelDelivery: delivery.channelDelivery, scanUrl: delivery.scanUrl, markdown: delivery.markdown };
               }
             } else throw new BadRequestException('Unavailable Agent tool.');
             signal.throwIfAborted();
@@ -453,12 +470,86 @@ export class AgentCollaborationService {
             });
             return safe;
           } catch (error) {
-            this.db.update(agentToolCalls).set({ status: signal.aborted ? 'cancelled' : 'failed', output: error instanceof Error ? error.message : 'Agent tool failed.', finishedAt: new Date() }).where(eq(agentToolCalls.id, callId)).run();
+            const saved = signal.aborted ? this.db.select({ output: agentToolCalls.output }).from(agentToolCalls).where(eq(agentToolCalls.id, callId)).get()?.output : undefined;
+            this.db.update(agentToolCalls).set({ status: signal.aborted ? 'cancelled' : 'failed', output: saved || (error instanceof Error ? error.message : 'Agent tool failed.'), finishedAt: new Date() }).where(eq(agentToolCalls.id, callId)).run();
             if (signal.aborted) throw error;
             return JSON.stringify({ status: 'failed', callId, error: error instanceof Error ? error.message : 'Agent tool failed.' });
           } finally { thinking(); }
+      };
+      const systemPrompt = [instructions, TASK_OWNERSHIP_PROMPT, `Effective output requirements: ${JSON.stringify({ outputFormat: config.outputFormat ?? 'text', outputContract: config.outputContract ?? [], allowEmptyOutputKeys: config.allowEmptyOutputKeys ?? [], requiredSkillIds: requiredSkills })}. These are the authoritative requirements for this invocation.`, privateTools.length ? 'Private tools belong only to this Agent. Capability tools accept {input: <capability arguments>, resumeCallId?: <previous callId>}; command tools receive their arguments as base64 JSON in WORKLITE_TOOL_INPUT_BASE64. Use actual tool results as evidence.' : '', children.length ? `Assigned sub-Agents: ${JSON.stringify(children.map((child) => ({ id: child, name: directory.get(child)!.agent.name, responsibility: directory.get(child)!.agent.responsibility, instructions: directory.get(child)!.agent.systemPrompt, outputFormat: directory.get(child)!.agent.collaboration?.outputFormat ?? 'text', outputContract: directory.get(child)!.agent.collaboration?.outputContract ?? [], allowEmptyOutputKeys: directory.get(child)!.agent.collaboration?.allowEmptyOutputKeys ?? [], requiredSkillIds: directory.get(child)!.agent.collaboration?.requiredSkillIds ?? [], models: directory.get(child)!.agent.collaboration?.publicModels ?? [], limits: directory.get(child)!.agent.collaboration?.limits, skills: directory.get(child)!.skills.map((skill) => ({ id: skill.id, name: skill.name })), mcpServerIds: directory.get(child)!.serverIds, builtinToolNames: directory.get(child)!.agent.collaboration?.builtinToolNames ?? [] })))}` : '', capabilityList.length ? `Available capabilities (input ports describe the tool input; saved config is applied automatically; WeChat publishing capabilities also accept input.operation list, inspect, render_image, revise, verify or publish with runId/draftId and operation-specific fields, independently of any pipeline): ${JSON.stringify(capabilityList.map((item) => ({ ...item, inputPorts: resolveWorkflowNodeCapability(item.type, item.typeVersion)?.inputs })))}` : '', 'Select each next action from actual results. A waiting_for_input result is not success: if channelDelivery is queued, the QR image and scanUrl are already queued to the originating WeChat conversation; otherwise deliver its markdown (QR attachment and scanUrl) verbatim and state expiresAt. Do not wait for the user inside a model loop or resend a queued QR. Keep its callId, and resume that exact operation after the user completes it. Do not repeat a failed or uncertain publication automatically.'].filter(Boolean).join('\n\n');
+      if (agent.runtime.kind !== 'native') {
+        if (!workingDirectory) throw new BadRequestException(`An existing projectDirectory is required for Agent ${agent.name}.`);
+        if (!this.executors) throw new BadRequestException('The execution engine is unavailable.');
+        const model = models[0] || agent.model || null;
+        const launch = await this.executors.captureLaunch(agent.runtime.kind, model);
+        const instance = this.instances.get(runId);
+        const bridge = tools.length ? await openChatRuntimeMcp({ definitions: tools, execute: async (name, input) => {
+          const definition = tools.find((tool) => tool.name === name);
+          if (!definition || platformInputIssues(input, definition.inputSchema).length) throw new BadRequestException('Invalid assigned Agent tool input.');
+          if (remainingCalls <= (ancestors.length ? finishReserve : 0)) throw new BadRequestException('Shared Agent task budget reached.');
+          remainingCalls -= 1;
+          return executeManagedTool({ toolName: name, input });
+        } }, async () => { throw new BadRequestException('Return missing information to the owning Chat conversation.'); }) : undefined;
+        try {
+        signal.throwIfAborted();
+        const result = await this.executors.execute({ owner: 'agent', workspaceId, model, modelParameters: config.modelParameters?.[model ?? ''] ?? agent.modelParameters ?? undefined, launch,
+          runtimeSession: { resumeId: instance?.resumeId ?? state.resumeId, onSession: async (sessionId: string) => { state.resumeId = sessionId; saveState(); if (instance) instance.resumeId = sessionId; } }, projectDirectory: workingDirectory, systemPrompt: `${systemPrompt}\n\nUse the worklite_agent_tools MCP server for assigned sub-Agents and capabilities. Native sub-Agent tools do not grant access to other WorkLite Agents.`, input: instance?.resumeId ? 'Continue the interrupted task from the saved session. Inspect the current files and tool evidence before retrying any interrupted action; do not repeat uncertain external effects.' : JSON.stringify(resolve(context)), skills: invocationSkills, mcpServers: [...await this.resources.workflowMcpRuntimes(workspaceId, serverIds), ...(bridge ? [{ ...bridge.runtime, id: 'agent_tools', name: 'Assigned Agent tools' }] : [])], signal, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId }, approvalPolicy: agent.runtime.approvalPolicy ?? 'auto', onTextDelta: ancestors.length === 0 ? onTextDelta : undefined,
+          // Bind the command as soon as Codex starts, including failures before any
+          // usage arrives. Later cumulative snapshots replace this invocation's usage.
+          onEvent: (event) => {
+            if (event.usage || event.commandExecutionId) onUsage(event.usage ?? null, true, event.commandExecutionId);
+            if (!event.usage) report(undefined, undefined, event);
+          } });
+        signal.throwIfAborted();
+        return validateOutput(result);
+        } finally { await bridge?.close(); }
+      }
+      if (builtinToolNames.length > 0 && !workingDirectory) throw new BadRequestException(`An existing projectDirectory is required for Agent ${agent.name}.`);
+      if (!models.length) throw new BadRequestException(`Configure a model for Agent ${agent.name}.`);
+      signal.throwIfAborted();
+      try { text = await this.invocations.execute({
+        onContextCheckpoint: async (checkpoint) => {
+          signal.throwIfAborted();
+          const resultRef = `acr_${randomUUID()}`;
+          this.db.insert(agentCapabilityResults).values({ id: resultRef, executionId, value: { kind: 'task-checkpoint', runId, ...checkpoint } }).run();
+          return resultRef;
         },
+        initialMessages: ancestors.length === 0 && owner.agentId === id && owner.modelMessages.length ? owner.modelMessages as GatewayAgentMessage[] : state.messages,
+        onMessages: (messages) => {
+          signal.throwIfAborted();
+          checkpoint = messages;
+          state.messages = messages;
+          saveState();
+          if (ancestors.length === 0 && owner.agentId === id) {
+            const patch = patchExecutionMessages(persistedOwnerState, messages);
+            if (patch.changed) {
+              const updated = this.db.update(agentExecutions).set({ modelMessages: patch.value, updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
+              if (updated.changes) persistedOwnerState = patch.encoded;
+            }
+          }
+        },
+        beforeToolCall: (call) => {
+          if (remainingCalls <= (ancestors.length ? finishReserve : 0)) return 'Shared task budget reserve reached. Do not start more work. Return existing results and missing evidence to the lead, who can take over and finish delivery.';
+          remainingCalls -= 1;
+          report({ phase: 'tool', toolName: call.toolName });
+          return undefined;
+        },
+        workspaceId, publicModelId: models, modelParameters: agent.modelParameters ?? undefined, modelParametersByModel: config.modelParameters, context: workingDirectory ? { task: resolve(context), projectDirectory: workingDirectory } : resolve(context), skills: invocationSkills,
+        mcpRuntimes: await this.resources.workflowMcpRuntimes(workspaceId, serverIds), builtinToolNames, projectDirectory: workingDirectory, signal,
+        systemPrompt,
+        managedTools: tools, jsonOutput: config?.outputFormat === 'json', limits: { maxToolRounds: ancestors.length ? 20 : 40, maxToolCalls: ancestors.length ? 32 : 64, ...config.limits, budgetReminderAtRound: Math.max(1, Math.floor((config.limits.maxToolRounds ?? (ancestors.length ? 20 : 40)) * 0.7)) }, correlation: { surface: 'agent', agentRunId: runId, agentExecutionId: executionId },
+        onTextDelta: async (delta) => {
+          rawOutput += delta;
+          if (Date.now() - lastOutputAt >= 1000) { report({ phase: 'model' }, rawOutput); lastOutputAt = Date.now(); }
+          if (ancestors.length === 0) await onTextDelta?.(delta);
+        },
+        onModelRound: (round) => { thinking(); if (round.usage) onUsage(round.usage); },
+        onSkillScript: (call) => { skillCalls.push(call); thinking(); },
+        onMcpCall: (activity) => { toolActivities.push(activity); thinking(); },
+        onBuiltinTool: (activity) => { toolActivities.push(activity); thinking(); },
+        executeManagedTool,
       }); } catch (error) {
+        report(undefined, rawOutput);
         if (parentSignal.aborted) throw error;
         const output = typeof object(error).output === 'string' ? object(error).output as string : rawOutput;
         throw new DelegationFailure({ kind: 'execution', rawOutput: output, partialResult: { messages: checkpoint }, skillCalls, toolCalls: evidence() }, workflowAgentFailure(error));

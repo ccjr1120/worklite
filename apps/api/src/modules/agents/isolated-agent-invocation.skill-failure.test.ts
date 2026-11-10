@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 const gateway = vi.hoisted(() => ({ runWorkflowAgent: vi.fn() }));
 
-vi.mock('@worklite/model-gateway', () => ({
+vi.mock('@worklite/model-gateway', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@worklite/model-gateway')>()),
   createModelGateway: () => ({ runWorkflowAgent: gateway.runWorkflowAgent }),
 }));
 

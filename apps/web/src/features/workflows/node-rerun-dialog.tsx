@@ -1,3 +1,5 @@
+import { ModelParametersFields } from '@/components/model-parameters-fields';
+import type { ModelParameters } from '@worklite/contracts';
 import { LoaderCircle, RotateCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -41,6 +43,9 @@ function NodeRerunDialog({ run, nodeRun, definition, nodeLabel, nodeLabels, onCl
   const configuredModel = asRecord(targetNode?.config)?.model;
   const currentModel = typeof configuredModel === 'string' && configuredModel.trim() ? configuredModel : null;
   const [modelSelection, setModelSelection] = useState(currentModel ?? KEEP_CURRENT_MODEL);
+  const [modelParameters, setModelParameters] = useState<ModelParameters>((asRecord(targetNode?.config)?.modelParameters ?? {}) as ModelParameters);
+  const [parametersDirty, setParametersDirty] = useState(false);
+  const [parametersValid, setParametersValid] = useState(true);
   const [sideEffectsConfirmed, setSideEffectsConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +83,11 @@ function NodeRerunDialog({ run, nodeRun, definition, nodeLabel, nodeLabels, onCl
   }
 
   async function rerun() {
-    if (busy || (requiresSideEffectConfirmation && !sideEffectsConfirmed)) return;
+    if (busy || !parametersValid || (requiresSideEffectConfirmation && !sideEffectsConfirmed)) return;
     setBusy(true);
     setError(null);
     const input: RerunWorkflowNodeRequest = {
+      ...(isAgent && parametersDirty ? { modelParameters } : {}),
       ...(isAgent && modelSelection !== KEEP_CURRENT_MODEL ? { modelOverride: modelSelection } : {}),
       ...(requiresSideEffectConfirmation ? { confirmSideEffects: true } : {}),
     };
@@ -108,7 +114,7 @@ function NodeRerunDialog({ run, nodeRun, definition, nodeLabel, nodeLabels, onCl
         {isAgent ? (
           <div className="grid gap-2">
             <Label htmlFor="node-rerun-model">{t('runs:nodeRerun.model')}</Label>
-            <Select value={modelSelection} onValueChange={setModelSelection} disabled={busy || providersLoading}>
+            <Select value={modelSelection} onValueChange={(model) => { setModelSelection(model); setModelParameters(model === currentModel ? (asRecord(targetNode?.config)?.modelParameters ?? {}) as ModelParameters : {}); setParametersDirty(false); }} disabled={busy || providersLoading}>
               <SelectTrigger id="node-rerun-model">
                 <SelectValue />
               </SelectTrigger>
@@ -119,6 +125,8 @@ function NodeRerunDialog({ run, nodeRun, definition, nodeLabel, nodeLabels, onCl
             </Select>
           </div>
         ) : null}
+
+        {isAgent ? <ModelParametersFields key={modelSelection} value={modelParameters} onChange={(value) => { setModelParameters(value); setParametersDirty(true); }} onValidityChange={setParametersValid} protocol={providers.find((provider) => modelSelection.startsWith(`${provider.name}/`))?.protocol} disabled={busy || providersLoading} /> : null}
 
         <section aria-labelledby="node-rerun-downstream-title">
           <h3 id="node-rerun-downstream-title" className="text-sm font-medium">{t('runs:nodeRerun.downstreamTitle')}</h3>

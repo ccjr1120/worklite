@@ -1,6 +1,7 @@
+import { validateModelParameters, type ModelParameters } from '@worklite/contracts';
 import { agentFiles, type AgentFileTransaction } from './agent-file-store';
 import { validatePrivateTools } from './agent-private-tools';
-import { resolveWorkflowNodeCapability } from '@worklite/workflow-engine';
+import { validateAgentCapabilities } from './agent-capability-validation';
 import type { AgentCollaboration } from '@worklite/contracts';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -85,9 +86,9 @@ export class AgentsService {
     const systemPrompt = input.systemPrompt?.trim() ?? '';
     const providerId = input.providerId ?? null;
     const model = input.model?.trim() ?? '';
-    const collaboration = await this.validateCollaboration(team.id, input.collaboration ?? null, input.parentAgentId);
+    const modelParameters = this.parameters(input.modelParameters);
+    const collaboration = await this.validateCollaboration(team.id, input.collaboration ?? null, input.parentAgentId, `Agent ${JSON.stringify(name)} collaboration`);
     const runtime = await validateAgentRuntime(input.runtime);
-    if (runtime.kind !== 'native' && ((collaboration?.subAgentIds.length ?? 0) > 0 || (collaboration?.capabilities.length ?? 0) > 0 || (collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate sub-Agents and capability tools.');
     if ((!collaboration?.publicModels?.length && runtime.kind === 'native') || providerId) await this.validateModel(team.id, providerId, model);
     const validatedAssignments = await this.validateAssignments(team.id, input.skillIds, input.mcpServerIds);
     const skillIds = validatedAssignments.skillIds ?? [];
@@ -95,8 +96,8 @@ export class AgentsService {
     const id = `agt_${randomUUID()}`;
     this.mutate(team.id, (transaction) => {
       const parent = input.parentAgentId ? transaction.select().from(agents).where(and(eq(agents.id, input.parentAgentId), eq(agents.workspaceId, team.id), eq(agents.kind, 'custom'))).get() : undefined;
-      if (input.parentAgentId && (!parent || parent.runtime.kind !== 'native')) throw new BadRequestException('The parent must be an available native Agent.');
-      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, runtime, collaboration }).returning({ id: agents.id }).all();
+      if (input.parentAgentId && !parent) throw new BadRequestException('The parent must be an available Agent.');
+      const [row] = transaction.insert(agents).values({ id, workspaceId: team.id, kind: 'custom', name, responsibility, systemPrompt, providerId, model, modelParameters, runtime, collaboration }).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent could not be created');
       if (skillIds.length > 0) transaction.insert(agentSkills).values(skillIds.map((skillId) => ({ agentId: id, skillId }))).run();
       if (mcpServerIds.length > 0) transaction.insert(agentMcpServers).values(mcpServerIds.map((mcpServerId) => ({ agentId: id, mcpServerId }))).run();
@@ -119,14 +120,19 @@ export class AgentsService {
 
       const isChat = existing.id === CHAT_AGENT_ID;
         // Chat Skills are captured from its revisioned configuration. User MCP servers remain unavailable to Chat.
-        const fields = ['providerId', 'model', ...(isChat ? ['skillIds', 'extensionPrompt', 'summarizePrompt', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
+        const fields = ['providerId', 'model', 'modelParameters', ...(isChat ? ['runtime', 'skillIds', 'extensionPrompt', 'summarizePrompt', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
         if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported Chat configuration field.');
+      const requestedRuntime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
+      // Chat owns its working directory. Never accept a project directory from configuration.
+      const runtime = requestedRuntime.kind === 'native' ? requestedRuntime : { kind: requestedRuntime.kind, projectDirectory: '', approvalPolicy: 'auto' as const };
+      const modelParameters = this.parameters(input.modelParameters === undefined ? existing.modelParameters : input.modelParameters);
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
+      if (runtime.kind !== 'native' && provider && !(runtime.kind === 'codex' ? ['openai/responses', 'codex/responses'].includes(provider.protocol) : provider.protocol === 'anthropic/messages')) throw new BadRequestException(`${runtime.kind} requires a ${runtime.kind === 'codex' ? 'openai/responses or codex/responses' : 'anthropic/messages'} Provider, or clear providerId to use the runtime default.`);
       const requestedModel = input.model === undefined ? existing.model.trim() : input.model.trim();
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
-      const model = provider ? requestedModel || provider.models[0] || '' : '';
+      const model = provider ? requestedModel || provider.models[0] || '' : runtime.kind === 'native' ? '' : requestedModel;
       if (input.extensionPrompt !== undefined && typeof input.extensionPrompt !== 'string') throw new BadRequestException('An extension prompt must be text.');
       if (input.summarizePrompt !== undefined && typeof input.summarizePrompt !== 'string') throw new BadRequestException('A summarize prompt must be text.');
       if (input.turnNotificationsEnabled !== undefined && typeof input.turnNotificationsEnabled !== 'boolean') throw new BadRequestException('The conversation notification switch must be true or false.');
@@ -138,7 +144,7 @@ export class AgentsService {
       this.db.transaction((transaction) => {
         const [previous] = transaction.select().from(chatConfigurations).where(eq(chatConfigurations.workspaceId, team.id)).orderBy(desc(chatConfigurations.revision)).limit(1).all();
         if (isChat && input.expectedConfigurationRevision !== undefined && input.expectedConfigurationRevision !== previous?.revision) throw new ConflictException('Chat configuration changed; inspect the current revision before updating.');
-        transaction.update(agents).set({ providerId: nextProviderId ?? null, model, updatedAt: new Date() }).where(eq(agents.id, agentId)).run();
+        transaction.update(agents).set({ providerId: nextProviderId ?? null, model, modelParameters, runtime, updatedAt: new Date() }).where(eq(agents.id, agentId)).run();
         if (selections.mcpServerIds !== undefined) {
           transaction.delete(agentMcpServers).where(eq(agentMcpServers.agentId, agentId)).run();
           if (selections.mcpServerIds.length) transaction.insert(agentMcpServers).values(selections.mcpServerIds.map((mcpServerId) => ({ agentId, mcpServerId }))).run();
@@ -149,7 +155,7 @@ export class AgentsService {
           summarizePrompt: input.summarizePrompt === undefined ? previous?.summarizePrompt ?? '' : input.summarizePrompt,
           turnNotificationsEnabled: input.turnNotificationsEnabled ?? previous?.turnNotificationsEnabled ?? true,
           turnNotificationSound: input.turnNotificationSound === undefined ? previous?.turnNotificationSound ?? CHAT_TURN_NOTIFICATION_DEFAULT_SOUND : input.turnNotificationSound.trim(),
-          providerId: nextProviderId ?? null, model,
+          providerId: nextProviderId ?? null, model, modelParameters, runtime,
           skillIds: chatSkillIds ?? previous?.skillIds ?? [],
           mcpServerIds: [],
         }).run();
@@ -161,9 +167,9 @@ export class AgentsService {
     if (!name) throw new BadRequestException('Agent name is required.');
     const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
     const model = input.model === undefined ? existing.model : input.model.trim();
-    const collaboration = await this.validateCollaboration(team.id, input.collaboration === undefined ? existing.collaboration : input.collaboration, agentId);
+    const modelParameters = this.parameters(input.modelParameters === undefined ? existing.modelParameters : input.modelParameters);
+    const collaboration = await this.validateCollaboration(team.id, input.collaboration === undefined ? existing.collaboration : input.collaboration, agentId, `Agent ${JSON.stringify(agentId)} collaboration`);
     const runtime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
-    if (runtime.kind !== 'native' && ((collaboration?.subAgentIds.length ?? 0) > 0 || (collaboration?.capabilities.length ?? 0) > 0 || (collaboration?.privateTools?.length ?? 0) > 0)) throw new BadRequestException('Use a native lead Agent to coordinate sub-Agents and capability tools.');
     if ((!collaboration?.publicModels?.length && runtime.kind === 'native') || nextProviderId) await this.validateModel(team.id, nextProviderId, model);
     const ownedSkillIds = new Set(agentFiles(this.db)?.get(agentId)?.skills.map((skill) => skill.id) ?? []);
     const assignments = await this.validateAssignments(team.id, input.skillIds?.filter((id) => !ownedSkillIds.has(id)), input.mcpServerIds, true);
@@ -178,6 +184,7 @@ export class AgentsService {
         ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt.trim() }),
         providerId: nextProviderId ?? null,
         model,
+        modelParameters,
         updatedAt: new Date(),
       }).where(and(eq(agents.id, agentId), eq(agents.workspaceId, team.id))).returning({ id: agents.id }).all();
       if (!row) throw new NotFoundException('Agent not found');
@@ -251,19 +258,18 @@ export class AgentsService {
     return parent.subAgents ?? [];
   }
 
-  private async validateCollaboration(workspaceId: string, value: unknown, agentId?: string): Promise<AgentCollaboration | null> {
+  private async validateCollaboration(workspaceId: string, value: unknown, agentId?: string, source = 'Agent collaboration'): Promise<AgentCollaboration | null> {
     if (value === null) return null;
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException('Agent collaboration must be an object or null.');
     const config = value as AgentCollaboration;
     if (!Array.isArray(config.subAgentIds) || config.subAgentIds.some((id) => typeof id !== 'string' || !id.trim()) || new Set(config.subAgentIds).size !== config.subAgentIds.length) throw new BadRequestException('subAgentIds must contain unique Agent ids.');
-    if (!Array.isArray(config.capabilities)) throw new BadRequestException('capabilities must be an array.');
     const controls = ['worklite/agent', 'worklite/map', 'worklite/input', 'worklite/timer', 'worklite/branch', 'worklite/join', 'worklite/dashboard'];
-    const ids = new Set<string>();
-    for (const capability of config.capabilities) {
-      if (!capability || typeof capability.id !== 'string' || !capability.id.trim() || ids.has(capability.id) || controls.includes(capability.type) || !resolveWorkflowNodeCapability(capability.type, capability.typeVersion) || !capability.config || typeof capability.config !== 'object' || Array.isArray(capability.config)) throw new BadRequestException('An Agent capability is invalid or duplicated.');
-      ids.add(capability.id);
-    }
+    validateAgentCapabilities(config.capabilities, source, controls);
     await validatePrivateTools(config);
+    if (config.modelParameters !== undefined) {
+      if (!config.modelParameters || typeof config.modelParameters !== 'object' || Array.isArray(config.modelParameters)) throw new BadRequestException('Model parameter selections must be an object.');
+      for (const value of Object.values(config.modelParameters)) this.parameters(value);
+    }
     if (config.publicModels !== undefined && (!Array.isArray(config.publicModels) || config.publicModels.some((model) => typeof model !== 'string' || !model.includes('/')))) throw new BadRequestException('publicModels must contain public provider/model ids.');
     if (config.builtinToolNames !== undefined && (!Array.isArray(config.builtinToolNames) || config.builtinToolNames.some((name) => !['bash', 'read', 'write', 'glob', 'grep'].includes(name)))) throw new BadRequestException('An Agent built-in tool is invalid.');
     if (config.outputFormat !== undefined && !['text', 'json'].includes(config.outputFormat)) throw new BadRequestException('outputFormat must be text or json.');
@@ -281,13 +287,13 @@ export class AgentsService {
     return config;
   }
 
-  private async validateProvider(workspaceId: string, providerId: string | null | undefined): Promise<{ name: string; models: string[] } | null> {
+  private async validateProvider(workspaceId: string, providerId: string | null | undefined): Promise<{ name: string; models: string[]; protocol: ModelProviderView['protocol'] } | null> {
     if (!providerId) return null;
     try {
       const response = await fetch(`${GATEWAY_PROVIDER_URL}/${encodeURIComponent(providerId)}`);
       if (response.ok) {
-        const gatewayProvider = await response.json() as Pick<ModelProviderView, 'name' | 'models'>;
-        return { name: gatewayProvider.name, models: (gatewayProvider.models ?? []).map((model) => model.trim()).filter(Boolean) };
+        const gatewayProvider = await response.json() as Pick<ModelProviderView, 'name' | 'models' | 'protocol'>;
+        return { name: gatewayProvider.name, protocol: gatewayProvider.protocol, models: (gatewayProvider.models ?? []).map((model) => model.trim()).filter(Boolean) };
       }
     } catch {
       // Fall through to the stable domain error below.
@@ -306,7 +312,7 @@ export class AgentsService {
     }
   }
 
-  private async validateModel(workspaceId: string, providerId: string | null | undefined, model: string): Promise<{ name: string; models: string[] } | null> {
+  private async validateModel(workspaceId: string, providerId: string | null | undefined, model: string): Promise<{ name: string; models: string[]; protocol: ModelProviderView['protocol'] } | null> {
     const provider = await this.validateProvider(workspaceId, providerId);
     if (!provider) {
       if (model) throw new BadRequestException('Select a model provider before selecting a model.');
@@ -363,6 +369,10 @@ export class AgentsService {
     return { skillsByAgent, mcpServersByAgent };
   }
 
+  private parameters(value: unknown): ModelParameters {
+    try { return validateModelParameters(value); } catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Invalid model parameters.'); }
+  }
+
   private toView(row: typeof agents.$inferSelect, workspaceSlug: string, providerName: string | null, assignments: AgentAssignments): AgentView {
     return {
       id: row.id,
@@ -375,6 +385,7 @@ export class AgentsService {
       systemPrompt: row.systemPrompt,
       initials: initials(row.name),
       model: row.model,
+      modelParameters: row.modelParameters ?? {},
       providerId: row.providerId,
       providerName,
       // Chat exposes only its protected platform Skill; legacy Chat Skill/MCP assignment rows are not shown.

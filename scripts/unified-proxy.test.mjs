@@ -4,7 +4,7 @@ import { resolveUnifiedModel, UnifiedProxyError } from '../apps/portkey-gateway/
 
 const providers = [
   { id: 'p_anthropic', name: 'anthropic-main', protocol: 'anthropic/messages', models: ['claude-sonnet-4-5'] },
-  { id: 'p_codex', name: 'codex', protocol: 'codex/responses', models: ['gpt-5.1'] },
+  { id: 'p_openai', name: 'openai', protocol: 'openai/responses', models: ['gpt-5.1'] },
   { id: 'p_systemone', name: 'typesafe', protocol: 'typesafe/systemone', models: ['system-one-v2'] },
 ];
 
@@ -14,8 +14,8 @@ test('resolves a provider prefix and preserves model ids containing slashes', ()
   ]), { providerId: 'p_anthropic', providerName: 'anthropic-main', modelId: 'vendor/claude-sonnet-4-5' });
 });
 
-test('routes Codex images and limits System One to its dedicated operation', () => {
-  assert.equal(resolveUnifiedModel('codex/gpt-5.1', 'images/generations', providers).providerId, 'p_codex');
+test('routes OpenAI images and limits System One to its dedicated operation', () => {
+  assert.equal(resolveUnifiedModel('openai/gpt-5.1', 'images/generations', providers).providerId, 'p_openai');
   assert.equal(resolveUnifiedModel('typesafe/system-one-v2', 'systemone', providers).providerId, 'p_systemone');
   assert.throws(() => resolveUnifiedModel('typesafe/system-one-v2', 'responses', providers), UnifiedProxyError);
 });
@@ -23,6 +23,6 @@ test('routes Codex images and limits System One to its dedicated operation', () 
 test('rejects malformed, unknown, unconfigured, and protocol-mismatched models', () => {
   assert.throws(() => resolveUnifiedModel('bad-model', 'responses', providers), /providerName/);
   assert.throws(() => resolveUnifiedModel('missing/model', 'responses', providers), /Model provider not found/);
-  assert.throws(() => resolveUnifiedModel('codex/not-configured', 'responses', providers), /not configured/);
+  assert.throws(() => resolveUnifiedModel('openai/not-configured', 'responses', providers), /not configured/);
   assert.throws(() => resolveUnifiedModel('anthropic-main/claude-sonnet-4-5', 'responses', providers), /does not support/);
 });

@@ -73,7 +73,7 @@ describe('Executor role Skill pipeline', () => {
     const team = await configuration.update('workspace_personal', 'company_coder', {
       roles: [
         {
-          role: 'dispatcher',
+          role: 'router',
           publicModelId: '',
           instructions: 'Dispatch the request.',
           entryPoints: [],

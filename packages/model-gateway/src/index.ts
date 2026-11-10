@@ -1,3 +1,4 @@
+import { modelRequestParameters, type ModelParameters } from '@worklite/contracts';
 import { isContextOverflow, withContextRecovery, type ContextCheckpointWriter } from './context-recovery.ts';
 export type { ContextCheckpoint, ContextCheckpointWriter } from './context-recovery.ts';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -64,7 +65,7 @@ export function normalizePublicModelList(value: PublicModelList): string[] {
   return [...new Set(list.map((entry) => entry.trim()).filter(Boolean))];
 }
 
-export type ModelCandidate = { provider: ModelProviderConfig; model: string };
+export type ModelCandidate = { provider: ModelProviderConfig; model: string; modelParameters?: ModelParameters };
 
 export type GenerateAgentStepRequest = {
   candidates: readonly ModelCandidate[];
@@ -236,7 +237,7 @@ export class AiSdkModelGateway implements ModelGateway {
     // candidate is attempted; a future caller that needs fallback here should get a buffered
     // variant rather than bolting a loop onto this streaming path.
     const first = request.candidates[0]!;
-    const model = resolveModel(first.provider, first.model, request.correlation);
+    const model = resolveModel(first.provider, first.model, request.correlation, first.modelParameters);
     const messages = toModelMessages(request.messages);
     const result = streamText({
       model,
@@ -266,7 +267,7 @@ export class AiSdkModelGateway implements ModelGateway {
     const context = trimAgentMessages(request.systemPrompt, request.messages, request.maxContextTokens);
 
     return withModelFallback(request.candidates, async (candidate) => {
-      const model = withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation), {
+      const model = withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation, candidate.modelParameters), {
         getMessages: () => context.messages,
         setMessages: async (messages) => { context.messages = messages; await request.onMessages?.(messages); },
         archive: request.onContextCheckpoint, signal: request.abortSignal,
@@ -354,7 +355,7 @@ export class AiSdkModelGateway implements ModelGateway {
 
   private async runWorkflowAgentAttempt(request: RunWorkflowAgentRequest, candidate: ModelCandidate): Promise<WorkflowAgentLoopResult> {
     const model = withWorkflowAgentStreamTransport(
-      withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation), {
+      withContextRecovery(resolveModel(candidate.provider, candidate.model, request.correlation, candidate.modelParameters), {
         getMessages: () => preparedMessages,
         setMessages: async (messages) => { checkpointBoundary = sdkHistoryBoundary; checkpointPrefix = messages; preparedMessages = messages; await request.onMessages?.(messages); },
         archive: request.onContextCheckpoint, signal: request.abortSignal,
@@ -938,7 +939,7 @@ function argumentArray(value: unknown): string[] | null {
   return value.map(String);
 }
 
-function resolveModel(provider: ModelProviderConfig, modelId: string, correlation?: GatewayCorrelation): LanguageModel {
+function resolveModel(provider: ModelProviderConfig, modelId: string, correlation?: GatewayCorrelation, parameters?: ModelParameters): LanguageModel {
   if (!modelId.trim()) {
     throw new ModelGatewayError('INVALID_REQUEST', 'A model id is required.');
   }
@@ -960,12 +961,25 @@ function resolveModel(provider: ModelProviderConfig, modelId: string, correlatio
     ...gatewayAttributionHeaders(correlation),
     'x-portkey-config': portkeyConfig,
   };
+  const protocol = provider.adapter === 'codex' ? 'codex/responses' : provider.adapter === 'anthropic' ? 'anthropic/messages' : isResponsesProvider(provider) ? 'openai/responses' : 'openai/chat';
+  const requestParameters = modelRequestParameters(protocol, parameters);
+  const parameterFetch: typeof fetch = (input, init) => {
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+    if (!body) return globalThis.fetch(input, init);
+    // Merge nested reasoning/output_config without removing SDK-generated structured output settings.
+    const merged = { ...body, ...requestParameters };
+    for (const key of ['reasoning', 'output_config', 'text']) {
+      if (body[key] && requestParameters[key] && typeof body[key] === 'object' && typeof requestParameters[key] === 'object') merged[key] = { ...body[key] as object, ...requestParameters[key] as object };
+    }
+    return globalThis.fetch(input, { ...init, body: JSON.stringify(merged) });
+  };
   const baseURL = gatewayBaseURL();
   const gatewayModel = provider.gatewayProviderName ? `${provider.gatewayProviderName}/${modelId}` : modelId;
 
   if (provider.adapter === 'anthropic') {
     return createAnthropic({
       apiKey: 'worklite-gateway',
+      fetch: parameterFetch,
       baseURL,
       headers,
     })(gatewayModel) as unknown as LanguageModel;
@@ -973,10 +987,11 @@ function resolveModel(provider: ModelProviderConfig, modelId: string, correlatio
 
   const openai = createOpenAI({
     apiKey: 'worklite-gateway',
+      fetch: parameterFetch,
     baseURL,
     headers,
   });
-  return provider.operation === 'responses' || provider.adapter === 'codex' ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
+  return isResponsesProvider(provider) ? openai.responses(gatewayModel) as unknown as LanguageModel : openai.chat(gatewayModel);
 }
 
 export function gatewayBaseURL(): string {

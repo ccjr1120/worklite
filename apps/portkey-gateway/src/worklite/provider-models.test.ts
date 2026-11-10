@@ -1,21 +1,23 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { vi } from 'vitest';
+import { rmSync } from 'node:fs';
 
 import app from '../index';
-import { createProvider, getProvider } from './provider-registry';
+import { createProvider, getProvider, stopGatewayDatabaseMaintenance } from './provider-registry';
 
-const originalDatabasePath = process.env.PORTKEY_GATEWAY_DB_PATH;
-const testDirectory = mkdtempSync(join(tmpdir(), 'worklite-provider-models-'));
-const testDatabasePath = join(testDirectory, 'gateway.db');
-const fetchMock = jest.spyOn(globalThis, 'fetch');
+const testEnvironment = vi.hoisted(() => {
+  const directory = `${process.cwd()}/.tmp-provider-models-${process.pid}-${Date.now()}`;
+  const originalDatabasePath = process.env.PORTKEY_GATEWAY_DB_PATH;
+  // The application opens the registry during import, before beforeAll runs.
+  process.env.PORTKEY_GATEWAY_DB_PATH = `${directory}/gateway.db`;
+  return { directory, originalDatabasePath };
+});
+const fetchMock = vi.spyOn(globalThis, 'fetch');
 const apiKey = 'provider-model-test-key';
 
 let providerId = '';
 
 describe('saved Provider model operations', () => {
   beforeAll(async () => {
-    process.env.PORTKEY_GATEWAY_DB_PATH = testDatabasePath;
     const provider = await createProvider({
       name: 'provider-model-test',
       baseURL: 'https://models.example/v1/',
@@ -33,9 +35,10 @@ describe('saved Provider model operations', () => {
 
   afterAll(() => {
     fetchMock.mockRestore();
-    if (originalDatabasePath === undefined) delete process.env.PORTKEY_GATEWAY_DB_PATH;
-    else process.env.PORTKEY_GATEWAY_DB_PATH = originalDatabasePath;
-    rmSync(testDirectory, { recursive: true, force: true });
+    stopGatewayDatabaseMaintenance();
+    if (testEnvironment.originalDatabasePath === undefined) delete process.env.PORTKEY_GATEWAY_DB_PATH;
+    else process.env.PORTKEY_GATEWAY_DB_PATH = testEnvironment.originalDatabasePath;
+    rmSync(testEnvironment.directory, { recursive: true, force: true });
   });
 
   it('discovers upstream model ids with stored credentials and returns ids only', async () => {

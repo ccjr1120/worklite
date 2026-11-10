@@ -13,6 +13,7 @@ import type { IsolatedAgentInvocationService } from './isolated-agent-invocation
 import type { AgentCapabilitiesService } from './agent-capabilities.service';
 import { initializeAgentFiles } from './agent-file-store';
 import { AgentsService } from './agents.service';
+import { parse, stringify } from 'yaml';
 
 let db: Database;
 let directory: string;
@@ -40,6 +41,43 @@ async function setup() {
 }
 
 describe('file-owned Agent catalog', () => {
+  it('loads the wechat-article capability shapes through API writes and file reads', async () => {
+    const { catalog, service } = await setup();
+    const capabilities = [
+      { id: 'wn_0eee172b-6f28-494f-9838-17772c6438d0/wn_map_render_9a4b8e2d', type: 'worklite/canvas-render', typeVersion: '1', config: {} },
+      { id: 'image', type: 'worklite/image', typeVersion: '1', config: {} },
+      { id: 'compose', type: 'worklite/compose-article', typeVersion: '1', config: {} },
+      { id: 'publish', type: 'wechat-official-account/publish', typeVersion: '2', config: {} },
+      ...['article', 'images', 'result'].map((id) => ({ id, type: 'worklite/artifact', typeVersion: '1', config: {} })),
+    ];
+    const collaboration = { ...input.collaboration, subAgentIds: ['child'], capabilities };
+    expect((await service.update(request, 'personal', 'lead', { collaboration })).collaboration?.capabilities).toEqual(capabilities);
+    catalog.refresh(workspace);
+    expect((await service.list(request, 'personal')).find((agent) => agent.id === 'lead')?.collaboration?.capabilities).toEqual(capabilities);
+    expect((await service.get(request, 'personal', CHAT_AGENT_ID)).id).toBe(CHAT_AGENT_ID);
+    await expect(service.update(request, 'personal', 'lead', { collaboration: { ...collaboration, capabilities: [...capabilities, capabilities[0]!] } }))
+      .rejects.toThrow('Duplicate Agent capability id "wn_0eee172b-6f28-494f-9838-17772c6438d0/wn_map_render_9a4b8e2d" in Agent "lead" collaboration');
+  });
+
+  it.each(['duplicate', 'config'] as const)('isolates a capability %s failure from Chat and reports its exact source', async (failure) => {
+    const { catalog, root, service } = await setup();
+    const healthy = await service.create(request, 'personal', { ...input, name: 'Healthy' });
+    const path = join(root, 'qcoder/AGENT.md');
+    const original = readFileSync(path, 'utf8');
+    const [, frontmatter, body] = original.split('---');
+    const config = parse(frontmatter!);
+    const capability = { id: 'render/map', type: 'worklite/artifact', typeVersion: '1', config: {} };
+    config.collaboration.capabilities = failure === 'duplicate' ? [capability, { ...capability, config: {} }] : [{ ...capability, config: null }];
+    writeFileSync(path, `---\n${stringify(config)}---${body}`);
+    expect(() => catalog.refresh(workspace, root, false)).toThrow(path);
+    expect(() => catalog.refresh(workspace, root, false)).toThrow(failure === 'duplicate' ? 'Duplicate Agent capability id "render/map"' : 'config must be an object');
+    expect((await service.get(request, 'personal', CHAT_AGENT_ID)).id).toBe(CHAT_AGENT_ID);
+    expect((await service.list(request, 'personal')).map((agent) => agent.id)).toEqual([healthy.id]);
+    expect((await service.update(request, 'personal', CHAT_AGENT_ID, { extensionPrompt: 'Still editable' })).chatConfiguration?.extensionPrompt).toBe('Still editable');
+    writeFileSync(path, original);
+    expect((await service.list(request, 'personal')).map((agent) => agent.id)).toContain('lead');
+  });
+
   it('migrates the complete private tree once, copies Skills and tools, and preserves executions and ids', async () => {
     const { root, catalog } = await setup();
     expect(readdirSync(root)).toEqual(['qcoder']);
@@ -216,4 +254,32 @@ describe('file-owned Agent catalog', () => {
     expect(readFileSync(join(root, 'Renamed/subagents/im-claude/AGENT.md'), 'utf8')).toContain('Child prompt');
     expect((await service.get(request, 'personal', 'lead')).skills.map((skill) => skill.id)).toEqual(['shared']);
   });
+});
+
+it('round-trips use-site model parameters through Agent files without changing another Agent or Chat', async () => {
+  const { catalog, service } = await setup();
+  const modelParameters = { reasoningEffort: 'high' as const, serviceTier: 'fast' as const };
+  const child = await service.update(request, 'personal', 'child', { parentAgentId: 'lead', modelParameters });
+  expect(child.modelParameters).toEqual(modelParameters);
+  const byModel = { 'provider/model': { reasoningEffort: 'low' as const, requestBody: { temperature: 0.2 } } };
+  await service.update(request, 'personal', 'lead', { collaboration: { ...input.collaboration, subAgentIds: ['child'], modelParameters: byModel } });
+  catalog.refresh(workspace);
+  expect(catalog.get('child')?.agent.modelParameters).toEqual(modelParameters);
+  expect(catalog.get('lead')?.agent.modelParameters).toEqual({});
+  expect(catalog.get('lead')?.agent.collaboration?.modelParameters).toEqual(byModel);
+  expect((await service.get(request, 'personal', CHAT_AGENT_ID)).modelParameters).toEqual({});
+  await service.update(request, 'personal', CHAT_AGENT_ID, { modelParameters });
+  expect((await service.get(request, 'personal', CHAT_AGENT_ID)).modelParameters).toEqual(modelParameters);
+  expect(catalog.get('lead')?.agent.modelParameters).toEqual({});
+});
+
+it('refreshes a parameter-only AGENT.md edit into the runtime index', async () => {
+  const { catalog, root, service } = await setup();
+  const path = join(root, 'qcoder/subagents/im-claude/AGENT.md');
+  const [, frontmatter, body] = readFileSync(path, 'utf8').split('---');
+  const config = parse(frontmatter!);
+  config.modelParameters = { reasoningEffort: 'high', serviceTier: 'fast' };
+  writeFileSync(path, `---\n${stringify(config)}---${body}`);
+  catalog.refresh(workspace);
+  expect((await service.get(request, 'personal', 'child', 'lead')).modelParameters).toEqual(config.modelParameters);
 });

@@ -53,6 +53,7 @@ type ComposerProps = {
   cancelling: boolean;
   submitDisabled: boolean;
   waitingForInput: boolean;
+  suggestion?: string;
   onStop: () => void;
 };
 
@@ -67,7 +68,7 @@ function Composer({
   commandMatches, commandMenuOpen, onRunCommand,
   mentionMatches, mentionMenuOpen, onSelectMention,
   activeValue, onActiveValueChange, onDismissMenus,
-  running, busy, canCancel, cancelling, submitDisabled, waitingForInput, onStop,
+  running, busy, canCancel, cancelling, submitDisabled, waitingForInput, suggestion, onStop,
 }: ComposerProps) {
   const { t } = useTranslation('assistant');
   const menuOpen = switcherOpen || commandMenuOpen || mentionMenuOpen;
@@ -141,7 +142,7 @@ function Composer({
               onKeyDown={onKeyDown}
               onCompositionStart={onCompositionStart}
               onCompositionEnd={onCompositionEnd}
-              placeholder={waitingForInput ? t('composer.answerPlaceholder') : t('composer.placeholder')}
+              placeholder={waitingForInput ? t('composer.answerPlaceholder') : suggestion ?? t('composer.placeholder')}
               role="combobox"
               aria-expanded={menuOpen}
               rows={1}

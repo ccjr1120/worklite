@@ -1,3 +1,4 @@
+import { agentExecutionColumns, agentExecutions, agentToolCalls, chatSubmissions, commandExecutions, externalChats, type Database } from '@worklite/db';
 import { BadRequestException, Body, Controller, Get, Headers, Inject, Injectable, Logger, NotFoundException, OnModuleInit, Param, Post, UnauthorizedException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { execFileSync, spawn } from 'node:child_process';
@@ -5,7 +6,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
-import { agentExecutions, agentToolCalls, chatSubmissions, commandExecutions, externalChats, type Database } from '@worklite/db';
+
 import type { WorkliteUpgradeView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { upgradeStateDirectory } from '../../infrastructure/runtime-upgrade-state';
@@ -56,7 +57,7 @@ export class UpgradesService implements OnModuleInit {
   async propose(input: { summary: string; executionId: string; submissionId: string }) {
     const directory = this.directory();
     const runtime = this.readFile<{ projectRoot: string }>(join(directory, 'current.json'));
-    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
+    const [execution] = await this.db.select(agentExecutionColumns).from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
     if (!execution || !input.summary?.trim()) throw new BadRequestException('A Chat execution and upgrade summary are required.');
     const [chat] = await this.db.select({ id: externalChats.id }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1);
     const [existing] = await this.db.select().from(chatSubmissions).where(eq(chatSubmissions.id, input.submissionId)).limit(1);
@@ -83,7 +84,7 @@ export class UpgradesService implements OnModuleInit {
 
   async redeploy(input: { summary: string; executionId: string; submissionId: string; userMessageId: string }) {
     const directory = this.directory();
-    const [execution] = await this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
+    const [execution] = await this.db.select(agentExecutionColumns).from(agentExecutions).where(and(eq(agentExecutions.id, input.executionId), eq(agentExecutions.agentId, 'agt_system_helper_chat'))).limit(1);
     const userMessage = execution?.displayMessages.filter((message) => message.role === 'user').at(-1);
     const [call] = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, input.submissionId), eq(agentToolCalls.executionId, input.executionId))).limit(1);
     const currentTurn = execution ? execution.modelMessages.slice(execution.modelMessages.map((message) => message.role).lastIndexOf('user')) : [];

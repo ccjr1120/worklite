@@ -1,9 +1,10 @@
+import { appendActivityValues, agentExecutionColumns, projectTaskColumns, agentExecutions, agentToolCalls, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
-import { agentExecutions, agentToolCalls, chatProjectOperations, chatProjectTasks, chatProjectTaskSubscriptions, type Database, type StoredProjectExecutor, type StoredProjectExecutorLaunch, type StoredProjectExecutorModelSource, type StoredProjectTaskSteerInstruction } from '@worklite/db';
+
 import { splitChatAttachmentImages, type AnswerAgentQuestionRequest, type ChatProjectOperationDetailView, type ChatProjectTaskView } from '@worklite/contracts';
 import { DATABASE } from '../../infrastructure/database.module';
 import { ChatAttachmentsService } from './chat-attachments.service';
@@ -75,9 +76,9 @@ export class ChatProjectTasksService {
   ) {}
 
   async capture(workspaceId: string, executionId: string, callId: string, input: unknown): Promise<Task> {
-    const existing = this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, callId)).get();
+    const existing = this.db.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, callId)).get();
     if (existing) return existing;
-    const execution = this.db.select().from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).get();
+    const execution = this.db.select(agentExecutionColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspaceId))).get();
     const value = input as { goal?: unknown; projectDirectory?: unknown; readOnly?: unknown; redeployAfterSuccess?: unknown; model?: unknown; executor?: unknown };
     const goal = required(value?.goal, 'goal');
     const directory = required(value?.projectDirectory, 'projectDirectory');
@@ -137,7 +138,7 @@ export class ChatProjectTasksService {
       snapshot: { launch: capturedLaunch, projectInstructions, capabilities: execution.capabilitySnapshot, readOnly, ...(inboundImages.length ? { inboundImages } : {}), ...(redeployAfterSuccess ? { redeployAfterSuccess, redeployAuthorization } : {}) }, status: 'running',
       worktreePath: null, worktreeBranch: null, baseBranch: null, baseCommit: null,
       mergeStatus: 'not_attempted',
-    }).returning().get();
+    }).returning(projectTaskColumns).get();
   }
 
   // Attachment images embedded in a user message, kept only when the attachment is still live and
@@ -200,22 +201,24 @@ export class ChatProjectTasksService {
     const live = this.liveQuestions.get(taskId);
     if (live) {
       const updated = this.db.transaction((transaction) => {
-        const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+        const current = transaction.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
         if (current.pendingQuestion?.id !== question.id || current.status !== 'waiting_for_input') throw new ConflictException('This project task question has already been answered.');
         accept(transaction);
         // The question was reported on its own; the round's final settlement must report again.
-        return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
+        transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+        return this.requireTask(taskId);
       });
       this.liveQuestions.delete(taskId);
       live(answer);
       return updated;
     }
     return this.db.transaction((transaction) => {
-      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      const current = transaction.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       if (current.pendingQuestion?.id !== question.id || current.status !== 'waiting_for_input') throw new ConflictException('This project task question has already been answered.');
       accept(transaction);
       // The task runs again, so its next settlement must be reported anew.
-      return transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, answers: [...current.answers, { question: question.question, answer }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
+      transaction.update(chatProjectTasks).set({ status: 'running', pendingQuestion: null, error: null, reportedAt: null, answers: [...current.answers, { question: question.question, answer }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+        return this.requireTask(taskId);
     });
   }
 
@@ -328,7 +331,7 @@ export class ChatProjectTasksService {
   pendingSubscriptionReports(): Array<{ subscriptionId: string; task: Task; subscriberExecutionId: string }> {
     const rows = this.db.select().from(chatProjectTaskSubscriptions).all();
     return rows.flatMap((row) => {
-      const task = this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, row.taskId)).get();
+      const task = this.db.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, row.taskId)).get();
       if (!task || !['succeeded', 'failed', 'waiting_for_input'].includes(task.status)) return [];
       return [{ subscriptionId: row.id, task, subscriberExecutionId: row.subscriberExecutionId }];
     });
@@ -347,7 +350,7 @@ export class ChatProjectTasksService {
   // Background tasks stay active after their originating turn settles, so conversation-level
   // cancel and the conversation list read this query rather than the turn's unresolved calls.
   activeForExecution(executionId: string): Task[] {
-    return this.db.select().from(chatProjectTasks)
+    return this.db.select(projectTaskColumns).from(chatProjectTasks)
       .where(and(eq(chatProjectTasks.executionId, executionId), inArray(chatProjectTasks.status, ['running', 'waiting_for_input'])))
       .all();
   }
@@ -355,7 +358,7 @@ export class ChatProjectTasksService {
   // Settled tasks whose report never ran (for example the API stopped between settlement and the
   // report turn) are picked up once at startup. Restart-interrupted tasks are already marked reported.
   unreportedSettled(): Task[] {
-    return this.db.select().from(chatProjectTasks)
+    return this.db.select(projectTaskColumns).from(chatProjectTasks)
       .where(and(isNull(chatProjectTasks.reportedAt), inArray(chatProjectTasks.status, ['succeeded', 'failed', 'waiting_for_input'])))
       .all();
   }
@@ -400,8 +403,7 @@ export class ChatProjectTasksService {
     task = this.requireTask(taskId);
     const activity = async (detail: Record<string, unknown>) => {
       this.db.transaction((transaction) => {
-        const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
-        transaction.update(chatProjectTasks).set({ activities: [...current.activities, { ...detail, createdAt: new Date().toISOString() }], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+        transaction.update(chatProjectTasks).set({ activities: appendActivityValues(taskId, [{ ...detail, createdAt: new Date().toISOString() }]), updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
       });
       await onProgress();
     };
@@ -487,7 +489,7 @@ export class ChatProjectTasksService {
     if (trimmed.length > STEER_TEXT_LIMIT) throw new BadRequestException(`text must be at most ${STEER_TEXT_LIMIT} characters.`);
     const delivered = await this.steerPorts.get(taskId)?.deliver?.(trimmed).catch(() => false);
     this.db.transaction((transaction) => {
-      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      const current = transaction.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       this.requireSteerable(current);
       const now = new Date().toISOString();
       const seq = current.steerQueue.reduce((max, entry, index) => Math.max(max, entry.seq ?? index + 1), 0) + 1;
@@ -500,7 +502,7 @@ export class ChatProjectTasksService {
       if (delivered) entries.push({ phase: 'steer.applied', seq, round, summary: `Steer #${seq} applied in round ${round}` });
       transaction.update(chatProjectTasks).set({
         steerQueue: [...current.steerQueue, instruction],
-        activities: [...current.activities, ...entries.map((entry) => ({ ...entry, createdAt: now }))],
+        activities: appendActivityValues(taskId, entries.map((entry) => ({ ...entry, createdAt: now }))),
         updatedAt: new Date(),
       }).where(eq(chatProjectTasks.id, taskId)).run();
     });
@@ -522,7 +524,7 @@ export class ChatProjectTasksService {
   // consumes nothing.
   private consumeQueuedSteers(taskId: string, round: number): StoredProjectTaskSteerInstruction[] {
     return this.db.transaction((transaction) => {
-      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
+      const current = transaction.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       if (SETTLED_STATUSES.includes(current.status)) return [];
       const pending = current.steerQueue.filter((instruction) => instruction.status === 'queued' && !instruction.consumedAt)
         .sort((left, right) => (left.seq ?? 0) - (right.seq ?? 0));
@@ -531,7 +533,7 @@ export class ChatProjectTasksService {
       const consumed = new Map(pending.map((instruction) => [instruction.id, { ...instruction, status: 'consumed' as const, consumedAt: now, consumedTurn: round }]));
       transaction.update(chatProjectTasks).set({
         steerQueue: current.steerQueue.map((instruction) => consumed.get(instruction.id) ?? instruction),
-        activities: [...current.activities, ...pending.map((instruction) => ({ phase: 'steer.applied', seq: instruction.seq, round, summary: `Steer #${instruction.seq ?? ''} applied in round ${round}`, createdAt: now }))],
+        activities: appendActivityValues(taskId, pending.map((instruction) => ({ phase: 'steer.applied', seq: instruction.seq, round, summary: `Steer #${instruction.seq ?? ''} applied in round ${round}`, createdAt: now }))),
         updatedAt: new Date(),
       }).where(eq(chatProjectTasks.id, taskId)).run();
       return [...consumed.values()];
@@ -540,9 +542,8 @@ export class ChatProjectTasksService {
 
   private appendActivities(taskId: string, entries: Array<Record<string, unknown>>): void {
     this.db.transaction((transaction) => {
-      const current = transaction.select().from(chatProjectTasks).where(eq(chatProjectTasks.id, taskId)).get()!;
       const createdAt = new Date().toISOString();
-      transaction.update(chatProjectTasks).set({ activities: [...current.activities, ...entries.map((entry) => ({ ...entry, createdAt }))], updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+      transaction.update(chatProjectTasks).set({ activities: appendActivityValues(taskId, entries.map((entry) => ({ ...entry, createdAt }))), updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
     });
   }
 
@@ -583,7 +584,7 @@ export class ChatProjectTasksService {
   // Tasks interrupted mid-merge by an API restart: abort any partial merge and fail the task so
   // the settlement report explains the retained worktree.
   async reconcileInterruptedMerges(): Promise<void> {
-    const tasks = this.db.select().from(chatProjectTasks).where(eq(chatProjectTasks.mergeStatus, 'merging')).all();
+    const tasks = this.db.select(projectTaskColumns).from(chatProjectTasks).where(eq(chatProjectTasks.mergeStatus, 'merging')).all();
     for (const task of tasks) {
       await reconcileInterruptedMerge(task).catch(() => undefined);
       this.update(task.id, {
@@ -595,13 +596,14 @@ export class ChatProjectTasksService {
   }
 
   private requireTask(taskId: string, workspaceId?: string): Task {
-    const task = this.db.select().from(chatProjectTasks).where(and(eq(chatProjectTasks.id, taskId), workspaceId ? eq(chatProjectTasks.workspaceId, workspaceId) : undefined)).get();
+    const task = this.db.select(projectTaskColumns).from(chatProjectTasks).where(and(eq(chatProjectTasks.id, taskId), workspaceId ? eq(chatProjectTasks.workspaceId, workspaceId) : undefined)).get();
     if (!task) throw new NotFoundException('Chat project task not found.');
     return task;
   }
 
   private update(taskId: string, patch: Partial<Omit<Task, 'id' | 'snapshot'>>): Task {
-    return this.db.update(chatProjectTasks).set({ ...patch, updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).returning().get();
+    this.db.update(chatProjectTasks).set({ ...patch, updatedAt: new Date() }).where(eq(chatProjectTasks.id, taskId)).run();
+    return this.requireTask(taskId);
   }
 }
 

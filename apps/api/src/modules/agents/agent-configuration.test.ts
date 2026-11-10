@@ -23,7 +23,7 @@ describe('unified Agent configuration', () => {
     expect(db.select().from(skills).all()).toHaveLength(before);
     await expect(service.update(request, 'personal', agent.id, { collaboration: { ...collaboration, capabilities: [] } })).rejects.toThrow('must belong');
     await expect(service.update(request, 'personal', agent.id, { collaboration: { ...collaboration, privateTools: [...privateTools, ...privateTools] } })).rejects.toThrow('duplicated');
-    await expect(service.update(request, 'personal', agent.id, { runtime: { kind: 'codex', projectDirectory: '' } })).rejects.toThrow('native');
+    await expect(service.update(request, 'personal', agent.id, { runtime: { kind: 'codex', projectDirectory: '' } })).resolves.toMatchObject({ runtime: { kind: 'codex' }, collaboration: { privateTools: [expect.objectContaining({ name: 'save_article' })] } });
   });
 
   it('atomically creates and assigns an engine-backed sub-Agent to its native parent', async () => {

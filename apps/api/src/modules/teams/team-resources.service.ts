@@ -485,12 +485,21 @@ export class WorkspaceResourcesService {
     const initialScan = await scanLocalSkillRoots();
     const unavailable = initialScan.roots.find((root) => !root.available && !root.rootMissing);
     if (unavailable) throw new ServiceUnavailableException(unavailable.unavailableReason ?? `Skill root ${unavailable.root} is unavailable.`);
-    await this.ensurePlatformSkillPackage(workspaceId);
-    const legacyMigrations = await this.migrateLegacySkills(workspaceId);
+    const platformMissing = initialScan.roots.some((root) => root.kind === 'platform' && root.rootMissing);
+    const [cachedPlatform] = platformMissing ? await this.db.select({ id: skills.id }).from(skills)
+      .where(and(eq(skills.workspaceId, workspaceId), eq(skills.source, 'local'), eq(skills.root, 'platform'))).limit(1) : [];
+    // Do not manufacture an empty replacement for a previously indexed root (for example a
+    // disconnected volume). It would make the next scan falsely confirm deletion of its Skills.
+    const preservePlatformRoot = platformMissing && Boolean(cachedPlatform);
+    if (!preservePlatformRoot) await this.ensurePlatformSkillPackage(workspaceId);
+    const legacyMigrations = preservePlatformRoot ? new Map<string, { currentId: string; name: string }>() : await this.migrateLegacySkills(workspaceId);
     const scan = await scanLocalSkillRoots();
     const unavailableAfterMigration = scan.roots.find((root) => !root.available && !root.rootMissing);
     if (unavailableAfterMigration) throw new ServiceUnavailableException(unavailableAfterMigration.unavailableReason ?? `Skill root ${unavailableAfterMigration.root} is unavailable.`);
 
+    // A missing entire root is not evidence that its packages were individually deleted.
+    // Reconcile readable roots independently, retaining snapshots and assignments for unavailable ones.
+    const readableRoots = new Set(scan.roots.filter((root) => root.available).map((root) => root.kind));
     const existingRows = await this.db.select().from(skills).where(eq(skills.workspaceId, workspaceId));
     const existingFiles = existingRows.length === 0
       ? []
@@ -620,7 +629,7 @@ export class WorkspaceResourcesService {
       deleteIds.add(oldId);
     }
     for (const row of existingRows) {
-      if (row.source !== 'local' || desiredIds.has(row.id)) continue;
+      if (row.source !== 'local' || !readableRoots.has(row.root) || desiredIds.has(row.id)) continue;
       const sameDirectoryId = localSkillId(workspaceId, row.directory, row.root);
       const currentId = row.root === 'platform' && row.directory === skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME)
         ? localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform')
@@ -637,6 +646,8 @@ export class WorkspaceResourcesService {
     const previousAliasById = new Map(previousAliases.map((alias) => [alias.oldSkillId, alias]));
     const aliasUpdates = new Map<string, { currentSkillId: string; skillName: string }>();
     for (const alias of previousAliases) {
+      const current = existingById.get(alias.currentSkillId);
+      if (current && !readableRoots.has(current.root)) continue;
       const isPlatformCore = skillNameKey(alias.skillName) === skillNameKey(WORKLITE_PLATFORM_SKILL_NAME);
       const platformCoreId = localSkillId(workspaceId, skillDirectoryName(WORKLITE_PLATFORM_SKILL_NAME), 'platform');
       const currentId = (isPlatformCore && desiredIds.has(platformCoreId) ? platformCoreId : undefined)
@@ -657,7 +668,7 @@ export class WorkspaceResourcesService {
 
     await this.applySkillIdMigrations(workspaceId, mapping, aliasUpdates, deleteIds);
 
-    const obsolete = existingRows.filter((row) => !desiredIds.has(row.id) && !deleteIds.has(row.id));
+    const obsolete = existingRows.filter((row) => readableRoots.has(row.root) && !desiredIds.has(row.id) && !deleteIds.has(row.id));
     if (obsolete.length > 0) {
       const cleanup = await this.removeSkillReferences(workspaceId, new Set(obsolete.map((row) => row.id)), 'disk_removed');
       await this.db.delete(skills).where(and(eq(skills.workspaceId, workspaceId), inArray(skills.id, obsolete.map((row) => row.id))));
@@ -1313,11 +1324,11 @@ export class WorkspaceResourcesService {
           repairDispatch: 'Chat dispatch_task creates a Coder group chat and binds its first role task to a Run; choose a Coder by its current configuration and the task',
           inspectionAuthorizesRepair: false,
           gatewayLogs: {
-            statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'indefinite', filters: ['from', 'to', 'groupBy', ...GATEWAY_ATTRIBUTION_FILTERS] },
+            statistics: { tool: 'inspect_gateway_stats', route: 'GET /portkey-gateway/stats', retention: 'GATEWAY_STATS_RETENTION_DAYS, default 90 days; 0 keeps statistics indefinitely', filters: ['from', 'to', 'groupBy', ...GATEWAY_ATTRIBUTION_FILTERS] },
             list: { tool: 'inspect_gateway_request_logs', route: 'GET /portkey-gateway/request-logs', filters: ['from', 'to', 'provider', 'model', 'statusClass', ...GATEWAY_ATTRIBUTION_FILTERS, 'limit', 'cursor'] },
             detail: { tool: 'inspect_gateway_request_log', route: 'GET /portkey-gateway/request-logs/:requestLogId', capture: 'complete stored request and response' },
             timeRange: 'explicit absolute from/to ISO-8601 instants',
-            requestRetentionHours: 12,
+            requestRetentionHours: 'GATEWAY_REQUEST_LOG_RETENTION_HOURS, default 12; 0 keeps details indefinitely',
             retentionMetadata: ['from', 'to', 'retainedFrom', 'retentionHours'],
             correlation: ['surface', 'conversationId', 'agentRunId', 'agentExecutionId', 'projectTaskId', 'executor', 'workflowId', 'workflowRunId', 'nodeRunId', 'coderId', 'teamRunId', 'teamRole', 'teamTaskAttemptId', 'teamOperationKey'],
             usageAttribution: {
@@ -1328,7 +1339,7 @@ export class WorkspaceResourcesService {
               nodeAttribution: 'nodeRunId is one Coder role task attempt or one Workflow node run; retries are separate nodes',
               idLists: 'teamRunId, nodeRunId and agentRunId accept a comma-separated list of ids',
               agentAttribution: 'agentExecutionId selects the owning execution tree; agentRunId selects exact invocations; agent_run groups by invocation and executor. GET /agents/run-usage/:runId and inspect_agent_run(runId) resolve ownership without an agentId and expose saved runtime usage and separate overlapping Gateway-only usage. Historical untagged requests remain unknown, not zero.',
-              persistence: 'attribution is written to the permanent statistics as well as the 12-hour request details',
+              persistence: 'attribution is written to statistics (default 90 days) as well as request details (default 12 hours), both configurable',
               coverage: 'only traffic that passes through the Gateway; native Codex configuration may use a direct provider and then only runtime-reported usage is available. Native Providers in the configured config.toml pointing at the local Gateway carry attribution headers. Gateway and runtime totals overlap and must not be added.',
             },
             profile: 'server-owned WORKLITE_API_URL; no URL or profile override',
@@ -1339,16 +1350,19 @@ export class WorkspaceResourcesService {
           deployment: { webPort: 23390, apiPort: 23391, gatewayPort: 23392 },
           sharedPersistentState: '.data/deployment',
           persistedStateRetention: {
-            maintenance: 'enabled by default without configuration: both SQLite databases run a periodic pass that expires history, reclaims free pages and truncates the WAL (SQLITE_MAINTENANCE_INTERVAL_MINUTES, default 15 minutes; SQLITE_WAL_SIZE_LIMIT_MEGABYTES; SQLITE_INCREMENTAL_VACUUM_PAGES). Each pass is bounded; while a backlog remains passes run about once a minute with four times the per-pass bounds, then return to the normal interval',
+            maintenance: 'enabled by default without configuration: both SQLite databases run a periodic pass that expires history, reclaims free pages and truncates the WAL (SQLITE_MAINTENANCE_INTERVAL_MINUTES, default 15 minutes; SQLITE_WAL_SIZE_LIMIT_MEGABYTES; SQLITE_INCREMENTAL_VACUUM_PAGES). All SQLite maintenance runs on worker threads; deletes are bounded to SQLITE_MAINTENANCE_BATCH_ROWS (default 500), vacuum writes move at most 16 pages at a time, and backlog retries use SQLITE_MAINTENANCE_CATCH_UP_SECONDS (default 5 seconds)',
             commandStreams: 'COMMAND_STREAM_RETENTION_DAYS, default 3 days, then only COMMAND_STREAM_TAIL_KILOBYTES of trailing output is kept',
-            runEventStreams: 'RUN_EVENT_RETENTION_DAYS, default 14 days for the replay stream of a settled Workflow Run, Coder Run or Chat execution; the runs, node records, results and artifacts themselves are never pruned. 0 disables the pruner',
-            gatewayRequestLogs: '12 hours; statistics are indefinite',
+            runEventStreams: 'RUN_EVENT_RETENTION_DAYS, default 7 days by event age, including earlier events in active conversations and settled project-task activities; latest snapshots, reconnect watermarks and runtime usage summaries remain; the runs, node records, results and artifacts themselves are never pruned. 0 disables the pruner',
+            commandHistory: 'COMMAND_HISTORY_RETENTION_DAYS, default 30 days for terminal command records and their output; saved tool results remain',
+            toolPackageCopies: 'TOOL_PACKAGE_RETENTION_DAYS, default 7 days for successful result-appended calls in completed executions; active and failed execution snapshots remain for retry',
+            apiRequestLogs: 'API_REQUEST_LOG_RETENTION_DAYS, default 1 day',
+            gatewayRequestLogs: 'GATEWAY_REQUEST_LOG_RETENTION_HOURS, default 12 hours; GATEWAY_STATS_RETENTION_DAYS, default 90 days for statistics; 0 disables expiry',
             releases: 'WORKLITE_RELEASE_RETENTION, default 3 newest unreferenced release directories under runtime/releases; pruned on every deployment and upgrade attempt, including the ones that fail',
             upgradeRecords: 'WORKLITE_UPGRADE_RECORD_RETENTION_DAYS, default 30 days for terminal upgrade job records and deployment logs',
           },
         },
         localFiles: { tool: 'upload_local_files', register: 'POST /artifacts/local-files with files:[{path}]', limits: '1-8 regular files, 20 MiB each, 40 MiB total; WorkLite budgets, not verified iLink server limits', reference: '[filename](/api/artifacts/art_…/content?download=true)', wechat: 'encrypted CDN upload and native file_item, in reply order; a readable notice replaces failed media, never an internal link', storage: 'persistent opaque Artifact, download-only; existing inline text/markdown/json Artifacts support the same content route' },
-        chatAttachments: { upload: 'POST /chat/attachments (raw image body; image/png, image/jpeg, image/gif or image/webp; at most 10 MB; optional fileName, conversationId, projectTaskId query)', read: 'GET /chat/attachments/:id', delete: 'DELETE /chat/attachments/:id', reference: '![description](/api/chat/attachments/att_…)', storage: '.data/deployment/chat-attachments', retention: 'CHAT_ATTACHMENT_RETENTION_HOURS, default 12 hours like Gateway request logs', producers: 'project executors receive attachmentUploadUrl in task input; the Web composer uploads pasted images without a projectTaskId', modelInput: 'a Chat turn inlines live attachments uploaded by the reader (no projectTaskId) as image content blocks, at most 8 images, 3.5 MiB each and 10 MB per request, on the anthropic/messages, openai/chat, openai/responses and codex/responses protocols; an executor report image stays a Markdown reference', feishu: 'replaced by a text note pointing to Web' },
+        chatAttachments: { upload: 'POST /chat/attachments (raw image body; image/png, image/jpeg, image/gif or image/webp; at most 10 MB; optional fileName, conversationId, projectTaskId query)', read: 'GET /chat/attachments/:id', delete: 'DELETE /chat/attachments/:id', reference: '![description](/api/chat/attachments/att_…)', storage: '.data/deployment/chat-attachments', retention: 'CHAT_ATTACHMENT_RETENTION_HOURS, default 12 hours like Gateway request logs', producers: 'project executors receive attachmentUploadUrl in task input; the Web composer uploads pasted images without a projectTaskId', modelInput: 'a Chat turn inlines live attachments uploaded by the reader (no projectTaskId) as image content blocks, at most 8 images, 3.5 MiB each and 10 MB per request, on the anthropic/messages, openai/chat, openai/responses, codex/responses protocols; an executor report image stays a Markdown reference', feishu: 'replaced by a text note pointing to Web' },
         chatShell: {
           available: true,
           tool: 'run_host_command',
@@ -1456,7 +1470,7 @@ export class WorkspaceResourcesService {
           },
           imageGeneration: {
             route: '/api/portkey-gateway/v1/images/generations',
-            codexModel: 'codex/gpt-image-2',
+            modelFormat: '<providerName>/<modelId>',
             supportedRequestFields: ['prompt', 'model', 'n', 'background', 'quality', 'size'],
             responseContent: 'data[].b64_json',
             workflowNode: true,

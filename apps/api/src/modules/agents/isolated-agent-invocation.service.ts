@@ -1,8 +1,10 @@
+import type { ModelParameters } from '@worklite/contracts';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { AgentTeamOperationRecoveryDecision, AgentTeamRoleId } from '@worklite/contracts';
 import {
   createModelGateway,
+  normalizePublicModelList,
   type ContextCheckpointWriter,
   type GatewayToolDefinition,
   type GatewayAgentMessage,
@@ -91,6 +93,8 @@ type IsolatedAgentInvocationRequest = {
   workspaceId: string;
   // One declared Gateway public model id, or an ordered list of fallback candidates.
   publicModelId: string | readonly string[];
+  modelParameters?: ModelParameters;
+  modelParametersByModel?: Record<string, ModelParameters>;
   systemPrompt: string;
   context: unknown;
   initialMessages?: readonly GatewayAgentMessage[];
@@ -226,7 +230,8 @@ export class IsolatedAgentInvocationService {
     ].filter(Boolean).join('\n\n');
 
     const mcpTools = await this.mcpRuntime.discover(request.mcpRuntimes, request.signal);
-    const candidates = await this.resources.publicModelCandidates(request.workspaceId, request.publicModelId);
+    const ids = normalizePublicModelList(request.publicModelId);
+    const candidates = (await this.resources.publicModelCandidates(request.workspaceId, request.publicModelId)).map((candidate, index) => ({ ...candidate, modelParameters: request.modelParametersByModel?.[ids[index]!] ?? request.modelParameters }));
     const contextText = typeof request.context === 'string' ? request.context : JSON.stringify(request.context);
     const maxRounds = Math.min(request.limits?.maxToolRounds ?? MAX_TOOL_ROUNDS, MAX_ALLOWED_TOOL_ROUNDS);
     const skillReferenceTool: GatewayToolDefinition = {

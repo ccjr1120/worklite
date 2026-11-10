@@ -178,11 +178,11 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
   const { t } = useTranslation('assistant');
   return (
     <Message from="assistant" aria-label={t('speaker.assistant')} className="wl-enter">
-      <div className="flex w-full items-start gap-3">
+      <div className="grid min-w-0 w-full grid-cols-[2rem_minmax(0,1fr)] items-start gap-3">
         <span className={cn('mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface shadow-xs transition-shadow duration-[200ms]', working && 'wl-live-glow border-transparent')}>
           <MessageSquareText className={cn('size-4 transition-colors duration-[200ms]', working ? 'text-brand' : 'text-muted-foreground')} aria-hidden="true" />
         </span>
-        <MessageContent className="min-w-0 flex-1 pt-1">
+        <MessageContent className="min-w-0 w-full pt-1 [&>:first-child]:mt-0">
           {segments.map((segment, index) => segment.kind === 'message'
             ? segment.item.progressReport
               ? <ProgressReportCard key={segment.item.id} message={segment.item} report={segment.item.progressReport} streaming={working && index === segments.length - 1} markdownEnabled={markdownEnabled} />
@@ -860,14 +860,14 @@ function AgentTaskCard({ agentId, runId, agentName, task, status, progress }: {
   const { t } = useTranslation('assistant');
   return (
     <article className="min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <p className="min-w-0 truncate text-sm font-medium">
+      <div className="flex items-center gap-3">
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">
           <Link to="/agents/$agentId" params={{ agentId }} search={{ runId }} className="text-brand-text hover:underline">@{agentName}</Link>
           {task ? <> {toSingleLine(task)}</> : null}
         </p>
+        {progress ? <p className="min-w-0 max-w-[40%] truncate text-[13px] text-muted-foreground">{progress}</p> : null}
         <StatusBadge status={toStatusKey(status)} label={status === 'running' ? t('agentTask.running') : status === 'unknown' ? t('agentTask.unknown') : undefined} className="shrink-0" />
       </div>
-      {progress ? <p className="mt-1 whitespace-pre-line break-words text-[13px] text-muted-foreground">{progress}</p> : null}
     </article>
   );
 }

@@ -1,9 +1,11 @@
+import type { AgentPlanStep, ModelParameters } from '@worklite/contracts';
 import { BadRequestException } from '@nestjs/common';
 import type { StoredProjectExecutor, StoredProjectExecutorLaunch } from '@worklite/db';
 import type { GatewayCorrelation } from '@worklite/model-gateway';
 
 export type ProjectExecutorActivity = {
   phase: string;
+  plan?: AgentPlanStep[];
   usage?: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null; cacheReadTokens?: number | null; cacheCreationTokens?: number | null };
   // Codex activities carry the backing CommandExecution id. Claude Agent SDK activities have no
   // process-level command record of their own and carry `sessionId` instead.
@@ -15,6 +17,7 @@ export type ProjectExecutorActivity = {
   itemType?: string;
   summary?: string;
   text?: string;
+  status?: 'running' | 'completed' | 'failed';
 };
 
 export type ProjectExecutorSkill = {
@@ -46,6 +49,7 @@ export type ProjectExecutorRequest = {
   launch: StoredProjectExecutorLaunch;
   // Public Gateway model id; null keeps the executor's own configured default.
   model: string | null;
+  modelParameters?: ModelParameters;
   systemPrompt: string;
   input: string;
   projectDirectory: string;

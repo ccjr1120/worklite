@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n/config';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -27,7 +27,7 @@ describe('Coding run overview', () => {
     expect(finished.querySelector('section')).not.toBeNull();
     expect(active.querySelector('button[aria-expanded]')).toBeNull();
     expect(finished.querySelector('button[aria-expanded]')).toBeNull();
-    expect(active.querySelectorAll('button').length).toBe(2);
-    expect(finished.querySelectorAll('button').length).toBe(0);
+    expect(within(active).getAllByRole('button').map((button) => button.textContent)).toEqual(['取消执行']);
+    expect(within(finished).queryByRole('button')).not.toBeInTheDocument();
   });
 });

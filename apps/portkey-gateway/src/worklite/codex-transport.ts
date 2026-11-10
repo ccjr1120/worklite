@@ -264,7 +264,7 @@ async function imageGenerations(request: Request, requestHeaders: Record<string,
 
 async function responses(request: Request, requestHeaders: Record<string, string>, body: unknown, compact: boolean): Promise<Response> {
   const forwardedBody = body && typeof body === 'object' && !Array.isArray(body)
-    ? (() => { const value: Record<string, unknown> = { ...(body as Record<string, unknown>), store: false, ...(typeof (body as Record<string, unknown>).model === 'string' ? { model: String((body as Record<string, unknown>).model).split('/').slice(1).join('/') || (body as Record<string, unknown>).model } : {}) }; delete value.max_output_tokens; return value; })()
+    ? (() => { const value: Record<string, unknown> = { ...(body as Record<string, unknown>), store: false, ...(typeof (body as Record<string, unknown>).model === 'string' ? { model: String((body as Record<string, unknown>).model).split('/').slice(1).join('/') || (body as Record<string, unknown>).model } : {}) }; delete value.max_output_tokens; if (value.service_tier === 'fast') value.service_tier = 'priority'; return value; })()
     : body;
   let lease;
   try { lease = await acquireCodexAccount(); } catch { return unavailable(); }

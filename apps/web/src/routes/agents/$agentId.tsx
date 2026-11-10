@@ -1,3 +1,5 @@
+import { ModelParametersFields } from '@/components/model-parameters-fields';
+import type { ModelParameters } from '@worklite/contracts';
 import { AgentOverview } from '@/features/agents/agent-overview';
 import { WechatOfficialAccountConfiguration } from '@/features/agents/wechat-official-account-configuration';
 import { createFileRoute, Link } from '@tanstack/react-router';
@@ -6,7 +8,7 @@ import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AgentView, CreateAgentRequest, AgentCollaboration, AgentRuntimeConfiguration } from '@worklite/contracts';
 import { api } from '@/api/client';
-import { useAgentsQuery, useSkillsQuery, useMcpServersQuery } from '@/api/queries';
+import { useAgentsQuery, useSkillsQuery, useMcpServersQuery, useModelProvidersQuery } from '@/api/queries';
 import { queryClient } from '@/lib/query-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +36,7 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
   const navigate = Route.useNavigate();
   const { parentId } = Route.useSearch();
   const directory = useAgentsQuery();
+  const providers = useModelProvidersQuery();
   const skills = useSkillsQuery('personal');
   const servers = useMcpServersQuery('personal');
   const [name, setName] = useState(agent?.name ?? '');
@@ -41,7 +44,9 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
   const [prompt, setPrompt] = useState(agent?.systemPrompt ?? '');
   const [runtimeKind, setRuntimeKind] = useState<'native' | 'codex' | 'claude'>(agent?.runtime?.kind ?? 'native');
   const [projectDirectory, setProjectDirectory] = useState(agent?.runtime && agent.runtime.kind !== 'native' ? agent.runtime.projectDirectory : '');
-  const [models, setModels] = useState((agent?.collaboration?.publicModels ?? []).join('\n'));
+  const [models, setModels] = useState((agent?.collaboration?.publicModels?.length ? agent.collaboration.publicModels : agent?.model && !agent.providerId ? [agent.model] : []).join('\n'));
+  const [modelParameters, setModelParameters] = useState<ModelParameters>(agent?.modelParameters ?? {});
+  const [modelParametersByModel, setModelParametersByModel] = useState<Record<string, ModelParameters>>(agent?.collaboration?.modelParameters ?? {});
   const [subAgentIds, setSubAgentIds] = useState(agent?.collaboration?.subAgentIds ?? []);
   const [builtinToolNames, setBuiltinToolNames] = useState(agent?.collaboration?.builtinToolNames ?? []);
   const [skillIds, setSkillIds] = useState(agent?.skills.map((skill) => skill.id) ?? []);
@@ -55,9 +60,9 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
     event.preventDefault(); setBusy(true); setError('');
     try {
       const publicModels = models.split('\n').map((model) => model.trim()).filter(Boolean);
-      const collaboration: AgentCollaboration = { ...agent?.collaboration, builtinToolNames, subAgentIds, privateTools: JSON.parse(privateTools) as AgentCollaboration['privateTools'], capabilities: JSON.parse(capabilities) as AgentCollaboration['capabilities'], publicModels };
+      const collaboration: AgentCollaboration = { ...agent?.collaboration, builtinToolNames, subAgentIds, privateTools: JSON.parse(privateTools) as AgentCollaboration['privateTools'], capabilities: JSON.parse(capabilities) as AgentCollaboration['capabilities'], publicModels, modelParameters: Object.fromEntries(publicModels.filter((model) => modelParametersByModel[model]).map((model) => [model, modelParametersByModel[model]])) };
       const runtime: AgentRuntimeConfiguration = runtimeKind === 'native' ? { kind: 'native' } : { ...(agent?.runtime && agent.runtime.kind !== 'native' ? agent.runtime : {}), kind: runtimeKind, projectDirectory };
-      const input: CreateAgentRequest = { parentAgentId: parentId, runtime, name, responsibility, systemPrompt: prompt, providerId: agent?.providerId ?? null, model: agent?.providerId ? agent.model : publicModels[0] ?? '', skillIds, mcpServerIds, collaboration };
+      const input: CreateAgentRequest = { parentAgentId: parentId, runtime, name, responsibility, systemPrompt: prompt, modelParameters, providerId: agent?.providerId ?? null, model: agent?.providerId ? agent.model : publicModels[0] ?? '', skillIds, mcpServerIds, collaboration };
       const saved = agent ? parentId ? await api.updateSubAgent(parentId, agent.id, input) : await api.updateAgent('personal', agent.id, input) : await api.createAgent(input);
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['agents'] }), queryClient.invalidateQueries({ queryKey: ['agent', saved.id] })]);
       onSaved();
@@ -78,9 +83,10 @@ function AgentEditor({ agent, onSaved, onBack }: { agent?: AgentView; onSaved: (
       <Field label={t('name')} htmlFor="agent-name"><Input id="agent-name" value={name} onChange={(event) => setName(event.target.value)} required /></Field>
       <Field label={t('responsibility')} htmlFor="agent-responsibility"><Textarea id="agent-responsibility" value={responsibility} onChange={(event) => setResponsibility(event.target.value)} /></Field>
       <Field label={t('prompt')} htmlFor="agent-prompt"><Textarea id="agent-prompt" className="min-h-64" value={prompt} onChange={(event) => setPrompt(event.target.value)} /></Field>
-      <Field label={t('runtime')} htmlFor="agent-runtime"><select id="agent-runtime" className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm" value={runtimeKind} onChange={(event) => setRuntimeKind(event.target.value as 'native' | 'codex' | 'claude')}><option value="native">{t('native')}</option><option value="codex" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Codex</option><option value="claude" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Claude Code</option></select></Field>
+      <Field label={t('runtime')} htmlFor="agent-runtime"><select id="agent-runtime" className="h-9 w-full rounded-md border border-border bg-surface px-3 text-sm" value={runtimeKind} onChange={(event) => { setRuntimeKind(event.target.value as 'native' | 'codex' | 'claude'); setModelParameters({}); setModelParametersByModel({}); }}><option value="native">{t('native')}</option><option value="codex" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Codex</option><option value="claude" disabled={subAgentIds.length > 0 || capabilities.trim() !== '[]' || privateTools.trim() !== '[]'}>Claude Code</option></select></Field>
       {runtimeKind !== 'native' ? <Field label={t('projectDirectory')} htmlFor="agent-directory"><Input id="agent-directory" value={projectDirectory} onChange={(event) => setProjectDirectory(event.target.value)} placeholder={t('directoryPlaceholder')} /></Field> : null}
       <Field label={t('models')} htmlFor="agent-models"><Textarea id="agent-models" value={models} onChange={(event) => setModels(event.target.value)} placeholder="provider/model" /></Field>
+      {models.trim() && !agent?.providerId ? [...new Set(models.split('\n').map((model) => model.trim()).filter(Boolean))].map((model) => <fieldset key={`${runtimeKind}:${model}`} className="space-y-2"><legend className="text-sm">{model}</legend><ModelParametersFields value={modelParametersByModel[model] ?? modelParameters} onChange={(value) => setModelParametersByModel((previous) => ({ ...previous, [model]: value }))} protocol={providers.data?.find((provider) => model.startsWith(`${provider.name}/`))?.protocol} runtime={runtimeKind} disabled={busy} /></fieldset>) : <ModelParametersFields key={`${runtimeKind}:${agent?.providerId ?? ''}`} value={modelParameters} onChange={setModelParameters} protocol={providers.data?.find((provider) => provider.id === agent?.providerId)?.protocol} runtime={runtimeKind} disabled={busy} />}
       {runtimeKind === 'native' ? <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('subAgents')}</legend>{[...(directory.data ?? []), ...(agent?.subAgents ?? [])].filter((item) => item.kind === 'custom' && item.id !== agent?.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={subAgentIds.includes(item.id)} onChange={() => toggle(item.id, subAgentIds, setSubAgentIds)} />{item.name}{agent?.subAgents?.some((child) => child.id === item.id) ? <Link to="/agents/$agentId" params={{ agentId: item.id }} search={{ parentId: agent.id }} className="text-brand hover:underline">{t('configure')}</Link> : null}</label>)}{agent ? <Button asChild variant="secondary" size="compact"><Link to="/agents/$agentId" params={{ agentId: 'new' }} search={{ parentId: agent.id }}>{t('createSubAgent')}</Link></Button> : null}</fieldset> : null}
       {runtimeKind === 'native' ? <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('builtinTools')}</legend>{(['bash', 'read', 'write', 'glob', 'grep'] as const).map((tool) => <label key={tool} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={builtinToolNames.includes(tool)} onChange={() => toggle(tool, builtinToolNames, setBuiltinToolNames)} />{t(`tools.${tool}`)}</label>)}</fieldset> : null}
       <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">{t('skills')}</legend>{[...(skills.data ?? []), ...(agent?.skills ?? []).filter((skill) => !(skills.data ?? []).some((item) => item.id === skill.id))].map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={skillIds.includes(item.id)} onChange={() => toggle(item.id, skillIds, setSkillIds)} />{item.name}</label>)}</fieldset>

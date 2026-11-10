@@ -13,9 +13,7 @@ import {
 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useChatConversationsQuery } from '@/api/queries';
 import { APP_VERSION_LABEL } from '@/app-version';
-import { isLiveStatus } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { focusRingInset } from '@/components/ui/interaction';
@@ -54,13 +52,6 @@ const navigationGroups = [
 
 type NavItem = (typeof navigationGroups)[number]['items'][number];
 
-// The live dot reads the same server conversation list the Chat page polls, so it is
-// shared cache rather than a second source of truth.
-function useChatLive() {
-  const query = useChatConversationsQuery();
-  return (query.data?.pages[0]?.items ?? []).some((item) => isLiveStatus(item.status));
-}
-
 function Sidebar({
   collapsed,
   onNavigate,
@@ -72,7 +63,6 @@ function Sidebar({
 }) {
   const { t } = useTranslation('workspace');
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const chatLive = useChatLive();
   const navRef = useRef<HTMLElement>(null);
   const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
 
@@ -97,14 +87,12 @@ function Sidebar({
 
   function primaryLink(item: NavItem) {
     const active = primaryActive(item.id, item.to);
-    const live = item.id === 'chat' && chatLive;
     const label = t(item.labelKey);
-    const accessibleLabel = live ? `${label} · ${t('nav.live')}` : label;
     const content = (
       <Link
         to={item.to}
         onClick={onNavigate}
-        aria-label={accessibleLabel}
+        aria-label={label}
         className={cn(
           'wl-press relative z-[1] flex h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px]',
           collapsed && 'justify-center px-0',
@@ -115,10 +103,8 @@ function Sidebar({
       >
         <span className="relative flex shrink-0">
           <item.icon className={cn('size-[18px] transition-colors duration-[140ms]', active && 'text-brand')} aria-hidden="true" />
-          {live && collapsed ? <span className="wl-live absolute -right-1 -top-1 !size-2 text-brand ring-2 ring-surface" aria-hidden="true" /> : null}
         </span>
         {!collapsed ? <span className="min-w-0 flex-1 truncate">{label}</span> : null}
-        {live && !collapsed ? <span className="wl-live mr-1 text-brand" aria-hidden="true" /> : null}
       </Link>
     );
     return collapsed ? <Tooltip><TooltipTrigger asChild>{content}</TooltipTrigger><TooltipContent side="right">{label}</TooltipContent></Tooltip> : content;

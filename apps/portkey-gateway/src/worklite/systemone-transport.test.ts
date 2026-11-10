@@ -1,17 +1,20 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { vi } from 'vitest';
+import { rmSync } from 'node:fs';
 
 import app from '../index';
-import { createProvider, requestLog } from './provider-registry';
+import { createProvider, requestLog, stopGatewayDatabaseMaintenance } from './provider-registry';
 import { SYSTEM_ONE_TEST_INPUT } from './systemone-transport';
 
 const TEST_MODEL = 'jev-test';
 const TEST_PROVIDER_NAME = 'typesafe-systemone-test';
-const originalDatabasePath = process.env.PORTKEY_GATEWAY_DB_PATH;
-const testDirectory = mkdtempSync(join(tmpdir(), 'worklite-systemone-'));
-const testDatabasePath = join(testDirectory, 'gateway.db');
-const fetchMock = jest.spyOn(globalThis, 'fetch');
+const testEnvironment = vi.hoisted(() => {
+  const directory = `${process.cwd()}/.tmp-systemone-${process.pid}-${Date.now()}`;
+  const originalDatabasePath = process.env.PORTKEY_GATEWAY_DB_PATH;
+  // The application opens the registry during import, before beforeAll runs.
+  process.env.PORTKEY_GATEWAY_DB_PATH = `${directory}/gateway.db`;
+  return { directory, originalDatabasePath };
+});
+const fetchMock = vi.spyOn(globalThis, 'fetch');
 
 let providerId = '';
 
@@ -32,7 +35,6 @@ async function runProviderTest(): Promise<Response> {
 
 describe('typesafe/systemone provider connection test', () => {
   beforeAll(async () => {
-    process.env.PORTKEY_GATEWAY_DB_PATH = testDatabasePath;
     const provider = await createProvider({
       name: TEST_PROVIDER_NAME,
       baseURL: 'https://typesafe.example/tenant/v1/',
@@ -50,9 +52,10 @@ describe('typesafe/systemone provider connection test', () => {
 
   afterAll(() => {
     fetchMock.mockRestore();
-    if (originalDatabasePath === undefined) delete process.env.PORTKEY_GATEWAY_DB_PATH;
-    else process.env.PORTKEY_GATEWAY_DB_PATH = originalDatabasePath;
-    rmSync(testDirectory, { recursive: true, force: true });
+    stopGatewayDatabaseMaintenance();
+    if (testEnvironment.originalDatabasePath === undefined) delete process.env.PORTKEY_GATEWAY_DB_PATH;
+    else process.env.PORTKEY_GATEWAY_DB_PATH = testEnvironment.originalDatabasePath;
+    rmSync(testEnvironment.directory, { recursive: true, force: true });
   });
 
   it('sends the typed question through the Test button path and returns its answer', async () => {
