@@ -1,3 +1,4 @@
+import { DISCOVER_CHAT_TOOLS, NATIVE_CHAT_TOOL_GUIDANCE, discoverChatTools, loadedChatToolNames, nativeChatTurnKey, nativeChatInstructions, visibleChatTools } from './native-chat-tools';
 import type { AskChatRuntime } from './chat-runtime-mcp';
 import type { ModelParameters } from '@worklite/contracts';
 import { encodeMessageState, patchExecutionMessages, appendExecutionMessages, executionUpdates, agentExecutionColumns, displayMessagesColumn, projectTaskColumns, platformArgumentsHash, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentMcpServers, mcpServers, agentRuntimeSessions, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
@@ -752,24 +753,18 @@ export class AgentExecutionsService implements OnModuleInit {
     const turnToolCallIds = execution.modelMessages.slice(turnStart + 1).flatMap((message) => message.role === 'assistant'
       ? message.content.flatMap((part) => part.type === 'tool-call' ? [part.toolCallId] : [])
       : []);
-    const priorToolCalls = turnToolCallIds.length === 0 ? [] : await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls)
+    const priorToolCalls = turnToolCallIds.length === 0 ? [] : await this.db.select({ id: agentToolCalls.id, toolName: agentToolCalls.toolName, mcpToolName: agentToolCalls.mcpToolName, status: agentToolCalls.status }).from(agentToolCalls)
       .where(and(eq(agentToolCalls.executionId, executionId), inArray(agentToolCalls.toolCallId, turnToolCallIds)));
     // Chat has no per-turn tool budget. Other native helpers retain their existing limit
     // and receive an answer-only step when it is exhausted.
     const maxToolCalls = execution.agentId === CHAT_AGENT_ID ? Infinity : MAX_HELPER_TOOL_ROUNDS;
     const toolBudgetExhausted = priorToolCalls.length >= maxToolCalls;
-    const clarificationAllowed = execution.plan.length > 0
-      && execution.plan.some((step) => step.status !== 'completed')
-      && priorToolCalls.length === 1
-      && priorToolCalls[0]?.toolName === 'builtin'
-      && priorToolCalls[0].mcpToolName === 'update_plan';
     const { agent, assignedSkills: capturedSkills } = execution.capabilitySnapshot
       ? { agent: execution.capabilitySnapshot.agent, assignedSkills: execution.capabilitySnapshot.skills }
       : await this.requireExecutableAgent(workspace.id, execution.agentId);
     if (agent.id !== CHAT_AGENT_ID && 'collaboration' in agent && agent.collaboration && (!agent.runtime || agent.runtime.kind === 'native' || agent.collaboration.subAgentIds.length || agent.collaboration.capabilities.length || agent.collaboration.privateTools?.length)) return this.advanceCollaboration(workspace.id, execution);
     if (agent.runtime && agent.runtime.kind !== 'native') return this.advanceRuntime(request, workspaceSlug, workspace.id, execution);
     const assignedSkills = capturedSkills;
-    const clarificationPass = agent.id === CHAT_AGENT_ID && clarificationAllowed;
     const protectedPlatformSkill = agent.id === CHAT_AGENT_ID ? assignedSkills.find((skill) => isProtectedPlatformSkillId(workspace.id, skill.id)) : undefined;
     const protectedPlatformManifest = protectedPlatformSkill ? platformToolManifest(protectedPlatformSkill.files) : {};
     const hostCommandTool = protectedPlatformSkill ? platformRuntimeTool(protectedPlatformSkill.files, 'run_host_command') : undefined;
@@ -779,14 +774,20 @@ export class AgentExecutionsService implements OnModuleInit {
       const typedTools = isProtectedPlatformSkill ? protectedPlatformManifest : {};
       return skill.files.filter((file) => file.path.startsWith('scripts/') && file.content.startsWith('#!')).map((file) => ({ skillId: skill.id, skillName: skill.name, path: file.path, tool: typedTools[file.path] }));
     });
-    const mcpRuntimes = agent.id === CHAT_AGENT_ID || clarificationPass ? [] : await this.executionMcpRuntimes(request, workspaceSlug, execution);
-    const mcpTools = clarificationPass ? [] : await this.mcpRuntime.discover(mcpRuntimes);
-    const availableSkillScripts = clarificationPass ? [] : skillScripts;
-    const availableMcpTools = clarificationPass ? [] : mcpTools;
+    const mcpRuntimes = agent.id === CHAT_AGENT_ID ? [] : await this.executionMcpRuntimes(request, workspaceSlug, execution);
+    const mcpTools = await this.mcpRuntime.discover(mcpRuntimes);
+    const catalog = [...HELPER_BUILTIN_TOOLS, HISTORY_ARCHIVE_TOOL, ...CHAT_AGENT_TOOLS, DISCOVER_CHAT_TOOLS, ...(hostCommandTool ? [hostCommandTool] : []), ...skillScripts.flatMap((script) => script.tool ? [script.tool] : [])];
+    const discoveries = agent.id === CHAT_AGENT_ID ? this.db.select({ output: agentToolCalls.output }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.mcpToolName, 'discover_tools'), eq(agentToolCalls.status, 'completed'))).all() : [];
+    const loadedNames = loadedChatToolNames(nativeChatTurnKey(execution), discoveries.map((call) => call.output));
+    // Preserve tools already used in an in-flight turn when upgrading from eager exposure.
+    for (const call of priorToolCalls) if (call.status === 'completed' && call.mcpToolName) loadedNames.add(call.mcpToolName);
+    const visibleNames = new Set(visibleChatTools(catalog, loadedNames).map((tool) => tool.name));
+    const availableSkillScripts = agent.id === CHAT_AGENT_ID ? skillScripts.filter((script) => script.tool && visibleNames.has(script.tool.name)) : skillScripts;
+    const availableMcpTools = mcpTools;
     const builtinToolDefinitions = agent.id === CHAT_AGENT_ID
-      ? clarificationPass ? HELPER_BUILTIN_TOOLS : [...HELPER_BUILTIN_TOOLS, HISTORY_ARCHIVE_TOOL, ...CHAT_AGENT_TOOLS, ...(hostCommandTool ? [hostCommandTool] : [])]
+      ? [...HELPER_BUILTIN_TOOLS, HISTORY_ARCHIVE_TOOL, ...CHAT_AGENT_TOOLS, DISCOVER_CHAT_TOOLS, ...(hostCommandTool ? [hostCommandTool] : [])].filter((tool) => visibleNames.has(tool.name))
       : [];
-    const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${skill.instructions}`).filter((value) => value.trim()).join('\n\n');
+    const skillInstructions = assignedSkills.map((skill) => `## ${skill.name}\n${agent.id === CHAT_AGENT_ID ? nativeChatInstructions(skill.instructions) : skill.instructions}`).filter((value) => value.trim()).join('\n\n');
     const chatOrchestrationRule = agent.id === CHAT_AGENT_ID
       ? [CHAT_ORCHESTRATION_RULE, CHAT_ROUTER_CONTROL_RULE, CHAT_DELEGATION_RULE, hostCommandTool ? CHAT_HOST_COMMAND_RULE : ''].join(' ')
       : '';
@@ -801,7 +802,8 @@ export class AgentExecutionsService implements OnModuleInit {
       ? await this.db.select({ channel: externalChats.channel }).from(externalChats).where(and(eq(externalChats.workspaceId, workspace.id), eq(externalChats.executionId, executionId))).limit(1)
       : [];
     const systemPrompt = [
-      agent.systemPrompt.trim(),
+      agent.id === CHAT_AGENT_ID ? nativeChatInstructions(agent.systemPrompt.trim()) : agent.systemPrompt.trim(),
+      agent.id === CHAT_AGENT_ID ? NATIVE_CHAT_TOOL_GUIDANCE : '',
       agent.id === CHAT_AGENT_ID ? `Current conversation delivery channel: ${deliveryChat?.channel ?? 'web'}. This is the bound delivery channel even when a turn is submitted from Web.` : '',
       agent.id === CHAT_AGENT_ID && agentFiles(this.db) ? `Agent package catalog root for this workspace: ${JSON.stringify(agentFiles(this.db)!.workspaceRoot(workspace.id))}. Use run_host_command to inspect AGENT.md ids and write private skills/ and tools/ files here. Private sub-Agents live under their owner subagents/ directory.` : '',
       agent.id === CHAT_AGENT_ID ? 'Batch independent tool calls together; they execute concurrently. Issue dependent calls or writes to the same resource in separate model steps.' : '',
@@ -811,7 +813,7 @@ export class AgentExecutionsService implements OnModuleInit {
       skillInstructions ? `Assigned Skill instructions:\n\n${skillInstructions}` : '',
       availableSkillScripts.length > 0 ? `${agent.id === CHAT_AGENT_ID ? '' : 'Request at most one Skill script tool at a time. '}Every valid request executes immediately on the WorkLite host without user approval.` : '',
       scriptList ? `Assigned executable Skill scripts:\n${scriptList}\nUse skill_script only with an exact listed Skill id and script path.` : '',
-      builtinToolDefinitions.length > 0 ? 'Converse naturally. Use update_plan for multi-step work. Use ask_user only when a material user choice or missing information blocks the current request, with relevant options when helpful; a plan is not required. When the intent and target are clear, proceed through the assigned platform scripts.' : '',
+      builtinToolDefinitions.length > 0 ? 'Converse naturally. Use ask_user only when a material user choice or missing information blocks the current request, with relevant options when helpful; a plan is not required. When the intent and target are clear, proceed through the assigned platform scripts.' : '',
       hostCommandTool ? 'Use run_host_command directly for everyday installs, system/version/CLI queries, ordinary file management and short local scripts. It runs through a login zsh with closed stdin, bounded output and a timeout, and supports concurrent independent commands. Directly author Agent-owned Skills, Tools and their local scripts as configuration work. Delegate other code changes, repository-wide investigation and build/test validation through run_agent.' : '',
       availableMcpTools.length > 0 ? `Assigned MCP tools:\n${availableMcpTools.map((tool) => `- ${tool.name}: ${tool.description}`).join('\n')}` : '',
       chatOrchestrationRule,
@@ -932,12 +934,14 @@ export class AgentExecutionsService implements OnModuleInit {
           const callId = `acall_${randomUUID()}`;
           const workingDirectory = process.cwd();
           const skill = requestedCall.toolName === 'skill_script' ? assignedSkills.find((item) => item.id === requestedCall.skillId && (agent.id !== CHAT_AGENT_ID || isProtectedPlatformSkillId(workspace.id, item.id))) : undefined;
-          const script = skill?.files.find((file) => file.path === requestedCall.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!'));
+          const script = skill?.files.find((file) => file.path === requestedCall.scriptPath && file.path.startsWith('scripts/') && file.content.startsWith('#!') && availableSkillScripts.some((available) => available.skillId === skill.id && available.path === file.path));
           const mcpTool = mcpTools.find((tool) => tool.name === requestedCall.toolName);
           // A rejected call is recorded as a failed tool call with a credential-safe reason. The
           // model receives that reason as its tool result and can correct the request next step,
           // so one malformed or over-limit call never fails the whole turn.
-          let rejection = requestedCall.rejection ?? (result.finishReason === 'length' ? 'This tool was not executed because the model output was truncated. Reissue the call with complete arguments.' : null) ?? (priorToolCalls.length + index >= maxToolCalls ? TOOL_BUDGET_EXHAUSTED_MESSAGE : toolCallRejection({
+          const hiddenTool = agent.id === CHAT_AGENT_ID && requestedCall.toolName === 'skill_script' && skill && !script
+            ? 'This platform tool is not loaded. Call discover_tools with its exact toolNames, then retry in the next model step.' : null;
+          let rejection = requestedCall.rejection ?? hiddenTool ?? (result.finishReason === 'length' ? 'This tool was not executed because the model output was truncated. Reissue the call with complete arguments.' : null) ?? (priorToolCalls.length + index >= maxToolCalls ? TOOL_BUDGET_EXHAUSTED_MESSAGE : toolCallRejection({
             index,
             total: result.toolCalls.length,
             toolName: requestedCall.toolName,
@@ -946,7 +950,7 @@ export class AgentExecutionsService implements OnModuleInit {
             hasSkill: Boolean(skill),
             hasScript: Boolean(script),
             hasMcpTool: Boolean(mcpTool),
-            clarificationPass,
+            clarificationPass: false,
             projectTaskWithOtherTools: requestedCall.toolName === 'project_task' && result.toolCalls.some((call) => call !== requestedCall && call.toolName !== 'update_plan'),
             pendingQuestion: pendingQuestion !== null,
           }));
@@ -1125,7 +1129,18 @@ export class AgentExecutionsService implements OnModuleInit {
     let failure: PlatformFailure | null = null;
     let phase: PlatformFailure['stage'] = 'start';
     try {
-      if (call.toolName === 'builtin' && agentId === CHAT_AGENT_ID && call.mcpToolName === 'read_history_archive') {
+      if (call.toolName === 'builtin' && agentId === CHAT_AGENT_ID && call.mcpToolName === 'discover_tools') {
+        const execution = await this.loadExecution(workspaceId, agentId, executionId);
+        if (execution.status !== 'running') return;
+        const capturedSkills = execution.capabilitySnapshot?.skills ?? (await this.requireExecutableAgent(workspaceId, agentId)).assignedSkills;
+        const platformSkill = capturedSkills.find((skill) => isProtectedPlatformSkillId(workspaceId, skill.id));
+        const definitions = platformSkill ? Object.entries(platformToolManifest(platformSkill.files)).filter(([path, tool]) => path.startsWith('scripts/') ? platformSkill.files.some((file) => file.path === path && file.content.startsWith('#!')) : tool.name === 'run_host_command').map(([, tool]) => tool) : [];
+        const catalog = [...HELPER_BUILTIN_TOOLS, HISTORY_ARCHIVE_TOOL, ...CHAT_AGENT_TOOLS, DISCOVER_CHAT_TOOLS, ...definitions];
+        let discovered: ReturnType<typeof discoverChatTools>;
+        try { discovered = discoverChatTools(catalog, call.input, nativeChatTurnKey(execution)); }
+        catch (error) { throw new BadRequestException(error instanceof Error ? error.message : 'Invalid tool discovery request.'); }
+        result = { status: 'completed', output: JSON.stringify(discovered), result: null, exitCode: null, commandExecutionId: null };
+      } else if (call.toolName === 'builtin' && agentId === CHAT_AGENT_ID && call.mcpToolName === 'read_history_archive') {
         const input = asRecord(call.input);
         result = { status: 'completed', output: JSON.stringify(this.readNativeHistoryArchive(workspaceId, agentId, executionId, String(input?.archiveId ?? ''), Number(input?.offset ?? 0), Number(input?.maxChars ?? 12000))), result: null, exitCode: null, commandExecutionId: null };
       } else if (call.toolName === 'builtin' && agentId === CHAT_AGENT_ID && ['inspect_agents', 'run_agent', 'control_agent_instance'].includes(call.mcpToolName ?? '')) {

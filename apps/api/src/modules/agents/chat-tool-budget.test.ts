@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutions, agentToolCalls, externalChats, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutions, agentToolCalls, externalChats, platformSkillPackageFiles, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
 import type { HostNotificationsService } from '../notifications/host-notifications.service';
@@ -50,8 +50,8 @@ async function setup(priorToolCalls: number) {
   const hostNotifications = { notify: () => {} } as unknown as HostNotificationsService;
   const mcpRuntime = { discover: async () => [] };
   const unused = {} as never;
-  const service = new AgentExecutionsService(db, workspaces as never, resources as never, unused, mcpRuntime as never, unused, unused, unused, projectTasks, attachments as never, unused, hostNotifications, unused);
-  return { db, service };
+  const restartService = () => new AgentExecutionsService(db, workspaces as never, resources as never, unused, mcpRuntime as never, unused, unused, unused, projectTasks, attachments as never, unused, hostNotifications, unused);
+  return { db, service: restartService(), restartService };
 }
 
 async function advance(service: AgentExecutionsService) {
@@ -85,12 +85,12 @@ describe('Chat tool execution', () => {
 
   it.each([11, 12, 30])('keeps accepting tools after %i prior calls', async (count) => {
     const { db, service } = await setup(count);
-    const steps = [{ step: 'Investigate', status: 'completed' }, { step: 'Report', status: 'in_progress' }];
-    gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [{ role: 'assistant', content: [1, 2].map((index) => ({ type: 'tool-call', toolCallId: `next_${index}`, toolName: 'update_plan', input: { steps } })) }], toolCalls: [
-      { toolCallId: 'next_1', toolName: 'update_plan', input: { steps } },
-      { toolCallId: 'next_2', toolName: 'update_plan', input: { steps } },
+    gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [{ role: 'assistant', content: [1, 2].map((index) => ({ type: 'tool-call', toolCallId: `next_${index}`, toolName: 'discover_tools', input: {} })) }], toolCalls: [
+      { toolCallId: 'next_1', toolName: 'discover_tools', input: {} },
+      { toolCallId: 'next_2', toolName: 'discover_tools', input: {} },
     ], finishReason: 'tool-calls', contextDropped: 0 }).mockResolvedValueOnce({ text: 'Done.', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
     await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()?.status).toBe('completed'));
     expect(db.select().from(agentToolCalls).all().filter((call) => call.toolCallId.startsWith('next_')).map((call) => call.status)).toEqual(['completed', 'completed']);
     expect(db.select(agentExecutionColumns).from(agentExecutions).get()?.status).toBe('completed');
     for (const [request] of gateway.generateAgentStep.mock.calls) {
@@ -315,5 +315,115 @@ describe('native Chat context and truncated calls', () => {
     expect(db.select().from(agentToolCalls).get()).toMatchObject({ status: 'failed', resultAppended: true });
     expect(gateway.generateAgentStep).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(gateway.generateAgentStep.mock.calls[1][0].messages)).toContain('truncated');
+  });
+});
+
+describe('native Chat progressive tool exposure', () => {
+  const done = { text: 'Done.', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 };
+  const step = (id: string, toolName: string, input: unknown) => ({ text: '', responseMessages: [{ role: 'assistant', content: [{ type: 'tool-call', toolCallId: id, toolName, input }] }], toolCalls: [{ toolCallId: id, toolName, input }], finishReason: 'tool-calls', contextDropped: 0 });
+  function capturePlatform(db: Database) {
+    const skill = { id: 'sk_worklite_platform', name: 'worklite-platform', instructions: '' };
+    const files = platformSkillPackageFiles();
+    const snapshot = db.select(agentExecutionColumns).from(agentExecutions).get()!.capabilitySnapshot!;
+    db.update(agentExecutions).set({ capabilitySnapshot: { ...snapshot, skills: [{ id: skill.id, name: skill.name, instructions: skill.instructions, files }] } }).run();
+    return { skill, files };
+  }
+  const names = (request: { builtinTools: Array<{ name: string }>; skillScripts: Array<{ tool?: { name: string } }> }) => [...request.builtinTools.map((tool) => tool.name), ...request.skillScripts.flatMap((script) => script.tool ? [script.tool.name] : [])];
+
+  it('reduces the real platform catalog to ten default tools and loads a group on the next step', async () => {
+    const { db, service } = await setup(0);
+    const { files } = capturePlatform(db);
+    gateway.generateAgentStep.mockResolvedValueOnce(step('discover_files', 'discover_tools', { groups: ['files'] })).mockResolvedValue(done);
+    await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
+    expect(names(gateway.generateAgentStep.mock.calls[0][0])).toHaveLength(10);
+    expect(names(gateway.generateAgentStep.mock.calls[0][0])).not.toContain('upload_local_images');
+    expect(names(gateway.generateAgentStep.mock.calls[1][0])).toContain('upload_local_images');
+    expect(names(gateway.generateAgentStep.mock.calls[1][0])).toContain('upload_local_files');
+    expect(names(gateway.generateAgentStep.mock.calls[1][0])).not.toContain('wait_project_task');
+    const manifest = JSON.parse(files.find((file) => file.path === 'scripts/tools.json')!.content);
+    const request = gateway.generateAgentStep.mock.calls[0][0];
+    const exposed = [...request.builtinTools, ...request.skillScripts.map((script: { tool: unknown }) => script.tool)];
+    expect(JSON.stringify(exposed).length).toBeLessThan(JSON.stringify(Object.values(manifest)).length * 0.6);
+    const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'discover_files')).get()!;
+    expect(call).toMatchObject({ status: 'completed', resultAppended: true, commandExecutionId: null });
+    expect(JSON.parse(call.output).toolNames).toEqual(expect.arrayContaining(['upload_local_images', 'upload_local_files']));
+  });
+
+  it('recovers loaded tools after compaction and a service restart, then resets at a new user turn', async () => {
+    const { db, service, restartService } = await setup(0);
+    capturePlatform(db);
+    db.update(agentExecutions).set(executionUpdates('aex_budget', { displayMessages: [{ id: 'user1', role: 'user', content: 'Send files', createdAt: new Date().toISOString() }] })).run();
+    gateway.generateAgentStep.mockResolvedValueOnce(step('discover_files', 'discover_tools', { groups: ['files'] })).mockResolvedValue(done);
+    await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
+    db.update(agentExecutions).set(executionUpdates('aex_budget', { status: 'running', modelMessages: [{ role: 'user', content: 'Compacted checkpoint' }] })).run();
+    gateway.generateAgentStep.mockResolvedValue(done);
+    await advance(restartService());
+    expect(names(gateway.generateAgentStep.mock.calls.at(-1)![0])).toContain('upload_local_images');
+    db.update(agentExecutions).set(executionUpdates('aex_budget', { status: 'running', displayMessages: [{ id: 'user2', role: 'user', content: 'Next request', createdAt: new Date().toISOString() }], modelMessages: [{ role: 'user', content: 'Next request' }] })).run();
+    await advance(restartService());
+    expect(names(gateway.generateAgentStep.mock.calls.at(-1)![0])).not.toContain('upload_local_images');
+  });
+
+  it.each(['web_fetch', 'update_plan'])('removes %s from the catalog, discovery and execution', async (removed) => {
+    const { db, service } = await setup(0);
+    const { skill } = capturePlatform(db);
+    const attempted = removed === 'update_plan'
+      ? { toolCallId: 'removed_call', toolName: removed, input: { steps: [{ step: 'Work', status: 'in_progress' }, { step: 'Report', status: 'pending' }] } }
+      : { toolCallId: 'removed_call', toolName: 'skill_script', modelToolName: removed, skillId: skill.id, scriptPath: 'scripts/web-fetch.mjs', input: { url: 'https://example.com' }, arguments: ['{"url":"https://example.com"}'] };
+    gateway.generateAgentStep.mockResolvedValueOnce(step('catalog', 'discover_tools', {}))
+      .mockResolvedValueOnce(step('reload_removed', 'discover_tools', { toolNames: [removed] }))
+      .mockResolvedValueOnce({ ...step('removed_call', removed, attempted.input), toolCalls: [attempted] })
+      .mockResolvedValue(done);
+    await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
+    for (const [request] of gateway.generateAgentStep.mock.calls) expect(names(request)).not.toContain(removed);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.plan).toEqual([]);
+    const catalog = db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'catalog')).get()!;
+    expect(catalog.output).not.toContain(removed);
+    for (const id of ['reload_removed', 'removed_call']) expect(db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, id)).get()).toMatchObject({ status: 'failed', commandExecutionId: null, resultAppended: true });
+  });
+
+  it('executes a discovered tool with its captured contract and keeps discovery failures recoverable', async () => {
+    const { db, service } = await setup(0);
+    const { skill } = capturePlatform(db);
+    const internal = service as unknown as {
+      executeToolCall(request: unknown, slug: string, workspace: string, agent: string, execution: string, callId: string): Promise<void>;
+    };
+    const execute = internal.executeToolCall.bind(internal);
+    const effects: string[] = [];
+    vi.spyOn(internal, 'executeToolCall').mockImplementation(async (...args) => {
+      const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.id, args[5])).get()!;
+      if (call.mcpToolName !== 'upload_local_images') return execute(...args);
+      effects.push(call.mcpToolName);
+      db.update(agentToolCalls).set({ status: 'completed', output: 'Registered requested image.' }).where(eq(agentToolCalls.id, call.id)).run();
+    });
+    const image = { files: [{ path: '/tmp/screenshot.png', description: 'Screenshot' }] };
+    gateway.generateAgentStep
+      .mockResolvedValueOnce(step('invalid_discovery', 'discover_tools', { toolNames: ['unknown_tool'] }))
+      .mockResolvedValueOnce(step('valid_discovery', 'discover_tools', { toolNames: ['upload_local_images'] }))
+      .mockResolvedValueOnce({ ...step('send_image', 'upload_local_images', image), toolCalls: [{ toolCallId: 'send_image', toolName: 'skill_script', modelToolName: 'upload_local_images', skillId: skill.id, scriptPath: 'scripts/upload-local-images.mjs', input: image, arguments: [JSON.stringify(image)] }] })
+      .mockResolvedValue(done);
+    await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
+    expect(effects).toEqual(['upload_local_images']);
+    expect(names(gateway.generateAgentStep.mock.calls[1][0])).not.toContain('upload_local_images');
+    const failed = db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'invalid_discovery')).get()!;
+    expect(failed).toMatchObject({ status: 'failed', resultAppended: true });
+    expect(failed.output).toContain('unknown_tool');
+    expect(names(gateway.generateAgentStep.mock.calls[3][0])).toContain('upload_local_images');
+  });
+
+  it('rejects an undiscovered script without starting it and explains how to load it', async () => {
+    const { db, service } = await setup(0);
+    const { skill } = capturePlatform(db);
+    const call = { toolCallId: 'hidden', toolName: 'skill_script', modelToolName: 'upload_local_images', skillId: skill.id, scriptPath: 'scripts/upload-local-images.mjs', input: { files: [] }, arguments: ['{"files":[]}'] };
+    gateway.generateAgentStep.mockResolvedValueOnce({ ...step('hidden', 'upload_local_images', call.input), toolCalls: [call] }).mockResolvedValue(done);
+    await advance(service);
+    const saved = db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'hidden')).get()!;
+    expect(saved).toMatchObject({ status: 'failed', resultAppended: true, commandExecutionId: null });
+    expect(JSON.stringify(gateway.generateAgentStep.mock.calls[1][0].messages)).toContain('discover_tools');
+    expect(names(gateway.generateAgentStep.mock.calls[1][0])).not.toContain('upload_local_images');
   });
 });
