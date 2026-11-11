@@ -83,6 +83,7 @@ export type GenerateAgentStepRequest = {
   builtinTools?: readonly GatewayToolDefinition[];
   mcpTools?: readonly GatewayToolDefinition[];
   maxToolRounds?: number;
+  parallelToolCalls?: boolean;
   // Keeps the tool definitions the history refers to but forbids new calls, for a final
   // answer-only step once the caller's tool budget is spent.
   toolsDisabled?: boolean;
@@ -93,6 +94,8 @@ export type GenerateAgentStepRequest = {
 };
 
 export type GatewayToolDefinition = {
+  executionMode?: 'parallel' | 'sequential';
+  concurrency?: { namespace: string; keyFields: string[] };
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -101,7 +104,7 @@ export type GatewayToolDefinition = {
 export type AgentStepResult = {
   text: string;
   responseMessages: GatewayAgentMessage[];
-  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string }>;
+  toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string; rejection?: string }>;
   finishReason: string | null;
   contextDropped: number;
 };
@@ -305,7 +308,7 @@ export class AiSdkModelGateway implements ModelGateway {
         });
       }
       const openaiProviderOptions = {
-        ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
+        ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: request.parallelToolCalls ?? false } : {}),
         ...(useResponses ? { strictJsonSchema: false as const } : {}),
         ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
       };
@@ -855,9 +858,15 @@ function toAgentStepResult(
   contextDropped: number,
   jsonOutput: boolean,
 ): AgentStepResult {
-  const invalidToolRequest = classifyInvalidToolRequest(result.toolCalls);
+  const truncated = result.finishReason === 'length';
+  const invalidToolRequest = truncated ? null : classifyInvalidToolRequest(result.toolCalls);
   if (invalidToolRequest) throw invalidToolRequest;
-  const toolCalls = result.toolCalls.flatMap((call) => call ? normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts) : []);
+  const toolCalls = result.toolCalls.flatMap((call): AgentStepResult['toolCalls'] => {
+    if (!call) return [];
+    if (truncated) return [{ toolCallId: call.toolCallId, toolName: call.toolName, input: call.input,
+      rejection: 'This tool was not executed: the model output reached its length limit and the arguments may be incomplete. Reissue the call with complete arguments.' }];
+    return normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts);
+  });
   return {
     text: jsonOutput && toolCalls.length === 0 ? extractJsonText(result.text) : result.text,
     responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),

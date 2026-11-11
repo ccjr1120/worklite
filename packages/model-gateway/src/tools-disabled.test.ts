@@ -51,3 +51,31 @@ describe('generateAgentStep with toolsDisabled', () => {
     expect((bodies[0]?.tool_choice as { type?: string } | undefined)?.type).not.toBe('none');
   });
 });
+
+
+it.each(['responses', 'chat/completions'] as const)('enables parallel tool calls for Chat on %s', async (operation) => {
+  const bodies = captureRequests();
+  await createModelGateway().generateAgentStep({
+    candidates: [{ provider: { id: 'p', adapter: 'openai', operation, apiKey: 'key' }, model: 'model' }],
+    systemPrompt: 'You are Chat.', messages: [{ role: 'user', content: 'Inspect both projects.' }],
+    skillScripts: [], builtinTools: [tool], parallelToolCalls: true,
+  }).catch(() => undefined);
+  expect(bodies[0]?.parallel_tool_calls).toBe(true);
+});
+
+it('returns a rejection for length-truncated tool calls even when the arguments parse', async () => {
+  const chunk = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({ id: 'chatcmpl-test', object: 'chat.completion.chunk', created: 1, model: 'model', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(
+    chunk({ role: 'assistant', tool_calls: [{ index: 0, id: 'truncated_call', type: 'function', function: { name: 'run_host_command', arguments: '{"command":"echo unsafe"}' } }] }, null)
+      + chunk({}, 'length') + 'data: [DONE]\n\n',
+    { status: 200, headers: { 'content-type': 'text/event-stream' } },
+  )));
+  const result = await createModelGateway().generateAgentStep({
+    candidates: [{ provider: { id: 'p', adapter: 'openai', operation: 'chat/completions', apiKey: 'key' }, model: 'model' }],
+    systemPrompt: 'You are Chat.', messages: [{ role: 'user', content: 'Run a command.' }], skillScripts: [], builtinTools: [tool],
+  });
+  expect(result.finishReason).toBe('length');
+  expect(result.toolCalls).toHaveLength(1);
+  expect(result.toolCalls[0]).toMatchObject({ toolCallId: 'truncated_call', rejection: expect.stringContaining('not executed') });
+  expect(JSON.stringify(result.responseMessages)).toContain('truncated_call');
+});

@@ -21,6 +21,8 @@ const SLASH_COMMANDS: Array<{ value: SlashCommand; icon: typeof Download; descri
 ];
 
 type ComposerProps = {
+  messageMode?: 'steering' | 'follow_up';
+  onMessageModeChange?: (mode: 'steering' | 'follow_up') => void;
   draft: string;
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
@@ -57,6 +59,7 @@ type ComposerProps = {
 // and scroll-into-view have one implementation. cmdk does not own an input here:
 // filtering follows the composer text and keyboard focus never leaves the textarea.
 function Composer({
+  messageMode, onMessageModeChange,
   draft, onDraftChange, onSubmit, onKeyDown, onCompositionStart, onCompositionEnd, onFocus,
   selectedAgent, onRemoveAgent,
   attachments, attachmentsUploading, attachmentError, onPasteImages, onRemoveAttachment,
@@ -142,6 +145,15 @@ function Composer({
               aria-expanded={menuOpen}
               rows={1}
             />
+            {running && onMessageModeChange ? (
+              <>
+                <select aria-label={t('composer.messageMode')} value={messageMode} onChange={(event) => onMessageModeChange(event.target.value as 'steering' | 'follow_up')} className="rounded-md border border-border bg-background px-2 py-1 text-xs" disabled={busy}>
+                  <option value="steering">{t('composer.steering')}</option>
+                  <option value="follow_up">{t('composer.followUp')}</option>
+                </select>
+                <Button type="submit" variant="secondary" size="compact" disabled={busy || cancelling || attachmentsUploading > 0 || (!draft.trim() && !selectedAgent && !attachments.length)}>{t('composer.send')}</Button>
+              </>
+            ) : null}
             {canCancel && !running ? (
               <Button type="button" variant="secondary" size="compact" className="ml-auto rounded-full" disabled={cancelling} aria-busy={cancelling} onClick={onStop}>
                 {cancelling ? <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}

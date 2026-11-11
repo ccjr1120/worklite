@@ -489,7 +489,15 @@ export type ChatExecutionAuthorization = {
   status: 'pending' | 'approved' | 'declined'; approvedAt: string | null; createdAt: string;
 };
 
+export type QueuedAgentMessage = {
+  id: string;
+  message: string;
+  mode: 'steering' | 'follow_up';
+  createdAt: string;
+};
+
 export type AgentExecutionView = {
+  queuedMessages?: QueuedAgentMessage[];
   executionAuthorization: ChatExecutionAuthorization | null;
   id: string;
   agentId: string;
@@ -531,6 +539,7 @@ export type AgentRunDetailView = {
 };
 
 export type AgentExecutionEventData =
+  | { kind: 'native_activity'; phase: 'model_start' | 'model_end' | 'tool_start' | 'tool_progress' | 'tool_end' | 'run_end'; toolCallId?: string; text?: string; status?: string }
   | { kind: 'snapshot'; execution: AgentExecutionView }
   | { kind: 'message_delta'; messageId: string; delta: string; progressReport?: ChatProgressReport }
   | { kind: 'status'; status: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
@@ -550,6 +559,8 @@ export type CreateAgentExecutionRequest = {
 
 export type ContinueAgentExecutionRequest = {
   message: string;
+  mode?: 'steering' | 'follow_up';
+  messageId?: string;
 };
 
 export type AnswerAgentQuestionRequest = {

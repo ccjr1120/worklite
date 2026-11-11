@@ -15,6 +15,7 @@ const DDL = [
   'CREATE TABLE workspaces (id text PRIMARY KEY NOT NULL)',
   'CREATE TABLE agents (id text PRIMARY KEY NOT NULL)',
   `CREATE TABLE agent_executions (
+      queued_messages text NOT NULL DEFAULT '[]',
     id text PRIMARY KEY NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     agent_id text NOT NULL REFERENCES agents(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'completed', phase text NOT NULL DEFAULT 'model', display_messages text NOT NULL DEFAULT '[]', updated_at integer DEFAULT (unixepoch() * 1000) NOT NULL
   )`,

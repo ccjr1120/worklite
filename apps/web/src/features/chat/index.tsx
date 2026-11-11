@@ -142,6 +142,7 @@ function ChatWorkspace() {
   const [attachmentError, setAttachmentError] = useState('');
   const [queued, setQueued] = useState<QueuedMessage[]>(() => conversationDrafts.get(selectedConversationId ?? 'new')?.queued ?? []);
   const [queuePaused, setQueuePaused] = useState(() => conversationDrafts.get(selectedConversationId ?? 'new')?.paused ?? false);
+  const [messageMode, setMessageMode] = useState<'steering' | 'follow_up'>('steering');
   const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
   // An answer the server has not accepted yet. It is shown at once so the reader sees what they
   // sent; the accepted exchange replaces it, and a rejection returns the text to the composer.
@@ -523,12 +524,13 @@ function ChatWorkspace() {
     void api.deleteChatAttachment(id).catch(() => undefined);
   }
 
-  function enqueue(text: string) {
-    setScrollToBottomKey((value) => value + 1);
-    setQueued((current) => [...current, { id: `web_${crypto.randomUUID()}`, text }]);
-    setDraft('');
-    setSlashDismissed(false);
-    setMentionDismissed(false);
+  async function removeServerQueuedMessage(id: string) {
+    if (!activeId) return;
+    const generation = mainRequestGenerationRef.current;
+    try {
+      const next = await api.removeQueuedAgentMessage(CHAT_AGENT_ID, activeId, id);
+      if (generation === mainRequestGenerationRef.current) setExecution(next);
+    } catch (cause) { if (generation === mainRequestGenerationRef.current) setError(apiErrorMessage(cause, t('assistant:execution.requestFailed'))); }
   }
 
   async function submit(event: FormEvent) {
@@ -570,9 +572,22 @@ function ChatWorkspace() {
     }
     if (!isConfigured) return;
     if (running) {
-      enqueue(outgoingMessage);
-      setSelectedAgent(null);
-      clearAttachments();
+      if (!activeId) return;
+      setBusy(true);
+      setError('');
+      try {
+        const signature = JSON.stringify({ activeId, outgoingMessage, messageMode });
+        if (pendingDispatch.current?.signature !== signature) pendingDispatch.current = { signature, id: `web_${crypto.randomUUID()}` };
+        const next = await api.queueAgentMessage(CHAT_AGENT_ID, activeId, outgoingMessage, messageMode, pendingDispatch.current.id);
+        if (generation !== mainRequestGenerationRef.current) return;
+        pendingDispatch.current = null;
+        setExecution(next);
+        setDraft('');
+        setSelectedAgent(null);
+        clearAttachments();
+      } catch (cause) {
+        if (generation === mainRequestGenerationRef.current) setError(apiErrorMessage(cause, t('assistant:execution.requestFailed')));
+      } finally { if (generation === mainRequestGenerationRef.current) setBusy(false); }
       return;
     }
     const fromNewConversation = selectedConversationId === null;
@@ -924,6 +939,7 @@ function ChatWorkspace() {
                   })}
                   {visiblePendingAnswer ? <UserMessage key={visiblePendingAnswer.id} message={{ id: visiblePendingAnswer.id, role: 'user', content: visiblePendingAnswer.text, createdAt: visiblePendingAnswer.createdAt }} pending /> : null}
                   {(running && !showWorkingInLastTurn || busy && !cancelling && !running && (!waitingForInput || visiblePendingAnswer)) ? <AssistantTurn segments={[]} working markdownEnabled /> : null}
+                  <QueueRows queued={(visibleExecution?.queuedMessages ?? []).map((entry) => ({ id: entry.id, text: `${t(`assistant:composer.${entry.mode === 'steering' ? 'steering' : 'followUp'}`)}: ${entry.message}` }))} paused={visibleExecution?.status === 'failed' || visibleExecution?.status === 'cancelled' || waitingForInput} sendingId={null} onRemove={(id) => void removeServerQueuedMessage(id)} />
                   <QueueRows queued={queued} paused={queuePaused} sendingId={queueSendingId} onRemove={(id) => setQueued((current) => current.filter((item) => item.id !== id))} />
                   {error ? <p className="wl-enter mt-4 rounded-md border border-danger/25 bg-danger-subtle px-3 py-2 text-[13px] text-danger" role="alert">{error}</p> : null}
                 </ConversationContent>
@@ -939,7 +955,7 @@ function ChatWorkspace() {
                 selectedAgent={selectedAgent} onRemoveAgent={() => setSelectedAgent(null)} commandMatches={commandMatches} commandMenuOpen={commandMenuOpen} onRunCommand={runCommand}
                 attachments={attachments} attachmentsUploading={attachmentsUploading} attachmentError={attachmentError} onPasteImages={(files) => void uploadPastedImages(files)} onRemoveAttachment={removeAttachment}
                 mentionMatches={mentionMatches} mentionMenuOpen={mentionMenuOpen} onSelectMention={selectMention} activeValue={activeValue} onActiveValueChange={setActiveValue}
-                onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
+                messageMode={messageMode} onMessageModeChange={setMessageMode} onDismissMenus={() => { setSlashDismissed(true); setMentionDismissed(true); }} running={stopTarget} busy={busy || cancelling} canCancel={canCancel} cancelling={cancelling} submitDisabled={submitDisabled} waitingForInput={Boolean(waitingForInput)} onStop={() => void cancelExecution()} />
             ) : <div className="px-4 pb-4 md:px-8"><button type="button" className={cn('wl-press mx-auto flex min-h-12 w-full max-w-3xl items-center gap-2.5 rounded-xl border border-warning/30 bg-warning-subtle px-4 text-left text-[13px] font-medium text-foreground shadow-xs hover:border-warning/50', focusRingInset)} onClick={() => openSettings('configuration')}><ShieldAlert className="size-4 text-warning" />{t('assistant:composer.configure')}<ChevronRight className="ml-auto size-4" /></button></div>}
         </section>
       </div>

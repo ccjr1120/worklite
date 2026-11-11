@@ -21,6 +21,16 @@ export class AgentsController {
     return this.executions.steerRuntimeSession(request, 'personal', agentId, executionId, body);
   }
 
+  @Get(':agentId/executions/:executionId/history-archives/:archiveId')
+  historyArchive(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('archiveId') archiveId: string, @Query('offset') offset?: string, @Query('maxChars') maxChars?: string) {
+    return this.executions.historyArchive(request, 'personal', agentId, executionId, archiveId, Number(offset ?? 0), Number(maxChars ?? 12000));
+  }
+
+  @Delete(':agentId/executions/:executionId/queued-messages/:messageId')
+  removeQueuedMessage(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('messageId') messageId: string) {
+    return this.executions.removeQueuedMessage(request, 'personal', agentId, executionId, messageId);
+  }
+
   @Delete(':agentId/executions/:executionId/session')
   closeSession(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
     return this.executions.closeRuntimeSession(request, 'personal', agentId, executionId);
