@@ -123,13 +123,11 @@ export class AgentsService {
         const fields = ['providerId', 'model', 'modelParameters', ...(isChat ? ['runtime', 'skillIds', 'extensionPrompt', 'summarizePrompt', 'turnNotificationsEnabled', 'turnNotificationSound', 'expectedConfigurationRevision'] : ['mcpServerIds'])];
         if (isChat && 'mcpServerIds' in input) throw new BadRequestException('Chat does not accept user MCP server selections.');
       if (Object.keys(input).some((key) => !fields.includes(key))) throw new BadRequestException('Unsupported Chat configuration field.');
-      const requestedRuntime = await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
-      // Chat owns its working directory. Never accept a project directory from configuration.
-      const runtime = requestedRuntime.kind === 'native' ? requestedRuntime : { kind: requestedRuntime.kind, projectDirectory: '', approvalPolicy: 'auto' as const };
+      if (isChat && input.runtime !== undefined && (await validateAgentRuntime(input.runtime)).kind !== 'native') throw new BadRequestException('Chat only supports the native runtime.');
+      const runtime = isChat ? { kind: 'native' as const } : await validateAgentRuntime(input.runtime === undefined ? existing.runtime : input.runtime);
       const modelParameters = this.parameters(input.modelParameters === undefined ? existing.modelParameters : input.modelParameters);
       const nextProviderId = input.providerId === undefined ? existing.providerId : input.providerId;
       const provider = await this.validateProvider(team.id, nextProviderId);
-      if (runtime.kind !== 'native' && provider && !(runtime.kind === 'codex' ? ['openai/responses', 'codex/responses'].includes(provider.protocol) : provider.protocol === 'anthropic/messages')) throw new BadRequestException(`${runtime.kind} requires a ${runtime.kind === 'codex' ? 'openai/responses or codex/responses' : 'anthropic/messages'} Provider, or clear providerId to use the runtime default.`);
       const requestedModel = input.model === undefined ? existing.model.trim() : input.model.trim();
       if (provider && requestedModel && !provider.models.includes(requestedModel)) throw new BadRequestException('The selected model is not configured for this provider.');
       const model = provider ? requestedModel || provider.models[0] || '' : runtime.kind === 'native' ? '' : requestedModel;
@@ -378,7 +376,7 @@ export class AgentsService {
       id: row.id,
       workspaceSlug,
       kind: row.kind,
-      runtime: row.runtime,
+      runtime: row.id === CHAT_AGENT_ID ? { kind: 'native' } : row.runtime,
       collaboration: row.collaboration,
       name: row.name,
       responsibility: row.responsibility,

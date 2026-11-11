@@ -7,6 +7,7 @@ import { query, type CanUseTool, type McpServerConfig, type Options, type Permis
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { McpClientService } from '../mcp-servers/mcp-client.service';
+import { settleRuntimeInterruption } from './runtime-interruption';
 import { requireGatewayUrl, isGatewayPublicModel, localGatewayBaseUrl, type AgentRuntimeAdapter, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type ClaudeLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'claude' }>;
@@ -83,18 +84,23 @@ export class ClaudeCodeService implements AgentRuntimeAdapter {
       } satisfies Options,
     });
     session.attach(sdkQuery);
-    const cancel = () => session.cancel(request.signal.reason ?? new Error('The Claude Code task was cancelled.'));
+    let cancellation: Promise<void> | undefined;
+    const cancel = () => { cancellation ??= session.cancel(request.signal.reason ?? new Error('The Claude Code task was cancelled.')); };
     request.signal.addEventListener('abort', cancel, { once: true });
-    if (request.signal.aborted) { cancel(); request.signal.throwIfAborted(); }
     try {
+      if (request.signal.aborted) { cancel(); request.signal.throwIfAborted(); }
       await session.activity('claude.started');
       session.start();
       const output = await session.result();
       request.signal.throwIfAborted();
       await session.activity('claude.completed');
       return output;
+    } catch (error) {
+      request.signal.throwIfAborted();
+      throw error;
     } finally {
       request.signal.removeEventListener('abort', cancel);
+      await cancellation;
       await session.close();
     }
   }
@@ -300,13 +306,16 @@ class ClaudeCodeSession {
     }
   }
 
-  cancel(reason: unknown): void {
+  async cancel(reason: unknown): Promise<void> {
     if (this.failed) return;
-    void this.sdkQuery?.interrupt().catch(() => undefined);
     for (const pending of [...this.pendingQuestions.values()]) {
       pending.resolve({ behavior: 'deny', message: 'The task was cancelled.' });
     }
     this.pendingQuestions.clear();
+    await settleRuntimeInterruption(async () => {
+      await this.sdkQuery?.interrupt();
+      await this.finished.catch(() => undefined);
+    });
     this.fail(reason);
   }
 

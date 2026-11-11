@@ -228,7 +228,7 @@ describe('background Agent dispatch from Chat', () => {
     expect((await service.get({} as never, 'personal', CHAT_AGENT_ID, 'chat')).conversationStatus).toBe('completed');
   });
 
-  it.each(['failed', 'completed', 'cancelled'] as const)('wakes the same %s instance and retains its history and saved tools', async (status) => {
+  it.each(['failed', 'completed', 'cancelled', 'running'] as const)('wakes the same %s instance and retains its history and saved tools', async (status) => {
     const { internal } = await savedInstance(status);
     await internal.executeToolCall({}, 'personal', 'workspace_personal', CHAT_AGENT_ID, 'chat', 'dispatch');
     expect(db.select(agentExecutionColumns).from(agentExecutions).all()).toHaveLength(2);
@@ -307,8 +307,8 @@ describe('background Agent dispatch from Chat', () => {
     expect(JSON.parse(db.select().from(agentToolCalls).where(eq(agentToolCalls.id, 'dispatch')).get()!.output)).toMatchObject({ continued: true, executionId: 'saved' });
   });
 
-  it.each(['running', 'wrong-agent', 'wrong-workspace', 'missing'] as const)('rejects a %s instance without starting a replacement', async (scenario) => {
-    const { internal } = await savedInstance(scenario === 'running' ? 'running' : 'failed');
+  it.each(['wrong-agent', 'wrong-workspace', 'missing'] as const)('rejects a %s instance without starting a replacement', async (scenario) => {
+    const { internal } = await savedInstance('failed');
     if (scenario === 'wrong-agent') db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue', mode: 'continue', continuationReason: 'Same task', executionId: 'chat' } }).where(eq(agentToolCalls.id, 'dispatch')).run();
     if (scenario === 'wrong-workspace') { db.insert(workspaces).values({ id: 'workspace_foreign', slug: 'foreign', name: 'Foreign' }).run(); db.update(agentExecutions).set({ workspaceId: 'workspace_foreign' }).where(eq(agentExecutions.id, 'saved')).run(); }
     if (scenario === 'missing') db.update(agentToolCalls).set({ input: { agentId: 'lead', task: 'Continue', mode: 'continue', continuationReason: 'Same task', executionId: 'absent' } }).where(eq(agentToolCalls.id, 'dispatch')).run();

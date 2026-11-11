@@ -18,6 +18,7 @@ export async function openChatRuntimeMcp(tools: ChatRuntimeTools, ask: AskChatRu
   const token = randomBytes(32).toString('hex');
   const connections = new Set<Server>();
   let queue = Promise.resolve();
+  let closing = false;
   const http = createServer(async (request, response) => {
     if (request.url !== '/mcp' || request.headers.authorization !== `Bearer ${token}`) {
       response.writeHead(401).end();
@@ -29,6 +30,7 @@ export async function openChatRuntimeMcp(tools: ChatRuntimeTools, ask: AskChatRu
     server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
       // Platform operations share mutable configuration. Preserve request order even when an engine batches calls.
       const result = queue.then(async () => {
+        if (closing) throw new Error('This runtime turn has ended.');
         if (!tools.definitions.some((tool) => tool.name === params.name)) throw new Error('Unknown Chat tool.');
         return tools.execute(params.name, params.arguments ?? {}, ask);
       });
@@ -65,6 +67,10 @@ export async function openChatRuntimeMcp(tools: ChatRuntimeTools, ask: AskChatRu
   return {
     runtime: { id: 'chat', name: 'WorkLite Chat', endpoint: `http://127.0.0.1:${address.port}/mcp`, authToken: token, allowedTools: tools.definitions.map((tool) => tool.name) } satisfies ProjectExecutorMcpServer,
     close: async () => {
+      closing = true;
+      // Dispose only after the active operation stops; queued old-turn requests must never
+      // run against the next turn's mutable state. Callers abort tools before closing.
+      await queue;
       await Promise.all([...connections].map((server) => server.close().catch(() => undefined)));
       http.closeAllConnections();
       await new Promise<void>((resolve) => http.close(() => resolve()));

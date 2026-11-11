@@ -1,4 +1,5 @@
 import { migrateCodexProviders } from './migrate-codex-providers';
+import { migrateNativeChat } from './migrate-native-chat';
 import { migrateCodersToAgents } from './migrate-coders-to-agents';
 import { platformFailure, platformContractHash, PLATFORM_FAILURE_CONTRACT } from './platform-failure';
 import { migrateWorkflowsToAgents } from './migrate-workflows-to-agents';
@@ -352,9 +353,9 @@ const WORKLITE_PLATFORM_TOOL_SPECS: Array<[path: string, description: string, in
     alias: toolString('The saved alias to remove, matched case-insensitively.'),
   }, ['alias'])],
   ['scripts/inspect-chat.mjs', 'Read the protected Chat configuration: revision, runtime, Chat extension prompt, conversation-completion host notification settings, Provider/model and Skill ids. Chat Skill ids are captured by value per turn; user MCP cannot be called directly by Chat. Its revision is the expectedConfigurationRevision for update_chat.', toolInput()],
-  ['scripts/update-chat.mjs', 'Save a new Chat configuration revision. Runtime selection applies to new conversations; Skills and prompts apply from the next turn. Omitted fields keep their current value. turnNotificationsEnabled and turnNotificationSound control the macOS host notification posted when a conversation turn settles, and apply immediately rather than from the next turn. skillIds replaces the full Chat Skill id list: every id must exist in this workspace\'s Skill registry and be valid, or the call fails with no partial write; omit it to keep the current list. This tool still does not edit Chat-facing user MCP selection; Chat cannot call user MCP directly.', toolInput({
+  ['scripts/update-chat.mjs', 'Save a new Chat configuration revision. Chat uses the native model loop. Skills and prompts apply from the next turn. Omitted fields keep their current value. turnNotificationsEnabled and turnNotificationSound control the macOS host notification posted when a conversation turn settles, and apply immediately rather than from the next turn. skillIds replaces the full Chat Skill id list: every id must exist in this workspace\'s Skill registry and be valid, or the call fails with no partial write; omit it to keep the current list. This tool still does not edit Chat-facing user MCP selection; Chat cannot call user MCP directly.', toolInput({
     expectedConfigurationRevision: { type: 'integer', minimum: 1, description: 'The revision returned by inspect_chat.' },
-    runtime: { type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: { type: 'string', enum: ['native', 'codex', 'claude'] } }, description: 'Runtime for new Chat conversations. Working directory is managed by WorkLite.' },
+    runtime: { type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: { type: 'string', enum: ['native'] } }, description: 'Chat only supports the native runtime.' },
     extensionPrompt: toolString('User extension appended to the product prompt.'),
     turnNotificationsEnabled: { type: 'boolean', description: 'Post a macOS system notification on the WorkLite host when a Chat conversation turn completes, fails or waits for user input. Enabled by default; it has no effect on a non-macOS host.' },
     turnNotificationSound: { type: 'string', description: 'System sound name for that notification (Glass, Ping, Hero, Submarine, Blow, Bottle, Frog, Funk, Morse, Pop, Purr, Sosumi, Tink); an empty string notifies silently.' },
@@ -1988,6 +1989,7 @@ export async function initializeDatabase(db: Database): Promise<void> {
   if (!migrationsFolder) throw new Error('Drizzle migrations folder could not be located.');
   migrate(db, { migrationsFolder });
   installStoredArrayStorage(db.$client);
+  migrateNativeChat(db.$client);
   // Retention and vacuum run on a separate connection in the maintenance worker.
 
   const workflowRows = db.$client.prepare('SELECT id, workspace_id FROM workflows').all() as Array<{ id: string; workspace_id: string }>;
@@ -2225,4 +2227,5 @@ export async function initializeDatabase(db: Database): Promise<void> {
       AND NOT EXISTS (SELECT 1 FROM chat_bot_configurations c WHERE c.workspace_id = a.workspace_id);
   `);
   migrateCodexProviders(db.$client);
+  migrateNativeChat(db.$client);
 }

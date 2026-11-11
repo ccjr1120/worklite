@@ -29,7 +29,7 @@ class FakeQuery implements AsyncIterable<SDKMessage> {
     this.interactive = options.interactive ?? false;
   }
   push(message: SDKMessage): void { this.pending.push(message); this.wake?.(); this.wake = undefined; }
-  async interrupt() { this.interrupted = true; return undefined; }
+  async interrupt() { this.interrupted = true; this.push(resultSuccess('')); return undefined; }
   close() { this.closed = true; this.wake?.(); this.wake = undefined; }
   setPermissionMode = vi.fn();
   setMcpPermissionModeOverride = vi.fn();
@@ -301,6 +301,31 @@ describe('ClaudeCodeService', () => {
     controller.abort(new Error('cancelled by user'));
     await expect(executed).rejects.toThrow('cancelled by user');
     expect(fake.interrupted).toBe(true);
+    expect(fake.closed).toBe(true);
+  });
+
+  it('keeps the SDK transport alive until interrupt acknowledgement and the final native result', async () => {
+    let fake!: FakeQuery;
+    let acknowledge!: () => void;
+    const receipt = new Promise<void>((resolve) => { acknowledge = resolve; });
+    fakeQuery.impl = () => {
+      fake = new FakeQuery([systemInit(), assistantText('Saved output')], { interactive: true });
+      vi.spyOn(fake, 'interrupt').mockImplementation(async () => { fake.interrupted = true; await receipt; return undefined; });
+      return fake;
+    };
+    const controller = new AbortController();
+    const { request, prepared } = buildRequest({ signal: controller.signal });
+    const running = service().execute(request, prepared);
+    const stopped = expect(running).rejects.toThrow('New direction');
+    await queryStarted();
+    controller.abort(new Error('New direction'));
+    await vi.waitFor(() => expect(fake.interrupted).toBe(true));
+    expect(fake.closed).toBe(false);
+    acknowledge();
+    await Promise.resolve();
+    expect(fake.closed).toBe(false);
+    fake.push(resultSuccess('Saved output'));
+    await stopped;
     expect(fake.closed).toBe(true);
   });
 

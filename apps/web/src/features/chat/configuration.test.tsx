@@ -15,27 +15,20 @@ const props = () => ({
   turnNotificationsEnabled: false, turnNotificationSound: '', onTurnNotificationsChange: vi.fn(), saving: false, loading: false, error: '', loadFailed: false, providersLoading: false, providersLoadFailed: false, onReload: vi.fn(),
 });
 
-describe('Chat runtime configuration', () => {
-  it('offers native, Codex App Server and Claude Agent SDK runtime choices', () => {
-    const onRuntimeChange = vi.fn();
-    render(<Configuration {...props()} runtime="native" onRuntimeChange={onRuntimeChange} />);
-    const runtime = screen.getByRole('combobox', { name: /^运行时/ });
-    fireEvent.keyDown(runtime, { key: 'ArrowDown' });
-    fireEvent.click(screen.getByRole('option', { name: 'Codex App Server' }));
-    expect(onRuntimeChange).toHaveBeenCalledWith('codex');
+describe('native-only Chat configuration', () => {
+  it('requires a Provider model and has no engine runtime selector', () => {
+    render(<Configuration {...props()} />);
+    expect(screen.queryByRole('combobox', { name: /^运行时/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '提供商和模型' })).not.toHaveTextContent('运行时默认模型');
+    expect(screen.queryByText('Codex App Server')).not.toBeInTheDocument();
+    expect(screen.queryByText('Claude Agent SDK')).not.toBeInTheDocument();
   });
-
-  it('allows an engine default without requiring a Provider', () => {
-    render(<Configuration {...props()} runtime="claude" />);
-    expect(screen.getByRole('combobox', { name: '提供商和模型' })).toHaveTextContent('运行时默认模型');
-  });
-  it('offers Codex reverse-proxy models to the Codex engine alongside ordinary Responses models', () => {
+  it('offers configured models including codex/responses Providers to native Chat', () => {
     const selected = vi.fn();
     const provider = { id: 'proxy', name: 'proxy', protocol: 'codex/responses' as const, baseURL: 'https://example.com', models: ['gpt-test'], apiKey: '', maskedKey: '', headerNames: [], status: 'connected' as const };
-    render(<Configuration {...props()} providers={[provider]} runtime="codex" onSelectionChange={selected} />);
+    render(<Configuration {...props()} providers={[provider]} onSelectionChange={selected} />);
     fireEvent.keyDown(screen.getByRole('combobox', { name: '提供商和模型' }), { key: 'ArrowDown' });
     fireEvent.click(screen.getByRole('option', { name: 'proxy / gpt-test' }));
     expect(selected).toHaveBeenCalledWith('proxy::gpt-test');
   });
-
 });

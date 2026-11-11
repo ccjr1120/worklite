@@ -1,7 +1,6 @@
-import { AgentRuntimeService } from './agent-runtime.service';
-import { agentRuntimeSessions, appendExecutionMessages, executionUpdates, agentExecutionColumns, displayMessagesColumn, agentExecutionEvents, agentExecutions, agentToolCalls, agents, chatConfigurations, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, chatChannels, wechatEvents, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
+import { appendExecutionMessages, executionUpdates, agentExecutionColumns, displayMessagesColumn, agentExecutionEvents, agentExecutions, agentToolCalls, agents, chatConfigurations, chatSubmissions, externalChats, feishuDeliveries, feishuEvents, chatChannels, wechatEvents, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage } from '@worklite/db';
 
-import { BadRequestException, ConflictException, Inject, Injectable, Optional, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
@@ -27,7 +26,6 @@ export class ChatConversationsService {
     private readonly workspaces: WorkspaceService,
     private readonly executions: AgentExecutionsService,
     private readonly resources: WorkspaceResourcesService,
-    @Optional() private readonly runtime?: AgentRuntimeService,
   ) {}
 
   channels(): ChatChannelView[] {
@@ -234,19 +232,12 @@ export class ChatConversationsService {
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, CHAT_AGENT_ID), eq(agents.workspaceId, workspace.id))).limit(1);
     const [configuration] = await this.db.select({ summarizePrompt: chatConfigurations.summarizePrompt }).from(chatConfigurations).where(eq(chatConfigurations.workspaceId, workspace.id)).orderBy(desc(chatConfigurations.revision)).limit(1);
     const systemPrompt = configuration?.summarizePrompt.trim() || DEFAULT_SUMMARIZE_SYSTEM_PROMPT;
-    const kind = execution.capabilitySnapshot?.agent.runtime?.kind ?? agent?.runtime.kind ?? 'native';
-    let text: string;
-    if (kind !== 'native') {
-      if (!this.runtime) throw new ConflictException('Chat runtime is unavailable.');
-      text = await this.runtime.summarize(workspace.id, execution.id, systemPrompt, transcript);
-    } else {
-      if (!agent?.providerId || !agent.model) throw new ConflictException('Configure a model provider and model before running this Agent.');
-      const runtime = await this.resources.providerRuntime(request, 'personal', agent.providerId, agent.model);
-      ({ text } = await createModelGateway().streamText({
+    if (!agent?.providerId || !agent.model) throw new ConflictException('Configure a model provider and model before running this Agent.');
+    const runtime = await this.resources.providerRuntime(request, 'personal', agent.providerId, agent.model);
+    const { text } = await createModelGateway().streamText({
         candidates: [{ provider: runtime.provider, model: runtime.model, modelParameters: agent.modelParameters ?? undefined }], systemPrompt,
         messages: [{ role: 'user', content: transcript }], correlation: { surface: 'chat', conversationId: execution.id },
-      }).result);
-    }
+    }).result;
     const summary = text.trim();
     if (!summary) throw new ConflictException('The summary was empty.');
     // The slash command is intercepted by the composer and never becomes a visible message,
@@ -258,8 +249,6 @@ export class ChatConversationsService {
     this.db.transaction((tx) => {
       const updated = tx.update(agentExecutions).set(executionUpdates(execution.id, { displayMessages: appendExecutionMessages(execution.id, 'display', [commandEcho, divider]), modelMessages, updatedAt: new Date() })).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.updatedAt, execution.updatedAt), inArray(agentExecutions.status, ['completed', 'failed', 'cancelled']))).run();
       if (updated.changes === 0) throw new ConflictException('This conversation changed while it was being summarized. Try again.');
-      // The next engine turn starts with the summary as its complete context.
-      if (kind !== 'native') tx.update(agentRuntimeSessions).set({ externalSessionId: null }).where(eq(agentRuntimeSessions.id, execution.id)).run();
     });
     await this.executions.publishSnapshotForExecution(workspace.id, execution.id);
     return this.executions.get(request, 'personal', CHAT_AGENT_ID, execution.id);

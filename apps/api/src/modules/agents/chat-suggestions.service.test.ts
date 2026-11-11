@@ -92,14 +92,29 @@ describe('Chat Jev suggestions', () => {
     expect((await result).source).toBe('rules');
     expect((test.executeSystemOne.mock.calls[0]![0] as { signal: AbortSignal }).signal.aborted).toBe(true);
   });
-  it('never calls Jev for a stale version, an ended task, or a Chat pending question', async () => {
+  it('never calls Jev for a stale version or a Chat pending question', async () => {
     const test = fixture();
     expect((await test.service.suggest({} as never, 'chat', 'v1-old-version')).suggestion).toBeNull();
-    test.setCurrent({ ...test.current, toolCalls: [] });
-    expect((await test.suggest()).suggestion).toBeNull();
     test.setCurrent({ ...test.current, pendingQuestion: { id: 'q', question: '确认？', options: [], createdAt: '' } });
     expect((await test.suggest()).suggestion).toBeNull();
     expect(test.executeSystemOne).not.toHaveBeenCalled();
+  });
+  it('ranks completed tasks using their saved result, with accurate active and completed counts', async () => {
+    const test = fixture();
+    test.setCurrent({ ...test.current, status: 'completed', toolCalls: test.current.toolCalls.map((call) => ({ ...call, agentInvocation: { ...call.agentInvocation!, status: 'completed' } })) });
+    test.db.$client.prepare('UPDATE agent_executions SET status = ?, display_messages = ?, pending_question = null WHERE id = ?').run('completed', JSON.stringify([{ id: 'm', role: 'assistant', content: '交互测试通过，等待检查结果', createdAt: '' }]), 'background');
+    test.executeSystemOne.mockResolvedValue({ answers: { suggestion: { type: 'choice', choice: 'run:result' }, useful: { type: 'noul', noul: 0.9 } } });
+    expect((await test.suggest()).suggestion?.id).toBe('run:result');
+    const input = test.executeSystemOne.mock.calls[0]![0] as { state: { activeTaskCount: number; completedTaskCount: number; tasks: Array<{ status: string; progress: string[] }> } };
+    expect(input.state.activeTaskCount).toBe(0);
+    expect(input.state.completedTaskCount).toBe(1);
+    expect(input.state.tasks[0]).toMatchObject({ status: 'completed', progress: ['交互测试通过，等待检查结果'] });
+  });
+  it('offers a conversation follow-up even when there are no delegated tasks', async () => {
+    const test = fixture();
+    test.setCurrent({ ...test.current, status: 'completed', toolCalls: [], messages: [{ id: 'a', role: 'assistant', content: '方案已整理。', createdAt: '' }] });
+    test.executeSystemOne.mockRejectedValue(new Error('offline'));
+    expect((await test.suggest()).suggestion?.id).toBe('conversation:next');
   });
   it('revalidates the task after the model finishes and does not return a stale suggestion', async () => {
     const test = fixture();

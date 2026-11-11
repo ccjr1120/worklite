@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CodexAppServerService } from './codex-app-server.service';
 
 describe('CodexAppServerService.captureLaunch', () => {
@@ -10,12 +10,14 @@ describe('CodexAppServerService.captureLaunch', () => {
 });
 
 // A JSON-RPC peer exercises the real adapter without launching a model-backed process.
-function rpcPeer(control?: { method: string; params: Record<string, unknown> }, notifications: unknown[] = [], turnStatus = 'completed') {
+function rpcPeer(control?: { method: string; params: Record<string, unknown> }, notifications: unknown[] = [], turnStatus = 'completed', options: { holdTurn?: boolean; holdInterrupt?: boolean } = {}) {
   const sent: Array<{ id?: string | number; method?: string; params?: Record<string, unknown>; result?: unknown }> = [];
   let receive!: (event: { type: string; data: string }) => void;
   let complete!: (value: { status: string }) => void;
   const completion = new Promise<{ status: string }>((resolve) => { complete = resolve; });
   const emit = (message: unknown) => receive({ type: 'stdout', data: `${JSON.stringify(message)}\n` });
+  let interruptId: number | undefined;
+  let cancelled = false;
   const finish = () => {
     emit({ method: 'item/completed', params: { threadId: 'thread-1', item: { id: 'answer', type: 'agentMessage', text: 'Done' } } });
     emit({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: turnStatus } } });
@@ -35,18 +37,21 @@ function rpcPeer(control?: { method: string; params: Record<string, unknown> }, 
               emit({ id: message.id, result: { turn: { id: 'turn-1' } } });
               for (const notification of notifications) emit(notification);
               if (control) emit({ id: 'control-1', method: control.method, params: { threadId: 'thread-1', turnId: 'turn-1', ...control.params } });
-              else finish();
+              else if (!options.holdTurn) finish();
             }
             if (message.id === 'control-1' && message.result) finish();
-            if (message.method === 'turn/interrupt') emit({ id: message.id, result: {} });
+            if (message.method === 'turn/interrupt') {
+              interruptId = message.id;
+              if (!options.holdInterrupt) emit({ id: message.id, result: {} });
+            }
           });
         },
         close: async () => { complete({ status: 'succeeded' }); },
       };
     },
-    cancel: async () => { complete({ status: 'cancelled' }); },
+    cancel: async () => { cancelled = true; complete({ status: 'cancelled' }); },
   };
-  return { sent, finish, crash: () => complete({ status: 'failed' }), service: new CodexAppServerService(commands as never) };
+  return { sent, finish, acknowledgeInterrupt: () => emit({ id: interruptId, result: {} }), wasCancelled: () => cancelled, crash: () => complete({ status: 'failed' }), service: new CodexAppServerService(commands as never) };
 }
 
 function runtimeRequest(): import('./project-executor.types').ProjectExecutorRequest {
@@ -96,6 +101,27 @@ it('rejects shell syntax in a historical launch before opening the app server', 
 });
 
 describe('Codex app-server durable sessions', () => {
+  it('waits for native interrupt acknowledgement and turn completion before stopping the transport', async () => {
+    const peer = rpcPeer(undefined, [], 'interrupted', { holdTurn: true, holdInterrupt: true });
+    const controller = new AbortController();
+    let ready = false;
+    const running = peer.service.execute({ ...runtimeRequest(), signal: controller.signal,
+      runtimeSession: { onSession: async () => {} }, onEvent: (event) => { if (event.phase === 'codex.turn_started') ready = true; },
+    }, prepared);
+    const stopped = expect(running).rejects.toThrow('New direction');
+    await vi.waitFor(() => expect(ready).toBe(true));
+    controller.abort(new Error('New direction'));
+    await vi.waitFor(() => expect(peer.sent.some((message) => message.method === 'turn/interrupt')).toBe(true));
+    expect(peer.wasCancelled()).toBe(false);
+    peer.acknowledgeInterrupt();
+    await Promise.resolve();
+    expect(peer.wasCancelled()).toBe(false);
+    peer.finish();
+    await stopped;
+    expect(peer.wasCancelled()).toBe(true);
+    expect(peer.sent.find((message) => message.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
+  });
+
   it('creates a persisted thread and resumes it for the next turn', async () => {
     const first = rpcPeer();
     let saved = '';

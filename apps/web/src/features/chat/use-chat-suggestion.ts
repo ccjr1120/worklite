@@ -3,7 +3,10 @@ import { chatSuggestionContext, type AgentExecutionView, type ChatSuggestion, ty
 import { api } from '@/api/client';
 
 const STORAGE_KEY = 'worklite.chat.dismissed-suggestions';
-const suggestionKey = (conversationId: string, suggestion: ChatSuggestion) => JSON.stringify([conversationId, suggestion.id, suggestion.text, suggestion.runIds]);
+const suggestionKey = (conversationId: string, suggestion: ChatSuggestion, context: ReturnType<typeof chatSuggestionContext>) => JSON.stringify([
+  conversationId, suggestion.id, suggestion.text, suggestion.runIds,
+  context.tasks.filter((task) => suggestion.runIds.includes(task.runId)).map((task) => [task.runId, task.status]),
+]);
 
 function readDismissed(): string[] {
   try {
@@ -13,7 +16,7 @@ function readDismissed(): string[] {
 }
 
 export function useChatSuggestion(conversationId: string | null, execution: AgentExecutionView | null, enabled: boolean) {
-  const context = useMemo(() => execution ? chatSuggestionContext(execution) : null, [execution]);
+  const context = useMemo(() => chatSuggestionContext(execution), [execution]);
   // Equivalent SSE snapshots and the five-second poll must not restart an in-flight decision.
   const serializedContext = JSON.stringify(context);
   const executionId = execution?.id ?? null;
@@ -21,7 +24,7 @@ export function useChatSuggestion(conversationId: string | null, execution: Agen
   const [decision, setDecision] = useState<{ key: string; response: ChatSuggestionResponse } | null>(null);
   const [dismissed, setDismissed] = useState(readDismissed);
   const key = JSON.stringify([conversationId, executionId, context?.contextVersion]);
-  const eligible = enabled && Boolean(conversationId && context?.candidates.length);
+  const eligible = enabled && Boolean(context.candidates.length) && Boolean(executionId || !conversationId);
 
   useEffect(() => {
     if (!eligible || !executionId) return;
@@ -53,11 +56,12 @@ export function useChatSuggestion(conversationId: string | null, execution: Agen
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
   }, [eligible, executionId, key, serializedContext]);
 
-  const proposed = eligible && decision?.key === key ? decision.response.suggestion : null;
-  const suggestion = proposed && !dismissed.includes(suggestionKey(conversationId!, proposed)) ? proposed : null;
+  const proposed = !eligible ? null : !executionId ? context.candidates[0] : decision?.key === key ? decision.response.suggestion : null;
+  const scope = useMemo(() => conversationId ?? `new:${crypto.randomUUID()}`, [conversationId]);
+  const suggestion = proposed && !dismissed.includes(suggestionKey(scope, proposed, context)) ? proposed : null;
   function dismiss() {
-    if (!suggestion || !conversationId) return;
-    const ignored = suggestionKey(conversationId, suggestion);
+    if (!suggestion) return;
+    const ignored = suggestionKey(scope, suggestion, context);
     setDismissed((previous) => {
       const next = [...previous.filter((item) => item !== ignored), ignored].slice(-256);
       try { window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* In-memory dismissal still applies. */ }

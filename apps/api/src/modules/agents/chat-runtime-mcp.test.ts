@@ -18,6 +18,24 @@ async function setup() {
 }
 
 describe('turn-scoped Chat MCP bridge', () => {
+  it('waits for active work before closing and rejects queued work from the old turn', async () => {
+    const { client, server, execute } = await setup();
+    let release!: () => void;
+    const work = new Promise<void>((resolve) => { release = resolve; });
+    execute.mockImplementationOnce(async () => { await work; return 'Stopped'; });
+    const active = client.callTool({ name: 'inspect_workspace', arguments: { id: 'active' } }).catch(() => undefined);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const queued = client.callTool({ name: 'inspect_workspace', arguments: { id: 'queued' } }).catch(() => undefined);
+    let closed = false;
+    const closing = server.close().then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    await Promise.all([active, queued]);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it('lists captured tools and routes arguments and a live answer through MCP', async () => {
     const { client } = await setup();
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['inspect_workspace', 'ask_user']);
