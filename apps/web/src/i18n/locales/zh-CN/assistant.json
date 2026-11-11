@@ -437,6 +437,7 @@
     "command": "命令"
   },
   "attachment": {
+    "preview": "放大查看图片",
     "expired": "图片已过期",
     "listLabel": "待发送的图片",
     "remove": "移除图片 {{name}}",
