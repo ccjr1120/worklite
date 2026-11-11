@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, lstatSync, readlinkSync, symlinkSync, chmodSync, rmSync, openSync, closeSync, writeSync, statSync } from 'node:fs';
 import { gatewayFingerprint } from './gateway-fingerprint.mjs';
+import { verifyRuntimeOwnership } from './runtime-ownership.mjs';
 
 const [command, ...args] = process.argv.slice(2);
 const sleep = (milliseconds) => new Promise((done) => setTimeout(done, milliseconds));
@@ -836,16 +837,10 @@ async function run(state, id) {
   let previousGatewayStopped = false;
   let candidateGateway;
   let keptGateway = null;
-  const targetUrl = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/runtime`;
   async function verifyTargetOwnership() {
-    // The target API can stall for several seconds while the host is under build load;
-    // 3s aborts an otherwise healthy runtime. Ownership is still verified after the wait.
-    const response = await fetchForUpgrade(targetUrl, { signal: AbortSignal.timeout(15000) }, 'Target runtime ownership check');
-    if (!response.ok) throw new Error(`Target runtime ownership check returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`);
-    const ownership = await response.json();
-    const expectedIdentity = previous.version ?? previous.releaseHash;
-    const actualIdentity = ownership.version ?? ownership.releaseHash;
-    if (actualIdentity !== expectedIdentity || ownership.wrapperPid !== previous.pid) throw new Error('Target listeners are not owned by the recorded managed runtime.');
+    await verifyRuntimeOwnership(previous, {
+      onRetry: (error, attempt) => writeSync(log, `${new Date().toISOString()} Target runtime probe ${attempt}/3 failed; retrying: ${describeError(error)}\n`),
+    });
   }
   async function call(action) {
     const url = `http://127.0.0.1:${previous.ports[1]}/api/upgrades/${id}/${action}`;

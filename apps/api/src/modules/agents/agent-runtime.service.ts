@@ -7,13 +7,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { agentExecutions, agentRuntimeEvents, agentRuntimeInteractions, agentRuntimeRuns, agentRuntimeSessions, type Database, type StoredAgentRuntimeEvent } from '@worklite/db';
 import { DATABASE } from '../../infrastructure/database.module';
 import { ProjectExecutorService } from './project-executor.service';
-import { openChatRuntimeMcp, type ChatRuntimeTools, type ChatRuntimeQuestion } from './chat-runtime-mcp';
+import type { ChatRuntimeQuestion } from './chat-runtime-mcp';
 import type { ProjectExecutorRequest, ProjectExecutorSteerPort } from './project-executor.types';
 
 type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];
 type RuntimeTurnRequest = Omit<ProjectExecutorRequest, 'launch' | 'runtimeSession' | 'resourceDirectory' | 'onQuestion' | 'onApproval' | 'owner'> & {
-  owner?: 'agent' | 'chat';
-  platformTools?: ChatRuntimeTools;
   sessionId: string;
   runtime: 'claude' | 'codex';
   messageId?: string;
@@ -70,19 +68,6 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async summarize(workspaceId: string, sessionId: string, systemPrompt: string, input: string): Promise<string> {
-    if (this.active.has(sessionId)) throw new ConflictException('The Chat session is still running.');
-    const session = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, sessionId), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
-    if (!session || session.status === 'closed') throw new ConflictException('Run one Chat turn before summarizing this runtime session.');
-    const directory = await mkdtemp(join(session.resourceDirectory, 'summary-'));
-    try {
-      return await this.executors.execute({ owner: 'chat', workspaceId, launch: session.launch, model: session.launch.model,
-        projectDirectory: directory, resourceDirectory: directory, systemPrompt, input, skills: [], mcpServers: [],
-        signal: new AbortController().signal, correlation: { surface: 'chat', conversationId: sessionId },
-      });
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  }
-
   async waitForStop(sessionId: string): Promise<void> {
     await this.active.get(sessionId)?.done;
   }
@@ -121,8 +106,9 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
 
   private async run(request: RuntimeTurnRequest): Promise<string> {
     request.signal.throwIfAborted();
-    const owner = this.db.select({ id: agentExecutions.id }).from(agentExecutions).where(and(eq(agentExecutions.id, request.sessionId), eq(agentExecutions.workspaceId, request.workspaceId))).get();
+    const owner = this.db.select({ id: agentExecutions.id, agentId: agentExecutions.agentId }).from(agentExecutions).where(and(eq(agentExecutions.id, request.sessionId), eq(agentExecutions.workspaceId, request.workspaceId))).get();
     if (!owner) throw new NotFoundException('Agent conversation not found in this workspace.');
+    if (owner.agentId === 'agt_system_helper_chat') throw new ConflictException('Chat only supports the native runtime.');
     let session = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, request.sessionId), eq(agentRuntimeSessions.workspaceId, request.workspaceId))).get();
     if (session?.status === 'closed') throw new ConflictException('This Agent session is closed. Start a new conversation.');
     if (session && session.runtime !== request.runtime) throw new ConflictException('A conversation cannot switch runtimes. Start a new conversation.');
@@ -130,7 +116,7 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
       if (request.model) await this.executors.requireModel(request.workspaceId, request.runtime, request.model);
       const launch = await this.executors.captureLaunch(request.runtime, request.model);
       request.signal.throwIfAborted();
-      const root = request.owner === 'chat' ? process.env.WORKLITE_CHAT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'chat') : process.env.WORKLITE_AGENT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'agent-sessions');
+      const root = process.env.WORKLITE_AGENT_RUNTIME_DIR ?? join(homedir(), '.worklite', 'agent-sessions');
       await mkdir(root, { recursive: true, mode: 0o700 });
       const resourceDirectory = await mkdtemp(join(root, 'session-'));
       try {
@@ -153,17 +139,14 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
     const event = (data: StoredAgentRuntimeEvent) => {
       this.db.insert(agentRuntimeEvents).values({ id: `are_${randomUUID()}`, runId, sequence: ++sequence, data }).run();
     };
-    let platform: Awaited<ReturnType<typeof openChatRuntimeMcp>> | undefined;
     try {
       request.signal.throwIfAborted();
-      if (request.platformTools) platform = await openChatRuntimeMcp(request.platformTools, (question, details) => this.ask(request, runId, question, event, 'question', details));
-        // Link to the owning execution's canonical text stream without duplicating its chunks.
-        if (request.messageId) event({ kind: 'message_stream', messageId: request.messageId });
+      // Link to the owning execution's canonical text stream without duplicating its chunks.
+      if (request.messageId) event({ kind: 'message_stream', messageId: request.messageId });
       const execute = (input: string) => this.executors.execute({
-        ...request, model: session.launch.model, owner: request.owner ?? 'agent', launch: session.launch, resourceDirectory: session.resourceDirectory,
+        ...request, model: session.launch.model, owner: 'agent', launch: session.launch, resourceDirectory: session.resourceDirectory,
         input,
-        ...(request.owner === 'chat' ? { projectDirectory: session.resourceDirectory } : {}),
-        mcpServers: [...request.mcpServers, ...(platform ? [platform.runtime] : [])],
+        mcpServers: request.mcpServers,
         runtimeSession: {
           ...(externalSessionId ? { resumeId: externalSessionId } : {}),
           onSession: async (id) => {
@@ -209,8 +192,6 @@ export class AgentRuntimeService implements OnModuleInit, OnModuleDestroy {
       this.settle(session.id, runId, status, error instanceof Error ? error.message : 'Agent runtime failed.');
       event({ kind: 'settled', status });
       throw error;
-    } finally {
-      await platform?.close();
     }
   }
 

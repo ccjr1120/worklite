@@ -50,14 +50,14 @@ export class ChatDispatchService {
     try {
       if (input.target.kind === 'conversation') {
         const current = input.executionId ? await this.executions.get(request, 'personal', CHAT_AGENT_ID, input.executionId) : null;
-        const afterMessageId = input.newConversation ? null : current?.messages.at(-1)?.id ?? null;
-        const accept = (transaction: Transaction, executionId: string) => {
+        const accept = (transaction: Transaction, executionId: string, previous = current) => {
+          const afterMessageId = input.newConversation ? null : previous?.messages.at(-1)?.id ?? null;
           // Freeze the previous turn before appending another user message to the same execution.
           if (current) {
-            const previous = transaction.select().from(chatSubmissions).where(eq(chatSubmissions.executionId, current.id)).all();
-            for (const row of previous) {
+            const previousSubmissions = transaction.select().from(chatSubmissions).where(eq(chatSubmissions.executionId, current.id)).all();
+            for (const row of previousSubmissions) {
               if (row.reference?.kind !== 'conversation' || row.reference.completionStatus) continue;
-              transaction.update(chatSubmissions).set({ reference: { ...row.reference, untilMessageId: current.messages.at(-1)?.id ?? null, completionStatus: current.status === 'waiting_for_input' ? 'completed' : current.status, completionError: current.error }, settled: false, deliveryFingerprint: null }).where(eq(chatSubmissions.id, row.id)).run();
+              transaction.update(chatSubmissions).set({ reference: { ...row.reference, untilMessageId: previous?.messages.at(-1)?.id ?? null, completionStatus: previous?.status === 'waiting_for_input' ? 'completed' : previous?.status ?? current.status, completionError: previous?.error ?? null }, settled: false, deliveryFingerprint: null }).where(eq(chatSubmissions.id, row.id)).run();
             }
           }
           transaction.update(chatSubmissions).set({ executionId }).where(eq(chatSubmissions.id, submission.id)).run();

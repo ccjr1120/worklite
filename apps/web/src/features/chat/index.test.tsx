@@ -82,10 +82,22 @@ async function mountSuggestedChat(deferred?: Promise<ChatSuggestionResponse>) {
 }
 
 describe('Chat placeholder suggestions', () => {
-  it.each(['codex', 'claude'] as const)('works for %s Chat without a native provider configuration', async (kind) => {
-    vi.mocked(api.agent).mockResolvedValue({ runtime: { kind }, providerId: null, model: null } as unknown as AgentView);
-    const { input } = await mountSuggestedChat();
-    await waitFor(() => expect(input).toHaveAttribute('placeholder', '这个任务目前进展如何？'));
+  it('offers an opening prompt in a new conversation without calling the conversation API', async () => {
+    const suggest = vi.spyOn(api, 'chatSuggestions');
+    const dispatch = vi.spyOn(api, 'dispatchChat');
+    const sidebar = mount();
+    fireEvent.click(within(sidebar).getByRole('button', { name: '新对话' }));
+    const input = await screen.findByRole('combobox', { name: '向 Chat 发送消息' });
+    await waitFor(() => expect(input).toHaveAttribute('placeholder', '帮我梳理目标，并拆成可以执行的任务。'));
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(input).toHaveValue('帮我梳理目标，并拆成可以执行的任务。');
+    expect(suggest).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(within(sidebar).getByRole('button', { name: '较早的会话' }));
+    await waitFor(() => expect(api.chatConversation).toHaveBeenCalledWith(earlier.id));
+    fireEvent.click(within(sidebar).getByRole('button', { name: '新对话' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '向 Chat 发送消息' })).toHaveAttribute('placeholder', '帮我梳理目标，并拆成可以执行的任务。'));
   });
   it('fills an editable draft on Tab without sending and preserves normal Tab afterwards', async () => {
     const { input, dispatch } = await mountSuggestedChat();
@@ -141,6 +153,22 @@ describe('Chat placeholder suggestions', () => {
     expect(suggest).toHaveBeenCalledTimes(2);
     expect(input).toHaveAttribute('placeholder', '这个任务目前进展如何？');
   });
+  it.each(['button', 'enter'])('sends a new direction immediately while Chat is running through %s', async (method) => {
+    const { input, execution, snapshot, dispatch } = await mountSuggestedChat();
+    const queue = vi.spyOn(api, 'queueAgentMessage');
+    const running = { ...execution, status: 'running' as const };
+    queue.mockResolvedValue(running);
+    vi.spyOn(api, 'agentExecution').mockResolvedValue(running);
+    snapshot(running);
+    await waitFor(() => expect(screen.getByRole('button', { name: '取消当前执行' })).toBeVisible());
+    fireEvent.change(input, { target: { value: '改为只检查测试' } });
+    if (method === 'button') fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
+    else fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(queue).toHaveBeenCalledTimes(1));
+    expect(queue).toHaveBeenCalledWith('agt_system_helper_chat', execution.id, '改为只检查测试', 'steering', expect.any(String));
+    expect(dispatch).not.toHaveBeenCalled();
+    await waitFor(() => expect(input).toHaveValue(''));
+  });
   it('does not intercept Shift+Tab, IME composition, or Tab without a suggestion', async () => {
     const { input } = await mountSuggestedChat();
     await waitFor(() => expect(input).toHaveAttribute('placeholder', '这个任务目前进展如何？'));
@@ -176,14 +204,31 @@ describe('Chat placeholder suggestions', () => {
     snapshot({ ...execution, status: 'waiting_for_input', pendingQuestion: { id: 'q', question: '确认输入方式？', options: [], createdAt: '' } });
     expect(input).toHaveAttribute('placeholder', '回答澄清问题...');
   });
-  it('clears as soon as the task settles, even though its original dispatch is completed', async () => {
+  it('replaces progress with a result follow-up as soon as the task settles', async () => {
     const { input, execution, snapshot } = await mountSuggestedChat();
     await waitFor(() => expect(input).toHaveAttribute('placeholder', '这个任务目前进展如何？'));
     snapshot({ ...execution, conversationStatus: 'completed', toolCalls: execution.toolCalls.map((call) => ({ ...call, agentInvocation: { ...call.agentInvocation!, status: 'completed' } })) });
     expect(input).not.toHaveAttribute('placeholder', '这个任务目前进展如何？');
+    await waitFor(() => expect(input).toHaveAttribute('placeholder', '帮我检查这个任务的结果，还有哪些需要验证或跟进？'));
     const tab = createEvent.keyDown(input, { key: 'Tab' });
     fireEvent(input, tab);
-    expect(tab.defaultPrevented).toBe(false);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(input).toHaveValue('帮我检查这个任务的结果，还有哪些需要验证或跟进？');
+  });
+  it('keeps an overview when multiple tasks finish or have different statuses', async () => {
+    const { input, execution, snapshot } = await mountSuggestedChat();
+    await waitFor(() => expect(input).toHaveAttribute('placeholder', '这个任务目前进展如何？'));
+    const first = { ...execution.toolCalls[0]!, agentInvocation: { ...execution.toolCalls[0]!.agentInvocation!, status: 'completed' as const } };
+    const second = { ...first, id: 'second', agentInvocation: { ...first.agentInvocation, runId: 'second', task: '验证接口', status: 'running' as const } };
+    snapshot({ ...execution, toolCalls: [first, second] });
+    const overview = '帮我汇总这些任务的结果和进展，并列出接下来需要跟进的事项。';
+    await waitFor(() => expect(input).toHaveAttribute('placeholder', overview));
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input).not.toHaveAttribute('placeholder', overview);
+    snapshot({ ...execution, conversationStatus: 'completed', toolCalls: [first, { ...second, agentInvocation: { ...second.agentInvocation, status: 'completed' } }] });
+    await waitFor(() => expect(input).toHaveAttribute('placeholder', overview));
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(input).toHaveValue(overview);
   });
   it('suspends after choosing an Agent even when the mention text has been cleared', async () => {
     vi.mocked(api.agents).mockResolvedValue([{ id: 'coder', name: 'coder', kind: 'custom' } as AgentView]);

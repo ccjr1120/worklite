@@ -158,14 +158,12 @@ function ChatWorkspace() {
   const mainRequestGenerationRef = useRef(0);
   const observedEventRef = useRef({ executionId: '', sequence: 0 });
   const imeCompositionRef = useRef({ active: false, endedAt: -Infinity });
-  const [configRuntime, setConfigRuntime] = useState<'native' | 'codex' | 'claude'>('native');
-  const isConfigured = Boolean(agentQuery.data && (agentQuery.data.runtime?.kind && agentQuery.data.runtime.kind !== 'native' || agentQuery.data.providerId && agentQuery.data.model));
+  const isConfigured = Boolean(agentQuery.data?.providerId && agentQuery.data.model);
 
   useEffect(() => {
     if (!agentQuery.data) return;
-    setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : agentQuery.data.model && (agentQuery.data.runtime?.kind ?? 'native') !== 'native' ? `__runtime::${agentQuery.data.model}` : '');
+    setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
     setConfigModelParameters(agentQuery.data.modelParameters ?? {});
-    setConfigRuntime(agentQuery.data.runtime?.kind ?? 'native');
     setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
     setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
     setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
@@ -173,16 +171,16 @@ function ChatWorkspace() {
     setChatSkillIds(agentQuery.data.chatConfiguration?.skillIds ?? []);
   }, [agentQuery.data]);
 
-  const saveConfiguration = async (selection: string, prompt = extensionPrompt, summarize = summarizePrompt, skillIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }, modelParameters = configModelParameters, runtime = configRuntime) => {
+  const saveConfiguration = async (selection: string, prompt = extensionPrompt, summarize = summarizePrompt, skillIds?: string[], notifications = { enabled: turnNotificationsEnabled, sound: turnNotificationSound }, modelParameters = configModelParameters) => {
     if (configSaving) return;
     const separator = selection.indexOf('::');
     setConfigSaving(true);
     setConfigError('');
     try {
       const saved = await api.updateAgent(workspaceSlug, CHAT_AGENT_ID, {
-        providerId: separator >= 0 && !selection.startsWith('__runtime::') ? selection.slice(0, separator) : null,
+        providerId: separator >= 0 ? selection.slice(0, separator) : null,
         model: separator >= 0 ? selection.slice(separator + 2) : '',
-        modelParameters, runtime: runtime === 'native' ? { kind: 'native' } : { kind: runtime, projectDirectory: '' },
+        modelParameters, runtime: { kind: 'native' },
         extensionPrompt: prompt, summarizePrompt: summarize, expectedConfigurationRevision: agentQuery.data?.chatConfiguration?.revision,
         turnNotificationsEnabled: notifications.enabled, turnNotificationSound: notifications.sound,
         ...(skillIds === undefined ? {} : { skillIds }),
@@ -191,9 +189,8 @@ function ChatWorkspace() {
     } catch (cause) {
       setConfigError(apiErrorMessage(cause, t('assistant:configuration.saveFailed')));
       if (agentQuery.data) {
-        setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : agentQuery.data.model && (agentQuery.data.runtime?.kind ?? 'native') !== 'native' ? `__runtime::${agentQuery.data.model}` : '');
+        setConfigSelection(agentQuery.data.providerId && agentQuery.data.model ? `${agentQuery.data.providerId}::${agentQuery.data.model}` : '');
         setConfigModelParameters(agentQuery.data.modelParameters ?? {});
-    setConfigRuntime(agentQuery.data.runtime?.kind ?? 'native');
         setExtensionPrompt(agentQuery.data.chatConfiguration?.extensionPrompt ?? '');
         setSummarizePrompt(agentQuery.data.chatConfiguration?.summarizePrompt ?? '');
         setTurnNotificationsEnabled(agentQuery.data.chatConfiguration?.turnNotificationsEnabled ?? true);
@@ -1047,7 +1044,6 @@ function ChatWorkspace() {
                   onModelParametersChange={(parameters) => { setConfigModelParameters(parameters); void saveConfiguration(configSelection, extensionPrompt, summarizePrompt, undefined, undefined, parameters); }}
                   selection={configSelection}
                   onSelectionChange={(value) => { setConfigSelection(value); setConfigModelParameters({}); void saveConfiguration(value, extensionPrompt, summarizePrompt, undefined, undefined, {}); }}
-                  runtime={configRuntime} onRuntimeChange={(runtime) => { setConfigRuntime(runtime); setConfigSelection(''); setConfigModelParameters({}); void saveConfiguration('', extensionPrompt, summarizePrompt, undefined, undefined, {}, runtime); }}
                   extensionPrompt={extensionPrompt} onPromptChange={setExtensionPrompt} onPromptSave={() => { if (extensionPrompt !== (agentQuery.data?.chatConfiguration?.extensionPrompt ?? '')) void saveConfiguration(configSelection); }}
                   summarizePrompt={summarizePrompt} onSummarizePromptChange={setSummarizePrompt} onSummarizePromptSave={() => { if (summarizePrompt !== (agentQuery.data?.chatConfiguration?.summarizePrompt ?? '')) void saveConfiguration(configSelection); }}
                   turnNotificationsEnabled={turnNotificationsEnabled} turnNotificationSound={turnNotificationSound} onTurnNotificationsChange={changeTurnNotifications}

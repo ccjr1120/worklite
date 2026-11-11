@@ -1,5 +1,4 @@
 import { DISCOVER_CHAT_TOOLS, NATIVE_CHAT_TOOL_GUIDANCE, discoverChatTools, loadedChatToolNames, nativeChatTurnKey, nativeChatInstructions, visibleChatTools } from './native-chat-tools';
-import type { AskChatRuntime } from './chat-runtime-mcp';
 import type { ModelParameters } from '@worklite/contracts';
 import { encodeMessageState, patchExecutionMessages, appendExecutionMessages, executionUpdates, agentExecutionColumns, displayMessagesColumn, projectTaskColumns, platformArgumentsHash, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutionEvents, agentExecutions, chatConfigurations, chatMemories, agents, agentSkills, agentMcpServers, mcpServers, agentRuntimeSessions, agentSubSessions, agentToolCalls, auditLogs, chatProjectTasks, chatSubmissions, externalChats, skillFiles, skills, type Database, type StoredAgentDisplayMessage, type StoredAgentModelMessage, insertAgentToolResults, normalizeAgentModelMessages } from '@worklite/db';
 
@@ -17,7 +16,7 @@ import { activeChatBackgroundExecutionIds, chatConversationStatus } from './chat
 import { AgentCollaborationService, CHAT_AGENT_TOOLS } from './agent-collaboration.service';
 import { assertRuntimeAdmission } from '../../infrastructure/runtime-upgrade-state';
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, type OnModuleInit } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { Request } from 'express';
 import type { AgentExecutionEvent, AgentExecutionEventData, AgentExecutionPhase, AgentExecutionView, AgentPendingQuestion, AgentPlanStep, AgentToolCallView, AnswerAgentQuestionRequest, ChatProgressReport, ChatProjectTaskView, ChatTaskReference, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, ModelProviderProtocol, WorkflowNodeActivityDetail, WorkliteScriptResult } from '@worklite/contracts';
@@ -51,7 +50,7 @@ const CHAT_AGENT_ID = 'agt_system_helper_chat';
 
 const CHAT_HOST_COMMAND_RULE = 'Use run_host_command for everyday non-interactive local terminal work and ordinary file management. Directly author Agent-owned Skills, Tools and their local scripts as configuration work. Delegate other coding, repository-wide investigation and validation/build/test work to an appropriate Agent with run_agent and the existing absolute projectDirectory. There is no command allow-list.';
 const CHAT_ROUTER_CONTROL_RULE = 'All delegated work uses Agents. Inspect available Agents and select by current id and responsibility. A native lead Agent dynamically coordinates assigned sub-Agents. There are no Coding Teams, Coders, fixed role workflows or server-owned Router.';
-const CHAT_ORCHESTRATION_RULE = 'Only top-level user-managed Agents belong to the user-facing Agent catalog and count. Sub-Agents are private to their owning Agent; never list, count or dispatch them as independent Agents from Chat. Chat may read, update or delete them only through GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId. Deleting an Agent cascades through all its descendants in one operation; never require manually deleting children first. There is no built-in Agent or Team product concept; do not use these categories. Answer Agent count questions with only the count and names requested. For requests to add or change an Agent-owned ability, inspect its package and use run_host_command to write skills/<name>/SKILL.md, tools/<name>.yaml and their implementation scripts directly. This is Chat-owned configuration work, not delegated repository coding. Use the actual catalog root supplied in this turn; identify the target by AGENT.md id and directory ownership. Do not use update_agent or platform capability registration to install private abilities. Preserve unrelated files and read back the changes; use read-only query_platform GET for the Agent to validate loading before reporting success. New invocations load these files without deployment or API restart. update_agent remains available for metadata/model settings. run_agent starts independent background work and returns a launch receipt immediately; the conversation stays available and results are reported automatically. Do not wait or poll for delegated results. The UI renders each dispatch as a task card with @Agent and the task summary on its first line, the current step below and execution status at the right. Successful dispatch-only batches end the Chat turn with this card and no generated launch acknowledgement. For a WeChat-bound conversation, the platform also queues one immediate short plain-text notice containing the Agent name and task summary after accepting each dispatch; never generate a duplicate acknowledgement. WeChat later receives changed periodic progress, questions and final results as text; failed dispatches and batches containing other operations retain normal follow-up. Periodic Agent progress cards include the task summary in the same layout. Do not narrate dispatches before or after run_agent, repeat their acknowledgement or invent duration estimates. Chat understands the user goal, performs platform operations and everyday terminal work directly, and uses inspect_agents plus run_agent for delegated work, code changes and multi-step project tasks. A user mention selects a target, not an action. First decide whether the user asks for information, control, new work, or continuation. For status, progress or failure explanations, read saved records and answer without waking an Agent. For stop/cancel requests, use cancel_agent_execution with the exact agentId and executionId; include runId only to stop one child invocation and its descendants. Never dispatch work to stop it. For independent work use run_agent mode=new, even for the same Agent or project; pass only necessary background. For an explicit continuation, correction or missing input for the same task, use mode=continue with the exact executionId and continuationReason. An instance mention may identify that task but does not by itself authorize continuation. If multiple tasks match, ask which one. Cancelled tasks require an explicit user request to resume and resumeCancelled=true. When the user requests continuing or modifying a known earlier task, reuse its executionId from its launch receipt or result report; never create a replacement instance or guess among multiple tasks. Completed, failed and cancelled native Agent instances can continue with their saved model history and tool evidence; cancellation does not delete the instance. For a requested pause or resume of one active execution sub-Agent, read the lead history to find its exact child runId and use control_agent_instance with the owning Agent id, executionId and that runId. Do not cancel the lead, dispatch replacement work or affect sibling instances. Controls require a saved engine session and a live owning execution; they do not survive an API restart. For a user-requested model change followed by continuation, inspect the Agent configuration, update and verify its configured model (collaboration.publicModels for Gateway models, or providerId/model for provider-backed Agents), then call run_agent with the original executionId. Native Agent continuation reads the latest saved configuration; never claim it requires starting over or loses context. Do not promise this model-switch behavior for engine-backed sessions, whose captured runtime may remain fixed. A running or still-settling instance must stop before continuation; waiting_for_input requires answering its pending question first. Continuation does not blindly replay tools or uncertain external effects. When asked what an Agent is doing, read its current run detail on demand: GET /agents/:agentId/history/:runId includes currentActivity, invocation states and partial output. Distinguish current tool work, model generation and waiting for input using recorded evidence, and do not invent progress or claim partial output is final. The Agent run-record UI refreshes the detail every two seconds and expands active sub-Agent records. A user-requested status check is allowed; do not turn it into repeated polling. Keep the mention link intact; it opens the corresponding work detail. Honor explicit Agent targets. Use search_local_projects to resolve project names, and pass an absolute existing projectDirectory for code or file work. The lead Agent chooses sub-Agents, ordering, independent parallel work and retries from actual results. No Workflow or Coding Team APIs remain. Ask only when a material choice or missing information blocks work. Report actual results and failures, never assume delegated work succeeded. For redeploy-only use redeploy directly. For code changes plus redeployment, run the selected Agent with the complete goal and managed project root, then redeploy after success without another confirmation. Keep task-produced attachment references verbatim.';
+const CHAT_ORCHESTRATION_RULE = 'Only top-level user-managed Agents belong to the user-facing Agent catalog and count. Sub-Agents are private to their owning Agent; never list, count or dispatch them as independent Agents from Chat. Chat may read, update or delete them only through GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId. Deleting an Agent cascades through all its descendants in one operation; never require manually deleting children first. There is no built-in Agent or Team product concept; do not use these categories. Answer Agent count questions with only the count and names requested. For requests to add or change an Agent-owned ability, inspect its package and use run_host_command to write skills/<name>/SKILL.md, tools/<name>.yaml and their implementation scripts directly. This is Chat-owned configuration work, not delegated repository coding. Use the actual catalog root supplied in this turn; identify the target by AGENT.md id and directory ownership. Do not use update_agent or platform capability registration to install private abilities. Preserve unrelated files and read back the changes; use read-only query_platform GET for the Agent to validate loading before reporting success. New invocations load these files without deployment or API restart. update_agent remains available for metadata/model settings. run_agent starts independent background work and returns a launch receipt immediately; the conversation stays available and results are reported automatically. Do not wait or poll for delegated results. The UI renders each dispatch as a task card with @Agent and the task summary on its first line, the current step below and execution status at the right. Successful dispatch-only batches end the Chat turn with this card and no generated launch acknowledgement. For a WeChat-bound conversation, the platform also queues one immediate short plain-text notice containing the Agent name and task summary after accepting each dispatch; never generate a duplicate acknowledgement. WeChat later receives changed periodic progress, questions and final results as text; failed dispatches and batches containing other operations retain normal follow-up. Periodic Agent progress cards include the task summary in the same layout. Do not narrate dispatches before or after run_agent, repeat their acknowledgement or invent duration estimates. Chat understands the user goal, performs platform operations and everyday terminal work directly, and uses inspect_agents plus run_agent for delegated work, code changes and multi-step project tasks. A user mention selects a target, not an action. First decide whether the user asks for information, control, new work, or continuation. For status, progress or failure explanations, read saved records and answer without waking an Agent. For stop/cancel requests, use cancel_agent_execution with the exact agentId and executionId; include runId only to stop one child invocation and its descendants. Never dispatch work to stop it. For independent work use run_agent mode=new, even for the same Agent or project; pass only necessary background. For an explicit continuation, correction or missing input for the same task, use mode=continue with the exact executionId and continuationReason. An instance mention may identify that task but does not by itself authorize continuation. If multiple tasks match, ask which one. Cancelled tasks require an explicit user request to resume and resumeCancelled=true. When the user requests continuing or modifying a known earlier task, reuse its executionId from its launch receipt or result report; never create a replacement instance or guess among multiple tasks. Completed, failed and cancelled native Agent instances can continue with their saved model history and tool evidence; cancellation does not delete the instance. For a requested pause or resume of one active execution sub-Agent, read the lead history to find its exact child runId and use control_agent_instance with the owning Agent id, executionId and that runId. Do not cancel the lead, dispatch replacement work or affect sibling instances. Controls require a saved engine session and a live owning execution; they do not survive an API restart. For a user-requested model change followed by continuation, inspect the Agent configuration, update and verify its configured model (collaboration.publicModels for Gateway models, or providerId/model for provider-backed Agents), then call run_agent with the original executionId. Native Agent continuation reads the latest saved configuration; never claim it requires starting over or loses context. Do not promise this model-switch behavior for engine-backed sessions, whose captured runtime may remain fixed. For an explicit new direction on a running instance, use mode=continue with the same executionId: the platform interrupts its current turn and resumes its saved session. waiting_for_input requires answering its pending question first. Continuation does not blindly replay tools or uncertain external effects. When asked what an Agent is doing, read its current run detail on demand: GET /agents/:agentId/history/:runId includes currentActivity, invocation states and partial output. Distinguish current tool work, model generation and waiting for input using recorded evidence, and do not invent progress or claim partial output is final. The Agent run-record UI refreshes the detail every two seconds and expands active sub-Agent records. A user-requested status check is allowed; do not turn it into repeated polling. Keep the mention link intact; it opens the corresponding work detail. Honor explicit Agent targets. Use search_local_projects to resolve project names, and pass an absolute existing projectDirectory for code or file work. The lead Agent chooses sub-Agents, ordering, independent parallel work and retries from actual results. No Workflow or Coding Team APIs remain. Ask only when a material choice or missing information blocks work. Report actual results and failures, never assume delegated work succeeded. For redeploy-only use redeploy directly. For code changes plus redeployment, run the selected Agent with the complete goal and managed project root, then redeploy after success without another confirmation. Keep task-produced attachment references verbatim.';
 // A settled Chat turn posts one macOS host notification so the user knows to come back. The subtitle
 // names the terminal state; the body carries the short context that tells them what it is about.
 const CHAT_TURN_NOTIFICATION_TITLE = 'WorkLite';
@@ -125,7 +124,7 @@ const HELPER_BUILTIN_TOOLS = [
 ] as const;
 
 type AcceptanceTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
-type ConversationAcceptance = (transaction: AcceptanceTransaction, executionId: string) => void;
+type ConversationAcceptance = (transaction: AcceptanceTransaction, executionId: string, previous?: AgentExecutionView) => void;
 
 // The columns toView reads. modelMessages and capabilitySnapshot carry the largest JSON payloads
 // on the row and are excluded so view loads never parse them.
@@ -158,6 +157,8 @@ export class AgentExecutionsService implements OnModuleInit {
   private readonly activeMcpRequests = new Map<string, AbortController>();
   private readonly activeHostCommands = new Map<string, AbortController>();
   private readonly scheduledExecutions = new Map<string, Promise<void>>();
+  private readonly continuationQueues = new Map<string, Promise<AgentExecutionView>>();
+  private readonly pendingContinuations = new Map<string, Set<AbortController>>();
   private readonly listeners = new Set<(event: AgentExecutionEvent) => void>();
   private readonly textBatches = new Map<string, StreamBatch<Extract<AgentExecutionEventData, { kind: 'message_delta' }>>>();
   private readonly eventQueues = new Map<string, Promise<void>>();
@@ -386,31 +387,57 @@ export class AgentExecutionsService implements OnModuleInit {
     return () => this.listeners.delete(listener);
   }
 
-  async continue(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest, accept?: ConversationAcceptance): Promise<AgentExecutionView> {
+  continue(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest, accept?: ConversationAcceptance): Promise<AgentExecutionView> {
+    // Serialize replacement messages through interruption, persistence and scheduling. The next
+    // message may interrupt the newly started turn, but never races its predecessor's cleanup.
+    const controller = new AbortController();
+    const pending = this.pendingContinuations.get(executionId) ?? new Set<AbortController>();
+    pending.add(controller);
+    this.pendingContinuations.set(executionId, pending);
+    const previous = this.continuationQueues.get(executionId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => this.continueTurn(request, workspaceSlug, agentId, executionId, input, controller.signal, accept));
+    this.continuationQueues.set(executionId, next);
+    return next.finally(() => {
+      pending.delete(controller);
+      if (!pending.size) this.pendingContinuations.delete(executionId);
+      if (this.continuationQueues.get(executionId) === next) this.continuationQueues.delete(executionId);
+    });
+  }
+
+  private async continueTurn(request: Request, workspaceSlug: string, agentId: string, executionId: string, input: ContinueAgentExecutionRequest, signal: AbortSignal, accept?: ConversationAcceptance): Promise<AgentExecutionView> {
+    signal.throwIfAborted();
     this.requireActiveAgent(agentId);
     assertRuntimeAdmission();
     if (input?.mode !== undefined) return this.queueMessage(request, workspaceSlug, agentId, executionId, input);
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     this.requireTopLevelAgent(workspace.id, agentId);
-    const execution = await this.loadExecution(workspace.id, agentId, executionId);
-    if (!execution.capabilitySnapshot?.agent.runtime || execution.capabilitySnapshot.agent.runtime.kind === 'native') await this.requireExecutableAgent(workspace.id, agentId);
+    let execution = await this.loadExecution(workspace.id, agentId, executionId);
+    const content = normalizeUserMessage(input?.message);
+    if (agentId === CHAT_AGENT_ID || !execution.capabilitySnapshot?.agent.runtime || execution.capabilitySnapshot.agent.runtime.kind === 'native') await this.requireExecutableAgent(workspace.id, agentId);
+    if (execution.status === 'running') {
+      await this.cancelTurn(request, workspaceSlug, agentId, executionId, true);
+      await this.scheduledExecutions.get(executionId);
+      execution = await this.loadExecution(workspace.id, agentId, executionId);
+    }
+    signal.throwIfAborted();
     if (this.scheduledExecutions.has(executionId)) throw new ConflictException('The previous Agent turn is still settling. Try again when it has stopped.');
-    if (this.db.select({ status: agentRuntimeSessions.status }).from(agentRuntimeSessions).where(eq(agentRuntimeSessions.id, executionId)).get()?.status === 'closed') throw new ConflictException('This Agent session is closed. Start a new conversation.');
+    if (agentId !== CHAT_AGENT_ID && this.db.select({ status: agentRuntimeSessions.status }).from(agentRuntimeSessions).where(eq(agentRuntimeSessions.id, executionId)).get()?.status === 'closed') throw new ConflictException('This Agent session is closed. Start a new conversation.');
     if (execution.status === 'running' || execution.status === 'waiting_for_input') throw new ConflictException(execution.status === 'waiting_for_input' ? 'Answer the pending Agent question before sending another message.' : 'This Agent execution is already running.');
     const unresolvedToolCall = (await this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).limit(1))[0];
     if (unresolvedToolCall) throw new ConflictException('请先重试本轮对话，处理尚未结束的工具调用；外部效果不会自动重跑。');
-    const content = normalizeUserMessage(input?.message);
+    const previousView = await this.toView(execution);
     const priorCalls = agentId !== CHAT_AGENT_ID && execution.capabilitySnapshot?.agent.runtime?.kind !== 'codex' && execution.capabilitySnapshot?.agent.runtime?.kind !== 'claude'
       ? this.db.select().from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId)).all() : [];
     const history = normalizeAgentModelMessages(execution.modelMessages);
     const cleanedHistory = JSON.stringify(history) !== JSON.stringify(execution.modelMessages);
     const historyRef = cleanedHistory ? `acr_${randomUUID()}` : null;
+    signal.throwIfAborted();
     let accepted = false;
     this.db.transaction((transaction) => {
       const chatSnapshot = agentId === CHAT_AGENT_ID ? this.captureCapabilities(transaction, workspace.id, agentId)! : undefined;
       const updated = transaction.update(agentExecutions).set(executionUpdates(executionId, {
         capabilitySnapshot: chatSnapshot
-          ? { ...chatSnapshot, agent: { ...chatSnapshot.agent, runtime: execution.capabilitySnapshot ? execution.capabilitySnapshot.agent.runtime ?? { kind: 'native' as const } : chatSnapshot.agent.runtime } }
+          ? chatSnapshot
           : execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native'
             ? execution.capabilitySnapshot : this.captureCapabilities(transaction, workspace.id, agentId),
         executionAuthorization: null,
@@ -424,11 +451,6 @@ export class AgentExecutionsService implements OnModuleInit {
       })).where(and(eq(agentExecutions.id, executionId), or(eq(agentExecutions.status, 'completed'), eq(agentExecutions.status, 'cancelled'), eq(agentExecutions.status, 'failed')))).run();
       accepted = updated.changes > 0;
       if (accepted) {
-        if (agentId === CHAT_AGENT_ID && execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') {
-          for (const call of transaction.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).all()) {
-            transaction.update(agentToolCalls).set({ resultAppended: true, ...(call.status === 'running' ? { status: 'failed' as const, output: JSON.stringify(platformFailure('execution', 'PLATFORM_EXECUTION_INTERRUPTED', 'unknown')), finishedAt: new Date() } : {}) }).where(eq(agentToolCalls.id, call.id)).run();
-          }
-        }
         if (historyRef) transaction.insert(agentCapabilityResults).values({ id: historyRef, executionId, value: { kind: 'conversation-history', messages: execution.modelMessages } }).run();
         for (const call of priorCalls.filter((call) => call.status === 'running')) {
           const failure = platformFailure('execution', 'PLATFORM_EXECUTION_INTERRUPTED', 'unknown');
@@ -438,7 +460,7 @@ export class AgentExecutionsService implements OnModuleInit {
         }
         const interruptedChildren = transaction.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, workspace.id), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'), sql`json_extract(${auditLogs.metadata}, '$.parentRunId') is not null`, sql`json_extract(${auditLogs.metadata}, '$.status') = 'running'`)).all();
         for (const child of interruptedChildren) transaction.update(auditLogs).set({ metadata: { ...child.metadata, status: 'failed', error: 'Interrupted before a result was recorded.', finishedAt: new Date().toISOString() } }).where(eq(auditLogs.id, child.id)).run();
-        accept?.(transaction, executionId);
+        accept?.(transaction, executionId, previousView);
       }
     });
     if (!accepted) throw new ConflictException('This Agent execution is no longer ready for another message.');
@@ -457,7 +479,7 @@ export class AgentExecutionsService implements OnModuleInit {
     this.db.transaction((tx) => {
       const execution = tx.select(agentExecutionColumns).from(agentExecutions).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.agentId, agentId), eq(agentExecutions.workspaceId, workspace.id))).get();
       if (!execution) throw new NotFoundException('Agent execution not found');
-      if (agentId !== CHAT_AGENT_ID || (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native')) throw new BadRequestException('Message queues are available for native Chat only.');
+      if (agentId !== CHAT_AGENT_ID) throw new BadRequestException('Message queues are available for native Chat only.');
       const duplicate = execution.queuedMessages.find((entry) => entry.id === id);
       if (duplicate) {
         if (duplicate.message !== message || duplicate.mode !== input.mode) throw new ConflictException('This messageId belongs to a different message.');
@@ -543,7 +565,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     if (!execution.capabilitySnapshot) await this.requireExecutableAgent(workspace.id, agentId);
     if (execution.status !== 'failed') throw new ConflictException('Only a failed Agent execution can be retried.');
-    if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') throw new ConflictException('Engine-backed work cannot be replayed. Send a new message to continue the saved session after inspecting prior effects.');
+    if (agentId !== CHAT_AGENT_ID && execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') throw new ConflictException('Engine-backed work cannot be replayed. Send a new message to continue the saved session after inspecting prior effects.');
     const unresolvedCalls = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false)));
     const projectTaskCall = agentId === CHAT_AGENT_ID ? unresolvedCalls.find((call) => call.toolName === 'builtin' && call.mcpToolName === 'project_task') : undefined;
     if (projectTaskCall) {
@@ -552,7 +574,7 @@ export class AgentExecutionsService implements OnModuleInit {
         if (updated.changes === 0) throw new ConflictException('This project task is no longer ready to retry.');
         transaction.update(agentToolCalls).set({ status: 'running', finishedAt: null }).where(eq(agentToolCalls.id, projectTaskCall.id)).run();
       });
-      void this.executeProjectTaskTool(request, workspaceSlug, workspace.id, executionId, projectTaskCall).catch((error) => this.markExecutionFailed(workspace.id, executionId, executionFailure(error)));
+      void this.executeProjectTaskTool(request, workspaceSlug, workspace.id, executionId, projectTaskCall).catch((error) => this.failBackgroundExecution(workspace.id, executionId, error));
       await this.publishSnapshotForExecution(workspace.id, executionId);
       return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
     }
@@ -605,7 +627,7 @@ export class AgentExecutionsService implements OnModuleInit {
       });
       const [call] = await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.id, taskId), eq(agentToolCalls.executionId, executionId))).limit(1);
       if (!call) throw new ConflictException('The project task is no longer bound to this turn.');
-      void this.executeProjectTaskTool(request, workspaceSlug, workspace.id, executionId, call).catch((error) => this.markExecutionFailed(workspace.id, executionId, executionFailure(error)));
+      void this.executeProjectTaskTool(request, workspaceSlug, workspace.id, executionId, call).catch((error) => this.failBackgroundExecution(workspace.id, executionId, error));
       await this.publishSnapshotForExecution(workspace.id, executionId);
       return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
     }
@@ -630,18 +652,23 @@ export class AgentExecutionsService implements OnModuleInit {
     });
     if (!accepted) throw new ConflictException('This Agent question is no longer active.');
     await this.publishSnapshotForExecution(workspace.id, executionId);
-    void this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, agentId, executionId).catch(async (error) => {
-      await this.markExecutionFailed(workspace.id, executionId, executionFailure(error));
-    });
+    void this.resumeAfterToolCalls(request, workspaceSlug, workspace.id, agentId, executionId)
+      .catch((error) => this.failBackgroundExecution(workspace.id, executionId, error));
     return this.toView(await this.loadExecution(workspace.id, agentId, executionId));
   }
 
-  async cancel(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
+  cancel(request: Request, workspaceSlug: string, agentId: string, executionId: string): Promise<AgentExecutionView> {
+    return this.cancelTurn(request, workspaceSlug, agentId, executionId);
+  }
+
+  private async cancelTurn(request: Request, workspaceSlug: string, agentId: string, executionId: string, interrupt = false): Promise<AgentExecutionView> {
     const workspace = await this.workspaces.getWorkspace(request, workspaceSlug);
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     await this.db.update(agentExecutions).set({ queuedMessages: [] }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.workspaceId, workspace.id)));
+    // A later explicit stop takes precedence over directions still waiting for native cleanup.
+    if (!interrupt) for (const pending of this.pendingContinuations.get(executionId) ?? []) pending.abort(new ConflictException('The pending direction was cancelled by the user.'));
     // Background project tasks outlive their turn, so Cancel covers them even after the turn settled.
-    const activeTasks = agentId === CHAT_AGENT_ID ? this.projectTasks.activeForExecution(executionId) : [];
+    const activeTasks = !interrupt && agentId === CHAT_AGENT_ID ? this.projectTasks.activeForExecution(executionId) : [];
     if (execution.status !== 'running' && execution.status !== 'waiting_for_input') {
       for (const task of activeTasks) await this.projectTasks.cancel(task.id);
       if (activeTasks.length > 0) await this.publishSnapshotForExecution(workspace.id, executionId);
@@ -653,7 +680,7 @@ export class AgentExecutionsService implements OnModuleInit {
     for (const task of activeTasks) await this.projectTasks.cancel(task.id);
 
     const calls = await this.db.select().from(agentToolCalls).where(eq(agentToolCalls.executionId, executionId));
-    const runningCalls = calls.filter((call) => call.status === 'running');
+    const runningCalls = calls.filter((call) => call.status === 'running' && (!interrupt || !call.resultAppended));
     for (const call of runningCalls.filter((item) => item.mcpToolName === 'project_task')) {
       if (!this.projectTasks.list(executionId).some((task) => task.id === call.id)) continue;
       const task = await this.projectTasks.cancel(call.id);
@@ -696,7 +723,6 @@ export class AgentExecutionsService implements OnModuleInit {
     if (cancelled) {
       this.activeNativeBatches.get(executionId)?.abort();
       this.activeModelRequests.get(executionId)?.abort();
-      if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') await this.agentRuntime.waitForStop(executionId);
       for (const call of runningCalls) this.activeHostCommands.get(call.id)?.abort();
       for (const call of runningCalls) this.activeMcpRequests.get(call.id)?.abort();
       await Promise.all(runningCalls.flatMap((call) => call.commandExecutionId
@@ -712,6 +738,7 @@ export class AgentExecutionsService implements OnModuleInit {
           await this.db.update(agentToolCalls).set({ shell: { ...call.shell!, state: 'settled' }, output: await this.commands.output(command.id), exitCode: command.exitCode, finishedAt: command.finishedAt ? new Date(command.finishedAt) : cancelledAt }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'cancelled')));
         } else await this.db.update(agentToolCalls).set({ shell: { ...call.shell!, state: 'settled' } }).where(and(eq(agentToolCalls.id, call.id), eq(agentToolCalls.status, 'cancelled')));
       }
+      if (execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native') await this.agentRuntime.waitForStop(executionId);
       await this.scheduledExecutions.get(executionId);
       // Also settle orphaned invocation records left by a previous process, preserving evidence.
       const interrupted = this.db.select().from(auditLogs).where(and(eq(auditLogs.workspaceId, workspace.id), eq(auditLogs.resource, executionId), eq(auditLogs.action, 'agent.invocation'))).all();
@@ -730,13 +757,17 @@ export class AgentExecutionsService implements OnModuleInit {
       .then(() => undefined)
       .catch(async (error) => {
         const workspace = await this.workspaces.getWorkspace(request, workspaceSlug).catch(() => null);
-        if (workspace) await this.markExecutionFailed(workspace.id, executionId, executionFailure(error));
+        if (workspace) await this.failBackgroundExecution(workspace.id, executionId, error);
       })
       .finally(() => {
         this.scheduledExecutions.delete(executionId);
-        const current = this.db.select({ status: agentExecutions.status, queuedMessages: agentExecutions.queuedMessages }).from(agentExecutions).where(eq(agentExecutions.id, executionId)).get();
-        if (current?.status === 'completed' && current.queuedMessages.length
-          && !this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).get()) this.schedule(request, workspaceSlug, executionId);
+        try {
+          const current = this.db.select({ status: agentExecutions.status, queuedMessages: agentExecutions.queuedMessages }).from(agentExecutions).where(eq(agentExecutions.id, executionId)).get();
+          if (current?.status === 'completed' && current.queuedMessages.length
+            && !this.db.select({ id: agentToolCalls.id }).from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.resultAppended, false))).get()) this.schedule(request, workspaceSlug, executionId);
+        } catch (error) {
+          this.logger.error(`Agent execution ${executionId} queue scheduling failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       });
     this.scheduledExecutions.set(executionId, work);
   }
@@ -763,7 +794,7 @@ export class AgentExecutionsService implements OnModuleInit {
       ? { agent: execution.capabilitySnapshot.agent, assignedSkills: execution.capabilitySnapshot.skills }
       : await this.requireExecutableAgent(workspace.id, execution.agentId);
     if (agent.id !== CHAT_AGENT_ID && 'collaboration' in agent && agent.collaboration && (!agent.runtime || agent.runtime.kind === 'native' || agent.collaboration.subAgentIds.length || agent.collaboration.capabilities.length || agent.collaboration.privateTools?.length)) return this.advanceCollaboration(workspace.id, execution);
-    if (agent.runtime && agent.runtime.kind !== 'native') return this.advanceRuntime(request, workspaceSlug, workspace.id, execution);
+    if (agent.id !== CHAT_AGENT_ID && agent.runtime && agent.runtime.kind !== 'native') return this.advanceRuntime(request, workspaceSlug, workspace.id, execution);
     const assignedSkills = capturedSkills;
     const protectedPlatformSkill = agent.id === CHAT_AGENT_ID ? assignedSkills.find((skill) => isProtectedPlatformSkillId(workspace.id, skill.id)) : undefined;
     const protectedPlatformManifest = protectedPlatformSkill ? platformToolManifest(protectedPlatformSkill.files) : {};
@@ -1274,7 +1305,6 @@ export class AgentExecutionsService implements OnModuleInit {
     if (targetExecutionId) {
       const target = await this.loadExecution(workspaceId, agentId, targetExecutionId);
       if (target.status === 'cancelled' && input.resumeCancelled !== true) throw new BadRequestException('This task was cancelled. Set resumeCancelled=true only when the user explicitly requests resuming it.');
-      if (this.activeModelRequests.has(targetExecutionId) || this.scheduledExecutions.has(targetExecutionId)) throw new ConflictException('This Agent instance is still running or settling. Wait for it to stop before continuing.');
       const binding = this.db.select().from(auditLogs).where(and(eq(auditLogs.action, 'chat_agent.dispatched'), eq(auditLogs.resource, targetExecutionId), eq(auditLogs.workspaceId, workspaceId))).get();
       const root = this.db.select().from(auditLogs).where(and(eq(auditLogs.action, 'agent.invocation'), eq(auditLogs.resource, targetExecutionId), eq(auditLogs.workspaceId, workspaceId), sql`json_extract(${auditLogs.metadata}, '$.parentRunId') is null`, sql`json_extract(${auditLogs.metadata}, '$.agentId') = ${agentId}`)).get();
       const invocationId = typeof asRecord(binding?.metadata)?.invocationId === 'string' ? asRecord(binding!.metadata)!.invocationId as string : root?.id ?? targetExecutionId;
@@ -1387,7 +1417,7 @@ export class AgentExecutionsService implements OnModuleInit {
       transaction.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: 'chat_shell.settled', resource: call.id, metadata: { executionId, questionId: input.questionId, commandExecutionId: call.commandExecutionId, recoveryDecision: input.recoveryDecision ?? null } }).run();
     });
     await this.publishSnapshotForExecution(workspaceId, executionId);
-    void this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId).catch((error) => this.markExecutionFailed(workspaceId, executionId, executionFailure(error)));
+    void this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId).catch((error) => this.failBackgroundExecution(workspaceId, executionId, error));
     return this.toView(await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId));
   }
 
@@ -1405,7 +1435,7 @@ export class AgentExecutionsService implements OnModuleInit {
       const continuation = shell.state === 'settled'
         ? this.resumeAfterToolCalls(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId)
         : this.executeShell(request, workspaceSlug, workspaceId, executionId, call);
-      void continuation.catch((error) => this.markExecutionFailed(workspaceId, executionId, executionFailure(error)));
+      void continuation.catch((error) => this.failBackgroundExecution(workspaceId, executionId, error));
     }
     return this.toView(await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId));
   }
@@ -1517,7 +1547,11 @@ export class AgentExecutionsService implements OnModuleInit {
       await this.publishSnapshotForExecution(workspaceId, executionId);
     }, (settled) => this.scheduleProjectTaskReport(workspaceId, executionId, settled.id),
     // A live Claude question parks the round without settling it; report the question now.
-    (waiting) => { void this.publishSnapshotForExecution(workspaceId, executionId); this.scheduleProjectTaskReport(workspaceId, executionId, waiting.id); })
+    (waiting) => {
+      void this.publishSnapshotForExecution(workspaceId, executionId)
+        .catch((error) => this.logger.warn(`Project task ${taskId} snapshot failed: ${error instanceof Error ? error.message : String(error)}`));
+      this.scheduleProjectTaskReport(workspaceId, executionId, waiting.id);
+    })
       .catch((error) => this.logger.warn(`Chat project task ${taskId} background run failed: ${error instanceof Error ? error.message : String(error)}`));
   }
 
@@ -1743,7 +1777,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const activeExecution = await this.loadExecution(workspaceId, agentId, executionId);
     if (activeExecution.status !== 'running') return this.toView(activeExecution);
     // The engine owns its tool loop; MCP returns results to that same live session.
-    if (activeExecution.capabilitySnapshot?.agent.runtime && activeExecution.capabilitySnapshot.agent.runtime.kind !== 'native') {
+    if (agentId !== CHAT_AGENT_ID && activeExecution.capabilitySnapshot?.agent.runtime && activeExecution.capabilitySnapshot.agent.runtime.kind !== 'native') {
       this.db.update(agentExecutions).set({ phase: 'model', updatedAt: new Date() }).where(and(eq(agentExecutions.id, executionId), eq(agentExecutions.status, 'running'))).run();
       await this.publishSnapshotForExecution(workspaceId, executionId);
       return this.toView(activeExecution);
@@ -1813,7 +1847,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const memoriesPrompt = buildChatMemoriesPrompt(memories);
     return {
       revision: configuration.revision,
-      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, runtime: agent.runtime, modelParameters: agent.modelParameters ?? undefined, systemPrompt: [
+      agent: { id: agent.id, providerId: agent.providerId, model: agent.model, runtime: { kind: 'native' as const }, modelParameters: agent.modelParameters ?? undefined, systemPrompt: [
         [agent.systemPrompt, configuration.extensionPrompt].filter(Boolean).join('\n\nUser capability extensions:\n'),
         memoriesPrompt,
       ].filter(Boolean).join('\n\n') },
@@ -1842,7 +1876,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const [agent] = await this.db.select().from(agents).where(and(eq(agents.id, agentId), eq(agents.workspaceId, workspaceId))).limit(1);
     if (!agent) throw new NotFoundException('Agent not found');
     if (agent.kind !== 'custom' && agent.id !== CHAT_AGENT_ID) throw new BadRequestException('This built-in Agent cannot be executed.');
-    if (agent.runtime.kind === 'native' && !agent.collaboration?.publicModels?.length && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
+    if ((agentId === CHAT_AGENT_ID || agent.runtime.kind === 'native') && !agent.collaboration?.publicModels?.length && (!agent.providerId || !agent.model)) throw new ConflictException('Configure a model provider and model before running this Agent.');
     const fileEntry = catalog?.get(agentId);
     if (fileEntry) return { agent, assignedSkills: fileEntry.skills };
     const rows = await this.db.select({ id: skills.id, name: skills.name, instructions: skills.instructions, validation: skills.validation, validationReason: skills.validationReason }).from(agentSkills).innerJoin(skills, eq(agentSkills.skillId, skills.id)).where(and(eq(agentSkills.agentId, agentId), eq(skills.workspaceId, workspaceId)));
@@ -1867,7 +1901,7 @@ export class AgentExecutionsService implements OnModuleInit {
     const execution = await this.loadExecution(workspace.id, agentId, executionId);
     if (execution.status !== 'running') throw new ConflictException('Only a running Agent turn accepts steering.');
     const text = normalizeUserMessage(input?.message);
-    if (agentId === CHAT_AGENT_ID && (!execution.capabilitySnapshot?.agent.runtime || execution.capabilitySnapshot.agent.runtime.kind === 'native')) {
+    if (agentId === CHAT_AGENT_ID) {
       await this.queueMessage(request, workspaceSlug, agentId, executionId, { ...input, mode: 'steering' });
       return { delivered: false, queued: true };
     }
@@ -1892,19 +1926,24 @@ export class AgentExecutionsService implements OnModuleInit {
     const controller = new AbortController();
     this.activeModelRequests.set(execution.id, controller);
     const messageId = `msg_${randomUUID()}`;
+    let partialText = '';
     try {
       const ready = await this.loadExecution(workspaceId, execution.agentId, execution.id);
       if (ready.status !== 'running') return this.toView(ready);
       controller.signal.throwIfAborted();
       const binding = this.db.select().from(auditLogs).where(and(eq(auditLogs.action, 'chat_agent.dispatched'), eq(auditLogs.resource, execution.id), eq(auditLogs.workspaceId, workspaceId))).get();
-      const invocationId = asRecord(binding?.metadata)?.invocationId;
-      const text = await this.collaboration!.run(workspaceId, execution.id, execution.agentId, { conversation: execution.displayMessages }, controller.signal, (delta) => this.persistEvent(execution.id, { kind: 'message_delta', messageId, delta }), execution.projectDirectory ?? undefined, undefined, typeof invocationId === 'string' ? invocationId : undefined);
+      const savedRoot = execution.capabilitySnapshot?.agent.runtime && execution.capabilitySnapshot.agent.runtime.kind !== 'native'
+        ? this.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.action, 'agent.invocation'), eq(auditLogs.resource, execution.id), eq(auditLogs.workspaceId, workspaceId), sql`json_extract(${auditLogs.metadata}, '$.parentRunId') is null`, sql`json_extract(${auditLogs.metadata}, '$.agentId') = ${execution.agentId}`)).orderBy(desc(auditLogs.createdAt)).get()
+        : undefined;
+      const invocationId = asRecord(binding?.metadata)?.invocationId ?? savedRoot?.id;
+      const text = await this.collaboration!.run(workspaceId, execution.id, execution.agentId, { conversation: execution.displayMessages }, controller.signal, (delta) => { partialText += delta; return this.persistEvent(execution.id, { kind: 'message_delta', messageId, delta }); }, execution.projectDirectory ?? undefined, undefined, typeof invocationId === 'string' ? invocationId : undefined);
       controller.signal.throwIfAborted();
       const message = { id: messageId, role: 'assistant' as const, content: text, createdAt: new Date().toISOString() };
       const checkpoint = (await this.loadExecution(workspaceId, execution.agentId, execution.id)).modelMessages;
       const messages = checkpoint.at(-1)?.role === 'assistant' ? checkpoint : [...checkpoint, { role: 'assistant' as const, content: [{ type: 'text' as const, text }] }];
       await this.db.update(agentExecutions).set(executionUpdates(execution.id, { status: 'completed', phase: 'model', error: null, errorCode: null, displayMessages: appendExecutionMessages(execution.id, 'display', [message]), modelMessages: messages, updatedAt: new Date() })).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running')));
     } catch (error) {
+      if (controller.signal.aborted && partialText) this.retainInterruptedReply(execution.id, messageId, partialText);
       if (!controller.signal.aborted) await this.markExecutionFailed(workspaceId, execution.id, executionFailure(error));
     } finally {
       if (this.activeModelRequests.get(execution.id) === controller) this.activeModelRequests.delete(execution.id);
@@ -1913,84 +1952,13 @@ export class AgentExecutionsService implements OnModuleInit {
     return this.toView(await this.loadExecution(workspaceId, execution.agentId, execution.id));
   }
 
-  private async chatRuntimeImages(workspaceId: string, content: string) {
-    const result = await inlineUserAttachmentImages([{ role: 'user', content }], { protocol: 'openai/responses', store: {
-      describe: (id) => this.attachments.describe(workspaceId, id), load: (id) => this.attachments.load(workspaceId, id),
-    } });
-    return result.messages.flatMap((message) => message.role === 'user' && Array.isArray(message.content)
-      ? message.content.flatMap((part) => {
-        if (part.type !== 'image') return [];
-        const body = Buffer.from(part.image, 'base64');
-        return [{ fileName: `${createHash('sha256').update(body).digest('hex')}.${part.mediaType.split('/')[1] ?? 'png'}`, body, description: 'User-supplied Chat image' }];
-      }) : []);
-  }
-
-  private async executeChatRuntimeTool(request: Request, workspaceSlug: string, workspaceId: string, executionId: string, name: string, input: Record<string, unknown>, definitions: GatewayToolDefinition[], ask: AskChatRuntime): Promise<string> {
-    const execution = await this.loadExecution(workspaceId, CHAT_AGENT_ID, executionId);
-    if (execution.status !== 'running') throw new ConflictException('The Chat turn is no longer running.');
-    const definition = definitions.find((tool) => tool.name === name);
-    if (!definition) throw new BadRequestException('This tool is unavailable in the captured Chat turn.');
-    const issues = platformInputIssues(input, definition.inputSchema);
-    const platform = execution.capabilitySnapshot?.skills.find((skill) => isProtectedPlatformSkillId(workspaceId, skill.id));
-    const scriptPath = platform ? Object.entries(platformToolManifest(platform.files)).find(([path, tool]) => path.startsWith('scripts/') && tool.name === name)?.[0] : undefined;
-    let rejection = issues.length ? JSON.stringify({ fields: issues }) : undefined;
-    if (!rejection && scriptPath) {
-      const fingerprint = platformArgumentsHash([JSON.stringify(input)]);
-      const userMessageAt = Date.parse(execution.displayMessages.filter((message) => message.role === 'user').at(-1)?.createdAt ?? '') || 0;
-      const prior = this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, executionId), eq(agentToolCalls.skillId, platform!.id), eq(agentToolCalls.scriptPath, scriptPath), inArray(agentToolCalls.status, ['failed', 'cancelled']))).all().find((call) => {
-        if (call.createdAt.getTime() < userMessageAt || platformArgumentsHash(call.arguments) !== fingerprint) return false;
-        try { const effect = JSON.parse(call.output)?.failure?.effect; return effect === 'unknown' || effect === 'applied'; } catch { return false; }
-      });
-      if (prior) rejection = JSON.stringify(platformFailure('admission', 'PLATFORM_REPLAY_BLOCKED', 'unknown', { evidence: { priorCallId: prior.id, commandExecutionId: prior.commandExecutionId } }));
-    }
-    const id = `acall_${randomUUID()}`;
-    // The original executor persists the same task card, script evidence, attribution and delivery records.
-    this.db.insert(agentToolCalls).values({ id, executionId, workspaceId, agentId: CHAT_AGENT_ID, toolCallId: id,
-      toolName: scriptPath ? 'skill_script' : 'builtin', mcpToolName: name, input, workingDirectory: '',
-      skillId: scriptPath ? platform!.id : null, skillName: scriptPath ? platform!.name : null,
-      scriptPath: scriptPath ?? null, packageFiles: scriptPath ? platform!.files : [], arguments: scriptPath ? [JSON.stringify(input)] : [], status: 'running',
-    }).run();
-    this.db.insert(auditLogs).values({ id: `audit_${randomUUID()}`, workspaceId, action: `${name}.requested`, resource: id, metadata: { executionId, agentId: CHAT_AGENT_ID, toolName: name, scriptPath: scriptPath ?? null } }).run();
-    const startedCall = this.db.select().from(agentToolCalls).where(eq(agentToolCalls.id, id)).get()!;
-    await this.persistEvent(executionId, { kind: 'tool_call', call: toToolCallView(startedCall) });
-    await this.publishSnapshotForExecution(workspaceId, executionId);
-    if (rejection) {
-      const output = rejection;
-      this.db.update(agentToolCalls).set({ status: 'failed', output, finishedAt: new Date() }).where(eq(agentToolCalls.id, id)).run();
-      await this.publishSnapshotForExecution(workspaceId, executionId);
-      throw new BadRequestException(output);
-    }
-    if (name === 'update_plan' || name === 'ask_user') {
-      try {
-        let output: string;
-        if (name === 'update_plan') {
-          const plan = parsePlan(input);
-          this.db.update(agentExecutions).set({ plan, updatedAt: new Date() }).where(eq(agentExecutions.id, executionId)).run();
-          output = formatPlan(plan);
-        } else {
-          const question = createPendingQuestion(input);
-          output = await ask(question.question, { options: question.options, ...(question.action === 'new_conversation' ? { action: question.action } : {}) });
-        }
-        this.db.update(agentToolCalls).set({ status: 'completed', output, finishedAt: new Date() }).where(eq(agentToolCalls.id, id)).run();
-      } catch (error) {
-        this.db.update(agentToolCalls).set({ status: 'failed', output: error instanceof Error ? error.message : 'Chat tool failed.', finishedAt: new Date() }).where(eq(agentToolCalls.id, id)).run();
-        throw error;
-      } finally { await this.publishSnapshotForExecution(workspaceId, executionId); }
-    } else {
-      await this.executeToolCall(request, workspaceSlug, workspaceId, CHAT_AGENT_ID, executionId, id);
-    }
-    const call = this.db.select().from(agentToolCalls).where(eq(agentToolCalls.id, id)).get()!;
-    if (call.status === 'failed' || call.status === 'cancelled') throw new BadRequestException(call.output);
-    return call.output;
-  }
-
   private async advanceRuntime(request: Request, workspaceSlug: string, workspaceId: string, execution: typeof agentExecutions.$inferSelect): Promise<AgentExecutionView> {
     const snapshot = execution.capabilitySnapshot;
     if (!snapshot?.agent.runtime || snapshot.agent.runtime.kind === 'native') throw new ConflictException('Agent runtime snapshot is unavailable.');
-    const isChat = execution.agentId === CHAT_AGENT_ID;
-    const configuration = await validateAgentRuntime({ ...snapshot.agent.runtime, ...(isChat ? { projectDirectory: '' } : { projectDirectory: execution.projectDirectory || snapshot.agent.runtime.projectDirectory }) });
-    if (!isChat && configuration.kind !== 'native' && !configuration.projectDirectory) throw new BadRequestException('runtime.projectDirectory is required for this Agent; configure it or pass projectDirectory to run_agent.');
+    if (execution.agentId === CHAT_AGENT_ID) throw new ConflictException('Chat only supports the native runtime.');
+    const configuration = await validateAgentRuntime({ ...snapshot.agent.runtime, projectDirectory: execution.projectDirectory || snapshot.agent.runtime.projectDirectory });
     if (configuration.kind === 'native') throw new ConflictException('A native Agent cannot enter an external runtime.');
+    if (!configuration.projectDirectory) throw new BadRequestException('runtime.projectDirectory is required for this Agent; configure it or pass projectDirectory to run_agent.');
     const existing = this.db.select().from(agentRuntimeSessions).where(and(eq(agentRuntimeSessions.id, execution.id), eq(agentRuntimeSessions.workspaceId, workspaceId))).get();
     let model = existing ? existing.launch.model : snapshot.agent.model || null;
     if (!existing && snapshot.agent.providerId) {
@@ -1999,44 +1967,31 @@ export class AgentExecutionsService implements OnModuleInit {
     }
     const input = [...execution.modelMessages].reverse().find((message) => message.role === 'user');
     if (!input || input.role !== 'user') throw new ConflictException('An Agent runtime turn requires user input.');
+    // Several directions can be accepted before the engine starts another turn. Preserve those
+    // user messages as context even when an intervening scheduled turn was stopped before send.
+    let pendingStart = execution.modelMessages.length - 1;
+    while (pendingStart > 0 && execution.modelMessages[pendingStart - 1]?.role === 'user') pendingStart--;
+    const pendingDirections = execution.modelMessages.slice(pendingStart, -1);
+    const runtimeInput = existing?.externalSessionId && pendingDirections.length
+      ? `Earlier user directions (context only; do not replay completed operations):\n${JSON.stringify(pendingDirections)}\n\nCurrent user message:\n${input.content}`
+      : input.content;
     const controller = new AbortController();
     this.activeModelRequests.set(execution.id, controller);
     const messageId = `msg_${randomUUID()}`;
+    let partialText = '';
     try {
       // Recheck after async setup: cancellation may already have settled the conversation.
       const ready = await this.loadExecution(workspaceId, execution.agentId, execution.id);
       if (ready.status !== 'running') return this.toView(ready);
-      const platformSkill = isChat ? snapshot.skills.find((skill) => isProtectedPlatformSkillId(workspaceId, skill.id)) : undefined;
-      const manifest = platformSkill ? platformToolManifest(platformSkill.files) : {};
-      const hostTool = platformSkill ? platformRuntimeTool(platformSkill.files, 'run_host_command') : undefined;
-      const definitions = [...new Map([...HELPER_BUILTIN_TOOLS, ...CHAT_AGENT_TOOLS, ...Object.entries(manifest).filter(([path]) => path.startsWith('scripts/')).map(([, tool]) => tool), ...(hostTool ? [hostTool] : [])].map((tool) => [tool.name, tool])).values()];
-      const [delivery] = isChat ? await this.db.select({ channel: externalChats.channel }).from(externalChats).where(eq(externalChats.executionId, execution.id)).limit(1) : [];
-      const systemPrompt = isChat ? [snapshot.agent.systemPrompt, CHAT_ORCHESTRATION_RULE, CHAT_ROUTER_CONTROL_RULE, CHAT_DELEGATION_RULE, CHAT_HOST_COMMAND_RULE,
-        'You are WorkLite Chat. Use the worklite_chat MCP server for platform tools (inspect_workspace, run_agent, update_chat, ask_user, update_plan, query_platform and the other listed tools). Use MCP ask_user for user choices. You do not own project code: delegate project code changes, repository investigation and build/test work to an Agent with an absolute projectDirectory. Never use native sub-agent tools to bypass WorkLite delegation. Skills are captured by value for this turn; only use the current selected Skills. Do not read sibling conversations or credentials in the parent .worklite directory. Stop after successful dispatches without an extra acknowledgement.',
-        `Current conversation delivery channel: ${delivery?.channel ?? 'web'}.`,
-        agentFiles(this.db) ? `Agent package catalog root: ${JSON.stringify(agentFiles(this.db)!.workspaceRoot(workspaceId))}` : '',
-      ].filter(Boolean).join('\n\n') : snapshot.agent.systemPrompt;
       const output = await this.agentRuntime.executeTurn({
-        owner: isChat ? 'chat' : 'agent',
-        ...(isChat ? { platformTools: { definitions, execute: (name: string, value: Record<string, unknown>, ask: AskChatRuntime) => this.executeChatRuntimeTool(request, workspaceSlug, workspaceId, execution.id, name, value, definitions, ask) } } : {}),
         sessionId: execution.id, runtime: configuration.kind, messageId, approvalPolicy: configuration.approvalPolicy, workspaceId, model, modelParameters: snapshot.agent.modelParameters,
-        projectDirectory: configuration.projectDirectory, systemPrompt,
-        ...(isChat ? { images: await this.chatRuntimeImages(workspaceId, input.content) } : {}),
-        input: !existing?.externalSessionId && (isChat || execution.modelMessages.length > 1) ? `Conversation history (context only; do not replay past operations):\n${JSON.stringify(execution.modelMessages.slice(0, -1))}\n\nCurrent user message:\n${input.content}` : input.content, skills: snapshot.skills,
+        projectDirectory: configuration.projectDirectory, systemPrompt: snapshot.agent.systemPrompt,
+        input: !existing?.externalSessionId && execution.modelMessages.length > 1 ? `Conversation history (context only; do not replay past operations):\n${JSON.stringify(execution.modelMessages.slice(0, -1))}\n\nCurrent user message:\n${input.content}` : runtimeInput, skills: snapshot.skills,
         mcpServers: await this.executionMcpRuntimes(request, workspaceSlug, execution),
-        signal: controller.signal, correlation: { surface: isChat ? 'chat' : 'agent', ...(isChat ? { conversationId: execution.id } : {}), agentRunId: execution.id, agentExecutionId: execution.id },
+        signal: controller.signal, correlation: { surface: 'agent', agentRunId: execution.id, agentExecutionId: execution.id },
         onTextDelta: (delta) => {
-          if (isChat) {
-            const calls = this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, execution.id), eq(agentToolCalls.resultAppended, false))).all();
-            if (runtimeDispatchOnly(calls)) return;
-          }
+          partialText += delta;
           return this.persistEvent(execution.id, { kind: 'message_delta', messageId, delta });
-        },
-        onEvent: async (activity) => {
-          if (isChat && activity.plan) {
-            this.db.update(agentExecutions).set({ plan: activity.plan, updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running'))).run();
-            await this.publishSnapshotForExecution(workspaceId, execution.id);
-          }
         },
         onInteraction: async (id, question, details) => {
           controller.signal.throwIfAborted();
@@ -2045,19 +2000,19 @@ export class AgentExecutionsService implements OnModuleInit {
           await this.publishSnapshotForExecution(workspaceId, execution.id);
         },
       });
-      const turnCalls = isChat ? await this.db.select().from(agentToolCalls).where(and(eq(agentToolCalls.executionId, execution.id), eq(agentToolCalls.resultAppended, false))) : [];
-      const dispatchOnly = runtimeDispatchOnly(turnCalls);
-      if (!output.trim() && !dispatchOnly) throw new Error('The Chat runtime returned no reply.');
+      if (!output.trim()) throw new Error('The Agent runtime returned no reply.');
       this.db.transaction((transaction) => {
-        for (const call of turnCalls) transaction.update(agentToolCalls).set({ resultAppended: true }).where(eq(agentToolCalls.id, call.id)).run();
         transaction.update(agentExecutions).set(executionUpdates(execution.id, { status: 'completed', pendingQuestion: null, error: null, errorCode: null,
           modelMessages: appendExecutionMessages(execution.id, 'model', [{ role: 'assistant', content: [{ type: 'text', text: output }] }]),
-          displayMessages: appendExecutionMessages(execution.id, 'display', dispatchOnly ? [] : [{ id: messageId, role: 'assistant', content: output, createdAt: new Date().toISOString() }]), updatedAt: new Date(),
+          displayMessages: appendExecutionMessages(execution.id, 'display', [{ id: messageId, role: 'assistant', content: output, createdAt: new Date().toISOString() }]), updatedAt: new Date(),
         })).where(and(eq(agentExecutions.id, execution.id), eq(agentExecutions.status, 'running'))).run();
       });
       await this.publishSnapshotForExecution(workspaceId, execution.id);
       return this.toView(await this.loadExecution(workspaceId, execution.agentId, execution.id));
     } catch (error) {
+      if (controller.signal.aborted && partialText) {
+        this.retainInterruptedReply(execution.id, messageId, partialText);
+      }
       const failure = executionFailure(error);
       const message = error instanceof Error ? error.message : failure.message;
       this.db.update(agentExecutions).set({ status: 'failed', errorCode: failure.code, error: `${message} Inspect prior effects and send a new message to continue; this turn was not replayed.`, pendingQuestion: null, updatedAt: new Date() }).where(and(eq(agentExecutions.id, execution.id), inArray(agentExecutions.status, ['running', 'waiting_for_input']))).run();
@@ -2066,6 +2021,13 @@ export class AgentExecutionsService implements OnModuleInit {
     } finally {
       this.activeModelRequests.delete(execution.id);
     }
+  }
+
+  private retainInterruptedReply(executionId: string, messageId: string, text: string): void {
+    this.db.update(agentExecutions).set(executionUpdates(executionId, {
+      displayMessages: appendExecutionMessages(executionId, 'display', [{ id: messageId, role: 'assistant', content: text, createdAt: new Date().toISOString() }]),
+      modelMessages: appendExecutionMessages(executionId, 'model', [{ role: 'assistant', content: [{ type: 'text', text }] }]), updatedAt: new Date(),
+    })).where(eq(agentExecutions.id, executionId)).run();
   }
 
   private async requireSkillAssignment(workspaceId: string, agentId: string, skillId: string | null): Promise<void> {
@@ -2103,6 +2065,14 @@ export class AgentExecutionsService implements OnModuleInit {
       ? chatConversationStatus(execution.status, (await activeChatBackgroundExecutionIds(this.db, execution.workspaceId, [execution.id])).has(execution.id))
       : undefined;
     return { queuedMessages: execution.queuedMessages, executionAuthorization: execution.executionAuthorization ?? null, id: execution.id, agentId: execution.agentId, status: execution.status, ...(conversationStatus ? { conversationStatus } : {}), phase: execution.phase, errorCode: execution.errorCode, messages: execution.displayMessages, toolCalls: calls.filter((call) => execution.agentId !== CHAT_AGENT_ID || !['run_sub_agent', 'run_sub_agents', 'use_capability'].includes(call.mcpToolName ?? '')).map((call) => ({ ...toToolCallView(call), ...(invocations.has(call.id) ? { agentInvocation: invocations.get(call.id) } : {}), ...(call.toolName === 'builtin' && call.mcpToolName === 'project_task' ? { projectTask: projectTasks.get(call.id) } : {}) })), error: execution.error, plan: execution.plan ?? [], pendingQuestion: execution.pendingQuestion ?? null, contextDropped: execution.contextDropped ?? 0, createdAt: execution.createdAt.toISOString(), updatedAt: execution.updatedAt.toISOString() };
+  }
+
+  private async failBackgroundExecution(workspaceId: string, executionId: string, error: unknown): Promise<void> {
+    try {
+      await this.markExecutionFailed(workspaceId, executionId, executionFailure(error));
+    } catch (persistenceError) {
+      this.logger.error(`Agent execution ${executionId} failed (${error instanceof Error ? error.message : String(error)}); failure persistence also failed: ${persistenceError instanceof Error ? persistenceError.stack : String(persistenceError)}`);
+    }
   }
 
   private async markExecutionFailed(workspaceId: string, executionId: string, failure: ExecutionFailure): Promise<void> {
@@ -2214,10 +2184,12 @@ export class AgentExecutionsService implements OnModuleInit {
 
   private async writeEvent(executionId: string, data: AgentExecutionEventData): Promise<void> {
     const previous = this.eventQueues.get(executionId) ?? Promise.resolve();
-    const next = previous.then(async () => {
+    const next = previous.catch(() => undefined).then(async () => {
       // A snapshot is a complete execution view, so it supersedes every earlier one.
       // The new row is allocated first so that deleting a trailing snapshot never
       // lets a later event reuse its sequence.
+      // Reserve the writer before reading: WAL read-to-write promotion can fail with
+      // SQLITE_BUSY_SNAPSHOT if maintenance commits meanwhile, bypassing busy_timeout.
       const row = this.db.transaction((transaction) => {
         if (data.kind === 'snapshot') {
           const previous = transaction.select({ data: agentExecutionEvents.data }).from(agentExecutionEvents).where(and(eq(agentExecutionEvents.executionId, executionId), eq(agentExecutionEvents.kind, 'snapshot'))).orderBy(desc(agentExecutionEvents.sequence)).get();
@@ -2242,7 +2214,7 @@ export class AgentExecutionsService implements OnModuleInit {
           )).run();
         }
         return inserted;
-      });
+      }, { behavior: 'immediate' });
       if (!row) return;
       const event = toExecutionEvent(row);
       for (const listener of this.listeners) listener(event);
@@ -2254,11 +2226,6 @@ export class AgentExecutionsService implements OnModuleInit {
       if (this.eventQueues.get(executionId) === next) this.eventQueues.delete(executionId);
     }
   }
-}
-
-function runtimeDispatchOnly(calls: Array<Pick<typeof agentToolCalls.$inferSelect, 'mcpToolName' | 'input' | 'status'>>): boolean {
-  return calls.some((call) => call.mcpToolName === 'run_agent' && typeof asRecord(call.input)?.__backgroundExecutionId === 'string')
-    && calls.every((call) => call.status === 'completed' && ['run_agent', 'update_plan'].includes(call.mcpToolName ?? ''));
 }
 
 function shortDispatchText(value: string, limit: number): string {

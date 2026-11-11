@@ -7,6 +7,7 @@ import { parse as parseToml, type TomlTable } from 'smol-toml';
 import type { StoredProjectExecutorLaunch } from '@worklite/db';
 import { gatewayAttributionHeaders } from '@worklite/model-gateway';
 import { CommandsService, type CommandStdioProcess } from '../commands/commands.service';
+import { settleRuntimeInterruption } from './runtime-interruption';
 import { requireSafeCommandWord, isGatewayPublicModel, localGatewayBaseUrl, type AgentRuntimeAdapter, type PreparedProjectExecution, type ProjectExecutorActivity, type ProjectExecutorRequest } from './project-executor.types';
 
 type CodexLaunch = Extract<StoredProjectExecutorLaunch, { executor: 'codex' }>;
@@ -47,12 +48,17 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
     let process: CommandStdioProcess | undefined;
     let completed = false;
     let closing = false;
+    let cancellation: Promise<void> | undefined;
     const cancel = () => {
-      if (session.threadId && session.turnId) {
-        void session.call('turn/interrupt', { threadId: session.threadId, turnId: session.turnId }).catch(() => undefined);
-      }
-      session.fail(request.signal.reason ?? new Error('The Codex task was cancelled.'));
-      if (process) void this.commands.cancel(process.executionId).catch(() => undefined);
+      cancellation ??= (async () => {
+        if (session.threadId && session.turnId) {
+          await settleRuntimeInterruption(async () => {
+            await session.call('turn/interrupt', { threadId: session.threadId, turnId: session.turnId });
+            await session.waitForTurnEnd();
+          });
+        }
+        session.fail(request.signal.reason ?? new Error('The Codex task was cancelled.'));
+      })();
     };
     try {
       // A declared Gateway public model is served by the WorkLite Gateway through a per-run Responses
@@ -115,8 +121,12 @@ export class CodexAppServerService implements AgentRuntimeAdapter {
       await session.activity('codex.completed');
       completed = true;
       return output;
+    } catch (error) {
+      request.signal.throwIfAborted();
+      throw error;
     } finally {
       request.signal.removeEventListener('abort', cancel);
+      await cancellation;
       controller.abort(new Error('The Codex App Server session is closed.'));
       try {
         if (process && !completed) {
@@ -163,6 +173,8 @@ class CodexAppServerSession {
   attach(transport: CommandStdioProcess): void { this.transport = transport; }
 
   async flushEvents(): Promise<void> { await this.eventQueue; }
+
+  async waitForTurnEnd(): Promise<void> { await this.finished.catch(() => undefined); }
 
   async call(method: string, params: unknown): Promise<any> {
     if (this.failed) throw this.failed;

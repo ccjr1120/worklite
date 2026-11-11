@@ -201,11 +201,7 @@
     "turnNotificationSound": "提示音",
     "turnNotificationSoundSilent": "无提示音",
     "saveFailed": "配置未保存，请重试。",
-    "loadFailed": "无法加载配置。",
-    "runtime": "运行时",
-    "runtimeNative": "原生模型",
-    "runtimeHint": "运行时在新会话生效；每轮使用当前选择的 Skills。",
-    "runtimeDefaultModel": "运行时默认模型"
+    "loadFailed": "无法加载配置。"
   },
   "settings": {
     "open": "打开 Chat 设置",

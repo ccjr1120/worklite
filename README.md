@@ -58,9 +58,13 @@ collaboration:
 
 ## 运行时与微信配置
 
-Chat 配置可选择原生模型、Codex App Server 或 Claude Agent SDK；运行时选择对新会话生效，已有会话继续使用捕获的运行时。引擎版 Chat 在 `~/.worklite/chat/session-*/` 中工作，禁止指向 `.worklite` 根目录。每轮从 Chat 配置捕获 Skills，重建 `.agents/skills` 和 `.claude/skills`，并从同一份内容生成 `AGENTS.md`、`CLAUDE.md`。平台操作通过只绑定当前轮次的本机 MCP 服务执行；项目事务仍委派给 Agent，任务卡片、提问、计划、流式输出及微信报告沿用现有通道。
+Chat 在空输入框中提供推荐输入：新对话可从梳理目标开始；任务运行中可追问进展，结束后可检查结果、排查失败或讨论下一步。同一对话中的多个任务会一起参与推荐，已结束任务不会从上下文中移除。按 Tab 将推荐填入草稿，按 Enter 发送，按 Esc 忽略；任务状态变化后可产生新的推荐。
+
+Chat 只使用 native 模型循环，通过配置的 Provider 和模型运行。每轮捕获当前选择的 Skills、提示词和模型配置；平台工具按需发现。旧 Codex/Claude Chat 会话在启动时转为 native，保留历史消息、工具证据和后台 Agent；未完成的引擎操作标记为中断且不会自动重放。原先使用本机默认模型的 Chat 需要先配置 Provider 和模型。
 
 Codex App Server 和 Claude Agent SDK 也是内置 Agent 运行时，无需插件配置。Codex 使用主机上可用的 `codex` 命令和 `CODEX_HOME`（默认 `~/.codex`）配置；显式选择 Gateway 模型时注入本次执行的 Responses Provider。旧会话保留已捕获的启动配置。Codex 的 `service_tier = "fast"` 会在本次进程中覆盖为上游接受的 `priority`，不会修改用户的 `config.toml`。Claude 默认配置位于 `~/.worklite/claude`；也可直接选择 `anthropic/messages` 的 Gateway 模型。
+
+Chat 运行中可排队发送或立即改方向；独立 Agent 收到新要求后会先中断当前轮并等待引擎收尾，再沿用同一 `executionId` 和 Codex thread / Claude session 继续；历史、部分回复和已有项目产出保留。Chat 中已派发的独立后台 Agent 不受改方向影响；要修改其任务，使用 `run_agent mode=continue` 指定原 `executionId`。显式停止优先于尚在等待收尾的新消息，停止后仍可按原执行继续。待回答的问题继续使用原回答入口。
 
 `codex/responses` Provider 反代与 Codex App Server / Claude Agent SDK 引擎运行时共存。Provider 页面可创建该协议，也可通过 Codex 账号池登录或导入 OAuth 账号；账号连接后会自动同步默认 `codex` Provider 及模型目录。反代转发 Responses、模型发现和图片生成，在上游边界把 `service_tier: "fast"` 转为 `priority`。已存在及新建的活动 Provider 不会再被启动迁移删除或强制切换运行时；旧退役身份、已完成的迁移标记和已经切换到引擎的配置继续保留。尚未完成的退役身份迁移仍修正 Chat、Agent、版本、执行快照及 Agent 文件配置；保留历史消息、工具证据及引擎支持的推理强度/服务档位；旧 Provider 请求 JSON 参数不适用于引擎，迁移时移除。拥有子 Agent 或能力工具的旧 Agent 通过受限 MCP 保留其委派与工具能力。没有默认项目目录的 Agent 仍须在派发时提供绝对项目目录。
 
