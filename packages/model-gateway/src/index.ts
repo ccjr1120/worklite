@@ -331,7 +331,11 @@ export class AiSdkModelGateway implements ModelGateway {
       const openaiProviderOptions = {
         ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: request.parallelToolCalls ?? false } : {}),
         ...(useResponses ? { strictJsonSchema: false as const } : {}),
-        ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
+        // store:false keeps every Responses-protocol turn self-contained: we never send
+        // conversation/previousResponseId, so a stored reasoning item would otherwise be
+        // replayed as a server-side item_reference the next model step cannot resolve
+        // (WorkLite never set one and most Responses-compatible gateways don't support it).
+        ...(useResponses ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
         ...(request.promptCacheKey && candidate.provider.adapter !== 'anthropic' ? { promptCacheKey: request.promptCacheKey } : {}),
       };
       const modelRequest = {
@@ -497,7 +501,10 @@ export class AiSdkModelGateway implements ModelGateway {
     const openaiProviderOptions = {
       ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: false as const } : {}),
       ...(useResponses ? { strictJsonSchema: false as const } : {}),
-      ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
+      // See the matching comment in generateAgentStep: this path never sends
+      // conversation/previousResponseId either, so a stored reasoning item must never be
+      // replayed as an item_reference.
+      ...(useResponses ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
     };
     const outputBudget = request.maxOutputTokens ?? defaultMaxOutputTokens(candidate.provider);
     const agentSettings = {
