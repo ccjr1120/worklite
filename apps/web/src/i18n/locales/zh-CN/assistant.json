@@ -503,6 +503,22 @@
       "provider_test": "供应商连接测试",
       "external": "外部直连",
       "unattributed": "未归因"
-    }
+    },
+    "nativeTitle": "Chat 模型用量（估算）",
+    "nativeTokens": "Token 总量",
+    "reasoningTokens": "推理 Token",
+    "cacheReadTokens": "缓存命中 Token",
+    "estimatedCost": "估算成本",
+    "nativeCaveat": "按已知模型单价估算，仅供参考，不是账单金额；未收录单价的模型不显示成本。"
+  },
+  "edit": {
+    "action": "编辑",
+    "cancel": "取消",
+    "save": "保存并重新发送",
+    "regenerate": "重新生成"
+  },
+  "reasoning": {
+    "show": "显示推理过程",
+    "hide": "隐藏推理过程"
   }
 }

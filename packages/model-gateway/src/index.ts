@@ -1,6 +1,7 @@
 import { modelRequestParameters, type ModelParameters } from '@worklite/contracts';
 import { isContextOverflow, withContextRecovery, type ContextCheckpointWriter } from './context-recovery.ts';
 export type { ContextCheckpoint, ContextCheckpointWriter } from './context-recovery.ts';
+export { DEFAULT_CONTEXT_WINDOW, estimateModelCost, modelCatalogEntry, modelContextWindow, type ModelCatalogEntry } from './model-catalog.ts';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { APICallError, generateText, InvalidToolInputError, isStepCount, JSONParseError, jsonSchema, NoOutputGeneratedError, Output, RetryError, streamText, ToolLoopAgent, tool, wrapLanguageModel, type LanguageModel, type LanguageModelCallEndEvent, type LanguageModelUsage, type ModelMessage, type PrepareStepFunction, type ToolExecutionEndEvent, type ToolSet } from 'ai';
@@ -46,9 +47,20 @@ export type GatewayUserContentPart =
   | { type: 'text'; text: string }
   | { type: 'image'; image: string; mediaType: string };
 
+// Provider replay metadata (Anthropic thinking signatures, OpenAI encrypted reasoning) is opaque
+// and must round-trip unchanged; providers reject or lose reasoning continuity without it.
+export type GatewayProviderOptions = Record<string, Record<string, unknown>>;
+
+export type GatewayReasoningPart = { type: 'reasoning'; text: string; providerOptions?: GatewayProviderOptions };
+
+export type GatewayAssistantPart =
+  | { type: 'text'; text: string }
+  | GatewayReasoningPart
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown };
+
 export type GatewayAgentMessage =
   | { role: 'user'; content: string | GatewayUserContentPart[] }
-  | { role: 'assistant'; content: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> }
+  | { role: 'assistant'; content: GatewayAssistantPart[] }
   | { role: 'tool'; content: Array<{ type: 'tool-result'; toolCallId: string; toolName: string; output: GatewayToolResultOutput }> };
 
 export type GatewayToolResultOutput = { type: 'text' | 'error-text'; value: string };
@@ -86,8 +98,13 @@ export type GenerateAgentStepRequest = {
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
   onTextDelta?: (delta: string) => void | Promise<void>;
+  onReasoningDelta?: (delta: string) => void | Promise<void>;
+  onToolInputStart?: (event: { toolCallId: string; toolName: string }) => void | Promise<void>;
+  onToolInputDelta?: (event: { toolCallId: string; delta: string }) => void | Promise<void>;
   onContextCheckpoint?: ContextCheckpointWriter;
   onMessages?: (messages: GatewayAgentMessage[]) => void | Promise<void>;
+  /** Stable per-conversation key so OpenAI-compatible providers route to the same prompt cache. */
+  promptCacheKey?: string;
 };
 
 export type GatewayToolDefinition = {
@@ -104,6 +121,8 @@ export type AgentStepResult = {
   toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; skillId?: string; scriptPath?: string; arguments?: string[]; modelToolName?: string; normalizationFailure?: string; rejection?: string }>;
   finishReason: string | null;
   contextDropped: number;
+  reasoningText: string;
+  usage: ModelUsage;
 };
 
 export type WorkflowAgentToolCall = {
@@ -172,6 +191,8 @@ export type ModelUsage = {
   outputTokens: number | null;
   totalTokens: number | null;
   reasoningTokens: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
 };
 
 export type ModelResult = {
@@ -293,32 +314,33 @@ export class AiSdkModelGateway implements ModelGateway {
       const tools: Record<string, unknown> = {
         ...(genericScripts.length > 0 ? { skill_script: skillScript } : {}),
       };
-      for (const definition of [...typedScripts.values()].map((script) => script.tool!)) {
-        if (tools[definition.name]) continue;
-        tools[definition.name] = tool({
-          description: definition.description,
-          strict: useResponses ? false : undefined,
-          inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
-        });
-      }
-      for (const definition of [...(request.builtinTools ?? []), ...(request.mcpTools ?? [])]) {
+      // Arguments are validated against each declared schema after parsing. A violation does not
+      // fail the step: the call comes back with a field-level rejection the model can correct.
+      const definitions = [...[...typedScripts.values()].map((script) => script.tool!), ...(request.builtinTools ?? []), ...(request.mcpTools ?? [])];
+      const schemas = new Map<string, Record<string, unknown>>();
+      for (const definition of definitions) {
         if (!definition.name || tools[definition.name]) continue;
+        schemas.set(definition.name, definition.inputSchema);
         tools[definition.name] = tool({
           description: definition.description,
           strict: useResponses ? false : undefined,
           inputSchema: jsonSchema<Record<string, unknown>>(definition.inputSchema as never),
         });
       }
+      const cacheBreakpoint = candidate.provider.adapter === 'anthropic' ? { anthropic: { cacheControl: { type: 'ephemeral' as const } } } : undefined;
       const openaiProviderOptions = {
         ...(candidate.provider.adapter === 'openai' ? { parallelToolCalls: request.parallelToolCalls ?? false } : {}),
         ...(useResponses ? { strictJsonSchema: false as const } : {}),
         ...(candidate.provider.adapter === 'codex' ? { store: false as const, include: ['reasoning.encrypted_content'] } : {}),
+        ...(request.promptCacheKey && candidate.provider.adapter !== 'anthropic' ? { promptCacheKey: request.promptCacheKey } : {}),
       };
       const modelRequest = {
         model,
-        system: request.systemPrompt,
+        // Anthropic caches by explicit breakpoints: one after the stable system prompt and tool
+        // definitions, and one on the newest message so every step reuses the previous prefix.
+        system: cacheBreakpoint ? { role: 'system' as const, content: request.systemPrompt, providerOptions: cacheBreakpoint } : request.systemPrompt,
         output: request.jsonOutput ? Output.json({ name: 'response' }) : undefined,
-        messages: context.messages as ModelMessage[],
+        messages: toSdkMessages(context.messages, cacheBreakpoint),
         tools: Object.keys(tools).length > 0 ? tools as never : undefined,
         // The Anthropic adapter implements 'none' by dropping every tool definition, which the
         // Messages API rejects when the history holds tool_use blocks; there the caller's
@@ -331,17 +353,17 @@ export class AiSdkModelGateway implements ModelGateway {
 
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
-        result = await generateAgentWithRetry(modelRequest, request.abortSignal, request.onTextDelta);
+        result = await generateAgentWithRetry(modelRequest as never, request.abortSignal, request);
       } catch (error) {
         if (!NoOutputGeneratedError.isInstance(error) || request.abortSignal?.aborted) throw modelFailure(error, error);
         try {
-          result = await generateText(modelRequest);
+          result = await generateText(modelRequest as never);
         } catch (fallbackError) {
           throw modelFailure(fallbackError, error.cause ?? error);
         }
       }
 
-      return toAgentStepResult(result, tools, typedScripts, context.dropped, request.jsonOutput === true);
+      return toAgentStepResult(result, tools, typedScripts, context.dropped, request.jsonOutput === true, schemas);
     });
   }
 
@@ -873,27 +895,97 @@ function toAgentStepResult(
   typedScripts: ReadonlyMap<string, { skillId: string; path: string }>,
   contextDropped: number,
   jsonOutput: boolean,
+  schemas: ReadonlyMap<string, Record<string, unknown>> = new Map(),
 ): AgentStepResult {
   const truncated = result.finishReason === 'length';
   const toolCalls = result.toolCalls.flatMap((call): AgentStepResult['toolCalls'] => {
     if (!call) return [];
     if (truncated) return [{ toolCallId: call.toolCallId, toolName: call.toolName, input: call.input,
       rejection: 'This tool was not executed: the model output reached its length limit and the arguments may be incomplete. Reissue the call with complete arguments.' }];
-    return normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts);
+    const normalized = normalizeAgentToolCall(call as { toolCallId: string; toolName: string; input: unknown }, tools, typedScripts);
+    const schema = schemas.get(call.toolName);
+    if (!schema) return normalized;
+    const issues = toolInputIssues(call.input, schema);
+    if (!issues.length) return normalized;
+    return normalized.map((entry) => entry.normalizationFailure || entry.rejection ? entry : { ...entry,
+      rejection: `This tool was not executed: its arguments do not match the declared input schema. Fix these fields and call it again: ${issues.slice(0, 12).map((issue) => `${issue.path} (${issue.rule})`).join('; ')}.` });
   });
+  const responseMessages = normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId)));
+  const usage = (result as { usage?: LanguageModelUsage }).usage;
   return {
     text: jsonOutput && toolCalls.length === 0 ? extractJsonText(result.text) : result.text,
-    responseMessages: normalizeResponseMessages(result.responseMessages, new Set(toolCalls.map((call) => call.toolCallId))),
+    responseMessages,
     toolCalls,
     finishReason: result.finishReason,
     contextDropped,
+    reasoningText: (result as { reasoningText?: string }).reasoningText ?? responseMessages.flatMap((message) => message.role === 'assistant' ? message.content.flatMap((part) => part.type === 'reasoning' ? [part.text] : []) : []).join('\n'),
+    usage: usage ? normalizeUsage(usage) : { inputTokens: null, outputTokens: null, totalTokens: null, reasoningTokens: null, cacheReadTokens: null, cacheWriteTokens: null },
   };
 }
+
+/**
+ * A small JSON Schema subset check (type, enum, const, required, properties, additionalProperties,
+ * items, string/number/array bounds, anyOf/oneOf). It reports only definite violations, so a
+ * schema feature it does not understand never rejects a call.
+ */
+export function toolInputIssues(value: unknown, schema: Record<string, unknown>, path = '$'): Array<{ path: string; rule: string }> {
+  const issues: Array<{ path: string; rule: string }> = [];
+  const fail = (rule: string) => issues.push({ path, rule });
+  const branches = (Array.isArray(schema.anyOf) ? schema.anyOf : Array.isArray(schema.oneOf) ? schema.oneOf : null) as Array<Record<string, unknown>> | null;
+  if (branches && branches.length && !branches.some((branch) => branch && typeof branch === 'object' && toolInputIssues(value, branch, path).length === 0)) fail(Array.isArray(schema.anyOf) ? 'anyOf' : 'oneOf');
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  const matches = (type: unknown) => type === 'null' ? value === null : type === 'array' ? Array.isArray(value)
+    : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
+      : type === 'integer' ? typeof value === 'number' && Number.isInteger(value) : typeof value === type;
+  if (types.length && !types.some(matches)) { fail(`type:${types.join('|')}`); return issues; }
+  if (Array.isArray(schema.enum) && !schema.enum.some((entry) => JSON.stringify(entry) === JSON.stringify(value))) fail('enum');
+  if ('const' in schema && JSON.stringify(schema.const) !== JSON.stringify(value)) fail('const');
+  if (typeof value === 'string') {
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength) fail('minLength');
+    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) fail('maxLength');
+    if (typeof schema.pattern === 'string') {
+      try { if (!new RegExp(schema.pattern, 'u').test(value)) fail('pattern'); } catch { /* unsupported pattern syntax */ }
+    }
+  }
+  if (typeof value === 'number') {
+    if (typeof schema.minimum === 'number' && value < schema.minimum) fail('minimum');
+    if (typeof schema.maximum === 'number' && value > schema.maximum) fail('maximum');
+  }
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) fail('minItems');
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) fail('maxItems');
+    if (schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) value.forEach((item, index) => issues.push(...toolInputIssues(item, schema.items as Record<string, unknown>, `${path}[${index}]`)));
+  } else if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const properties = (schema.properties && typeof schema.properties === 'object' ? schema.properties : {}) as Record<string, Record<string, unknown>>;
+    for (const key of Array.isArray(schema.required) ? schema.required : []) if (typeof key === 'string' && !(key in record)) issues.push({ path: `${path}.${key}`, rule: 'required' });
+    for (const key of Object.keys(record)) {
+      if (properties[key] && typeof properties[key] === 'object') issues.push(...toolInputIssues(record[key], properties[key], `${path}.${key}`));
+      else if (schema.additionalProperties === false) issues.push({ path: `${path}.${key}`, rule: 'additionalProperties' });
+      else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') issues.push(...toolInputIssues(record[key], schema.additionalProperties as Record<string, unknown>, `${path}.${key}`));
+    }
+  }
+  return issues;
+}
+
+/**
+ * Converts stored history into SDK messages. With an Anthropic breakpoint the newest message is
+ * marked so the next step reads the whole prior conversation from cache.
+ */
+function toSdkMessages(messages: readonly GatewayAgentMessage[], cacheBreakpoint?: GatewayProviderOptions): ModelMessage[] {
+  const converted = messages.map((message) => ({ ...message }) as ModelMessage);
+  if (!cacheBreakpoint || !converted.length) return converted;
+  const last = converted.length - 1;
+  converted[last] = { ...converted[last], providerOptions: { ...(converted[last] as { providerOptions?: GatewayProviderOptions }).providerOptions, ...cacheBreakpoint } } as ModelMessage;
+  return converted;
+}
+
+type AgentStreamListeners = Pick<GenerateAgentStepRequest, 'onTextDelta' | 'onReasoningDelta' | 'onToolInputStart' | 'onToolInputDelta'>;
 
 async function generateAgentWithRetry(
   request: Parameters<typeof streamText>[0],
   signal: AbortSignal | undefined,
-  onTextDelta?: (delta: string) => void | Promise<void>,
+  listeners: AgentStreamListeners = {},
   maxAttempts = 3,
 ): Promise<Awaited<ReturnType<typeof generateText>>> {
   const attempts = Math.max(1, Math.min(4, Math.floor(maxAttempts)));
@@ -909,13 +1001,18 @@ async function generateAgentWithRetry(
           request.onError?.({ error });
         },
       });
-      for await (const delta of result.textStream) {
-        emitted = true;
-        await onTextDelta?.(delta);
+      // Any visible output (text, reasoning or a streamed tool call) makes a retry unsafe:
+      // the caller has already shown or persisted part of this attempt.
+      for await (const part of result.fullStream) {
+        if (part.type === 'text-delta') { emitted = true; await listeners.onTextDelta?.(part.text); }
+        else if (part.type === 'reasoning-delta') { emitted = true; await listeners.onReasoningDelta?.(part.text); }
+        else if (part.type === 'tool-input-start') { emitted = true; await listeners.onToolInputStart?.({ toolCallId: part.id, toolName: part.toolName }); }
+        else if (part.type === 'tool-input-delta') { emitted = true; await listeners.onToolInputDelta?.({ toolCallId: part.id, delta: part.delta }); }
+        else if (part.type === 'tool-call') emitted = true;
       }
-      const [text, toolCalls, responseMessages, finishReason] = await Promise.all([result.text, result.toolCalls, result.responseMessages, result.finishReason]);
+      const [text, toolCalls, responseMessages, finishReason, usage, reasoningText] = await Promise.all([result.text, result.toolCalls, result.responseMessages, result.finishReason, result.totalUsage, result.reasoningText]);
       if (!emitted && streamError !== undefined) throw streamError;
-      return { text, toolCalls, responseMessages, finishReason } as Awaited<ReturnType<typeof generateText>>;
+      return { text, toolCalls, responseMessages, finishReason, usage, reasoningText } as Awaited<ReturnType<typeof generateText>>;
     } catch (error) {
       const failure = streamError !== undefined && NoOutputGeneratedError.isInstance(error) ? streamError : error;
       if (attempt + 1 >= attempts || emitted || signal?.aborted || !isRetryableGatewayError(failure)) throw failure;
@@ -1125,12 +1222,17 @@ function normalizeResponseMessages(messages: readonly ModelMessage[], acceptedTo
   const normalized: GatewayAgentMessage[] = [];
   for (const message of messages) {
     if (message.role === 'assistant') {
-      const parts: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> = [];
+      const parts: GatewayAssistantPart[] = [];
       if (typeof message.content === 'string') {
         parts.push({ type: 'text', text: message.content });
       } else {
         for (const part of message.content) {
           if (part.type === 'text') parts.push({ type: 'text', text: part.text });
+          // Reasoning is kept with its provider replay metadata (thinking signature, encrypted
+          // content). A part with neither text nor metadata carries nothing to replay.
+          if (part.type === 'reasoning' && (part.text || part.providerOptions)) {
+            parts.push({ type: 'reasoning', text: part.text, ...(part.providerOptions ? { providerOptions: part.providerOptions as GatewayProviderOptions } : {}) });
+          }
           if (part.type === 'tool-call' && acceptedToolCallIds.has(part.toolCallId)) parts.push({ type: 'tool-call', toolCallId: part.toolCallId, toolName: part.toolName, input: part.input });
         }
       }
@@ -1152,6 +1254,25 @@ function normalizeResponseMessages(messages: readonly ModelMessage[], acceptedTo
   return normalized;
 }
 
+/**
+ * Prepares stored history for a request that may run on a different protocol than the one that
+ * produced it. Provider replay metadata is only valid for its own provider family, so reasoning
+ * from another family is replayed as plain text inside the assistant turn, or dropped when empty.
+ */
+export function adaptReasoningForProvider(messages: readonly GatewayAgentMessage[], adapter: ModelProviderConfig['adapter']): GatewayAgentMessage[] {
+  const family = adapter === 'anthropic' ? 'anthropic' : 'openai';
+  return messages.map((message) => {
+    if (message.role !== 'assistant' || !message.content.some((part) => part.type === 'reasoning')) return message;
+    const content = message.content.flatMap((part): GatewayAssistantPart[] => {
+      if (part.type !== 'reasoning') return [part];
+      const options = part.providerOptions ?? {};
+      if (options[family]) return [{ type: 'reasoning', text: part.text, providerOptions: { [family]: options[family] } }];
+      return part.text.trim() ? [{ type: 'text', text: `<thinking>\n${part.text}\n</thinking>` }] : [];
+    });
+    return { role: 'assistant', content };
+  });
+}
+
 function normalizeToolResultOutput(output: unknown): GatewayToolResultOutput {
   if (!output || typeof output !== 'object' || !('type' in output)) return { type: 'text', value: JSON.stringify(output) };
   if (output.type === 'error-text' && 'value' in output && typeof output.value === 'string') return { type: 'error-text', value: output.value };
@@ -1164,6 +1285,8 @@ function normalizeUsage(usage: LanguageModelUsage): ModelUsage {
     inputTokens: usage.inputTokens ?? null,
     outputTokens: usage.outputTokens ?? null,
     totalTokens: usage.totalTokens ?? null,
-    reasoningTokens: usage.outputTokenDetails.reasoningTokens ?? null,
+    reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? null,
+    cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? null,
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? null,
   };
 }

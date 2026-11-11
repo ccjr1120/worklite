@@ -680,6 +680,27 @@ function ChatWorkspace() {
     }
   }
 
+  // Shared by editing a user message and regenerating the reply after one: both discard
+  // everything from that point on and re-run the turn against the server's authoritative result.
+  async function rewindExecution(messageId: string, message?: string) {
+    if (!visibleExecution || busy || running || waitingForInput) return;
+    const generation = mainRequestGenerationRef.current;
+    setBusy(true);
+    setError('');
+    try {
+      const next = await api.rewindAgentExecution(CHAT_AGENT_ID, visibleExecution.id, { messageId, message });
+      if (generation !== mainRequestGenerationRef.current) return;
+      setExecution(next);
+      setMainConnectionState('connected');
+      setQueuePaused(false);
+    } catch (rewindError) {
+      if (generation !== mainRequestGenerationRef.current) return;
+      setError(apiErrorMessage(rewindError, t('assistant:execution.requestFailed')));
+    } finally {
+      if (generation === mainRequestGenerationRef.current) setBusy(false);
+    }
+  }
+
   function selectMention(workflow: AgentView) {
     if (!mentionMatch) return;
     const atIndex = draft.lastIndexOf('@');
@@ -967,10 +988,14 @@ function ChatWorkspace() {
                   {conversationFailed ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('assistant:history.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => { setConversationFailed(false); setLoadingExecution(true); setConversationReloadKey((key) => key + 1); }}>{t('assistant:history.retry')}</Button></div> : null}
                   {hiddenTimelineCount > 0 ? <div className="flex justify-center"><Button type="button" variant="secondary" size="compact" onClick={() => setShowAllTimeline(true)}>{t('assistant:transcript.showEarlier', { count: hiddenTimelineCount })}</Button></div> : null}
                   {visibleTimeline.map((entry, index) => {
+                    // Editing or regenerating discards everything after the target message, so
+                    // it is only ever offered on the conversation's current final turn, and only
+                    // while nothing is in flight that the rewind would otherwise race.
+                    const rewindable = !busy && !running && !waitingForInput && index === visibleTimeline.length - 1;
                     switch (entry.kind) {
-                      case 'user': return <UserMessage key={entry.item.id} message={entry.item} />;
+                      case 'user': return <UserMessage key={entry.item.id} message={entry.item} editable={rewindable} onEdit={(messageId, text) => void rewindExecution(messageId, text)} />;
                       case 'summaryDivider': return <SummaryDivider key={entry.item.id} label={t('assistant:summarize.divider')} message={entry.item} />;
-                      case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled />;
+                      case 'assistant': return <AssistantTurn key={entry.segments[0].item.id} segments={entry.segments} working={showWorkingInLastTurn && index === visibleTimeline.length - 1} markdownEnabled regenerable={rewindable} onRegenerate={(messageId) => void rewindExecution(messageId)} />;
                       case 'agentInvocation': return <AgentInvocationMessage key={entry.call.id} call={entry.call} />;
                       case 'task': return <TaskCard key={entry.submission.id} submission={entry.submission} />;
                       case 'workflowRun': return null;

@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
-import { Ban, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
-import { memo, createContext, useContext, useEffect, useId, useState } from 'react';
+import { Ban, Brain, Check, ChevronDown, ChevronRight, CircleX, FileCode2, Hourglass, LoaderCircle, MessageCircleQuestion, MessageSquareText, Pencil, Play, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { memo, createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { agentTaskDisplayText, splitChatAttachmentImages, type AgentExecutionView, type AgentToolCallView, type ChatConversationView, type ChatProjectTaskView, type ChatSubmissionView, type RunView, type WorkflowView } from '@worklite/contracts';
 import { MarkdownImage } from '@/components/ai/markdown-image';
@@ -148,36 +148,90 @@ function buildTimeline(sources: {
 // place with reduced emphasis while the working note below it reports progress.
 // Memoized on message identity: timeline rebuilds keep settled messages referentially stable,
 // so a streaming turn does not re-render earlier messages.
-const UserMessage = memo(function UserMessage({ message, pending = false }: { message: TranscriptMessage; pending?: boolean }) {
+const UserMessage = memo(function UserMessage({ message, pending = false, editable = false, onEdit }: {
+  message: TranscriptMessage;
+  pending?: boolean;
+  // Only the conversation's latest user message offers editing: rewinding discards every
+  // later message and tool result, which is only ever safe at the end of the conversation.
+  editable?: boolean;
+  onEdit?: (messageId: string, text: string) => void;
+}) {
   const { t } = useTranslation('assistant');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (editing) editTextareaRef.current?.focus(); }, [editing]);
   // Images the reader pasted into the composer travel in the message text as attachment references;
   // show them as the pictures they are instead of printing their Markdown in the bubble.
   const { text, images } = splitChatAttachmentImages(agentTaskDisplayText(message.content));
+  if (editing) {
+    return (
+      <Message from="user" aria-label={t('speaker.you')} className="wl-enter">
+        <div className="w-full max-w-[min(78%,640px)] space-y-2">
+          <Textarea ref={editTextareaRef} value={draft} onChange={(event) => setDraft(event.target.value)} rows={Math.min(8, Math.max(2, draft.split('\n').length))} className="text-sm" />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="compact" onClick={() => setEditing(false)}>{t('edit.cancel')}</Button>
+            <Button type="button" variant="secondary" size="compact" disabled={!draft.trim()} onClick={() => { setEditing(false); onEdit?.(message.id, draft.trim()); }}>
+              <Check className="size-3.5" aria-hidden="true" />{t('edit.save')}
+            </Button>
+          </div>
+        </div>
+      </Message>
+    );
+  }
   return (
-    <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter">
-      <MessageContent className={cn('max-w-[min(78%,640px)] rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5 transition-opacity duration-[140ms] ease-[var(--ease-out)]', pending && 'opacity-60')}>
-        {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text.split(/(\[@[^\]\n]+\]\(\/agents\/[^)\s]+\))/g).map((part, index) => {
-          const mention = /^\[(@[^\]\n]+)\]\(\/agents\/([^?/)]+)\?runId=([A-Za-z0-9_-]+)(?:&executionId=[^\s)]+)?\)$/.exec(part);
-          return mention ? <Link key={index} to="/agents/$agentId" params={{ agentId: decodeURIComponent(mention[2]!) }} search={{ runId: mention[3] }} className="font-medium text-brand-text hover:underline">{mention[1]}</Link> : part;
-        })}</p> : null}
-        {images.map((image) => <MarkdownImage key={image.id} src={image.url} alt={image.alt} />)}
-      </MessageContent>
+    <Message from="user" aria-label={t('speaker.you')} aria-busy={pending || undefined} className="wl-enter group">
+      <div className="flex min-w-0 max-w-[min(78%,640px)] flex-col items-end gap-1">
+        <MessageContent className={cn('rounded-2xl rounded-br-md bg-brand-subtle px-4 py-2.5 transition-opacity duration-[140ms] ease-[var(--ease-out)]', pending && 'opacity-60')}>
+          {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text.split(/(\[@[^\]\n]+\]\(\/agents\/[^)\s]+\))/g).map((part, index) => {
+            const mention = /^\[(@[^\]\n]+)\]\(\/agents\/([^?/)]+)\?runId=([A-Za-z0-9_-]+)(?:&executionId=[^\s)]+)?\)$/.exec(part);
+            return mention ? <Link key={index} to="/agents/$agentId" params={{ agentId: decodeURIComponent(mention[2]!) }} search={{ runId: mention[3] }} className="font-medium text-brand-text hover:underline">{mention[1]}</Link> : part;
+          })}</p> : null}
+          {images.map((image) => <MarkdownImage key={image.id} src={image.url} alt={image.alt} />)}
+        </MessageContent>
+        {editable ? (
+          <Button type="button" variant="ghost" size="compact" className="h-6 px-1.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100" onClick={() => { setDraft(text); setEditing(true); }}>
+            <Pencil className="size-3" aria-hidden="true" />{t('edit.action')}
+          </Button>
+        ) : null}
+      </div>
     </Message>
   );
-}, (left, right) => left.pending === right.pending && left.message === right.message);
+}, (left, right) => left.pending === right.pending && left.editable === right.editable && left.message === right.message);
 
 function sameSegments(left: TurnSegment[], right: TurnSegment[]): boolean {
   return left.length === right.length && left.every((segment, index) => segment.kind === right[index].kind && segment.item === right[index].item);
 }
 
-const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownEnabled }: {
+function ReasoningDisclosure({ text }: { text: string }) {
+  const { t } = useTranslation('assistant');
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mb-2">
+      <CollapsibleTrigger className={cn('flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground', focusRingInset)}>
+        <Brain className="size-3.5" aria-hidden="true" />{t(open ? 'reasoning.hide' : 'reasoning.show')}
+        <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} aria-hidden="true" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 whitespace-pre-wrap break-words rounded-md border border-border bg-surface-subtle px-3 py-2 text-[13px] text-muted-foreground">
+        {text}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownEnabled, regenerable = false, onRegenerate }: {
   segments: TurnSegment[];
   working: boolean;
   markdownEnabled: boolean;
+  // Only the conversation's latest reply offers regeneration, for the same reason editing is
+  // limited to the latest user message: rewinding discards everything after the target message.
+  regenerable?: boolean;
+  onRegenerate?: (messageId: string) => void;
 }) {
   const { t } = useTranslation('assistant');
+  const lastMessageSegment = [...segments].reverse().find((segment) => segment.kind === 'message');
   return (
-    <Message from="assistant" aria-label={t('speaker.assistant')} className="wl-enter">
+    <Message from="assistant" aria-label={t('speaker.assistant')} className="wl-enter group">
       <div className="grid min-w-0 w-full grid-cols-[2rem_minmax(0,1fr)] items-start gap-3">
         <span className={cn('mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-surface shadow-xs transition-shadow duration-[200ms]', working && 'wl-live-glow border-transparent')}>
           <MessageSquareText className={cn('size-4 transition-colors duration-[200ms]', working ? 'text-brand' : 'text-muted-foreground')} aria-hidden="true" />
@@ -186,16 +240,24 @@ const AssistantTurn = memo(function AssistantTurn({ segments, working, markdownE
           {segments.map((segment, index) => segment.kind === 'message'
             ? segment.item.progressReport
               ? <ProgressReportCard key={segment.item.id} message={segment.item} report={segment.item.progressReport} streaming={working && index === segments.length - 1} markdownEnabled={markdownEnabled} />
-              : <MessageResponse key={segment.item.id} content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
+              : <div key={segment.item.id}>
+                  {segment.item.reasoning ? <ReasoningDisclosure text={segment.item.reasoning} /> : null}
+                  <MessageResponse content={segment.item.content} enabled={markdownEnabled} className={working && index === segments.length - 1 ? 'wl-caret' : undefined} />
+                </div>
             : segment.kind === 'question'
               ? <AskedQuestion key={segment.item.id} text={segment.text} />
               : <ToolCallPanel key={segment.item.id} call={segment.item} />)}
           {working && segments[segments.length - 1]?.kind !== 'message' ? <WorkingNote /> : null}
+          {regenerable && !working && lastMessageSegment?.kind === 'message' ? (
+            <Button type="button" variant="ghost" size="compact" className="mt-1 h-6 px-1.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100" onClick={() => onRegenerate?.(lastMessageSegment.item.id)}>
+              <RefreshCw className="size-3" aria-hidden="true" />{t('edit.regenerate')}
+            </Button>
+          ) : null}
         </MessageContent>
       </div>
     </Message>
   );
-}, (left, right) => left.working === right.working && left.markdownEnabled === right.markdownEnabled && sameSegments(left.segments, right.segments));
+}, (left, right) => left.working === right.working && left.markdownEnabled === right.markdownEnabled && left.regenerable === right.regenerable && sameSegments(left.segments, right.segments));
 
 // Expansion is one shared choice for the whole conversation: every progress card follows it,
 // so a later periodic report keeps the reader's current selection. The owner resets it to the
