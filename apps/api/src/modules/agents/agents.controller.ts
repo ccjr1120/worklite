@@ -26,6 +26,11 @@ export class AgentsController {
     return this.executions.steerRuntimeSession(request, 'personal', agentId, executionId, body);
   }
 
+  @Delete(':agentId/executions/:executionId/queued-messages/:messageId')
+  removeQueuedMessage(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Param('messageId') messageId: string) {
+    return this.executions.removeQueuedMessage(request, 'personal', agentId, executionId, messageId);
+  }
+
   @Delete(':agentId/executions/:executionId/session')
   closeSession(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string) {
     return this.executions.closeRuntimeSession(request, 'personal', agentId, executionId);

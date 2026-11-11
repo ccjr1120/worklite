@@ -17,7 +17,10 @@
     "cancelling": "取消中…",
     "answerPlaceholder": "回答澄清问题...",
     "loading": "正在加载 Chat 配置",
-    "configure": "绑定模型提供商和模型后使用 Chat"
+    "configure": "绑定模型提供商和模型后使用 Chat",
+    "messageMode": "运行中消息处理方式",
+    "steering": "追加指令",
+    "followUp": "排队追问"
   },
   "queue": {
     "title": "排队中（{{count}}）",

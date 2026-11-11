@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -257,13 +257,26 @@ describe('ChatHostCommandService execution', () => {
     expect(result.output).toContain('durationMs:');
   });
 
-  it('serializes concurrent host commands', async () => {
+  it('runs independent host commands concurrently', async () => {
     const service = new ChatHostCommandService();
-    const first = service.run({ command: 'printf 1 >> order.txt; sleep 0.15; printf 2 >> order.txt' }, undefined, config());
-    const second = service.run({ command: 'printf 3 >> order.txt' }, undefined, config());
-    await Promise.all([first, second]);
+    // Each command waits for its peer to start: a serial queue cannot complete this handshake.
+    const first = service.run({ command: 'touch first; while [ ! -f second ]; do sleep 0.01; done; printf first', timeoutMs: 2000 }, undefined, config());
+    const second = service.run({ command: 'touch second; while [ ! -f first ]; do sleep 0.01; done; printf second', timeoutMs: 2000 }, undefined, config());
+    const results = await Promise.all([first, second]);
+    expect(results.map((result) => result.status)).toEqual(['completed', 'completed']);
+    expect(results.map((result) => result.stdout)).toEqual(['first', 'second']);
+  });
 
-    expect(readFileSync(join(root, 'order.txt'), 'utf8')).toBe('123');
+  it('delivers progress before completion and awaits the final callback', async () => {
+    const updates: string[] = [];
+    const result = await new ChatHostCommandService().run({ command: 'printf started; while [ ! -f acknowledged ]; do sleep 0.01; done; printf finished', timeoutMs: 2000 }, undefined, config(), async (text) => {
+      updates.push(text);
+      if (text.includes('started')) writeFileSync(join(root, 'acknowledged'), 'ok');
+    });
+    expect(result.status).toBe('completed');
+    expect(updates[0]).toContain('started');
+    expect(updates[0]).not.toContain('finished');
+    expect(updates.at(-1)).toContain('finished');
   });
 
   it('cancels a running command and reports cancellation', async () => {

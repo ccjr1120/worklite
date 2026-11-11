@@ -525,6 +525,7 @@ export type StoredChatExecutionAuthorization = {
 };
 
 export const agentExecutions = sqliteTable('agent_executions', {
+  queuedMessages: text('queued_messages', { mode: 'json' }).$type<Array<{ id: string; message: string; mode: 'steering' | 'follow_up'; createdAt: string }>>().notNull().default([]),
   projectDirectory: text('project_directory'),
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),
   capabilitySnapshot: packedJson<StoredChatCapabilities | null>('capability_snapshot'),

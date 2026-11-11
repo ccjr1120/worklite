@@ -589,6 +589,13 @@
       "when": 1795800000000,
       "tag": "0084_chat_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1795800000001,
+      "tag": "0085_chat_message_queue",
+      "breakpoints": true
     }
   ]
 }

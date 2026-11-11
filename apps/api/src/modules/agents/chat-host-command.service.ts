@@ -224,11 +224,7 @@ export function formatChatHostCommandOutput(input: {
 
 @Injectable()
 export class ChatHostCommandService {
-  // Commands are serialized in this API process. The Chat turn loop is already ordered by request,
-  // but a global queue also prevents several conversations from starting host commands at once.
-  private queueTail: Promise<void> = Promise.resolve();
-
-  async run(input: unknown, signal?: AbortSignal, config = readChatHostCommandConfig()): Promise<ChatHostCommandResult> {
+  async run(input: unknown, signal?: AbortSignal, config = readChatHostCommandConfig(), onProgress?: (text: string) => Promise<void>): Promise<ChatHostCommandResult> {
     let parsed: ChatHostCommandInput;
     try {
       parsed = parseChatHostCommandInput(input, config);
@@ -237,28 +233,27 @@ export class ChatHostCommandService {
     }
     if (signal?.aborted) return cancelledResult(parsed, config, 'Command cancelled before it started.');
 
-    let release: () => void;
-    try {
-      release = await acquireQueueSlot(() => this.queueTail, (tail) => { this.queueTail = tail; }, signal);
-    } catch {
-      return cancelledResult(parsed, config, 'Command cancelled while waiting to start.');
-    }
-    try {
-      if (signal?.aborted) return cancelledResult(parsed, config, 'Command cancelled before it started.');
-      return await this.execute(parsed, config, signal);
-    } finally {
-      release();
-    }
+    return this.execute(parsed, config, signal, onProgress);
   }
 
-  private execute(input: ChatHostCommandInput, config: ChatHostCommandConfig, signal?: AbortSignal): Promise<ChatHostCommandResult> {
+  private execute(input: ChatHostCommandInput, config: ChatHostCommandConfig, signal?: AbortSignal, onProgress?: (text: string) => Promise<void>): Promise<ChatHostCommandResult> {
     const startedAt = Date.now();
     const stdout = new BoundedTail(config.streamChars);
     const stderr = new BoundedTail(config.streamChars);
     const stdoutDecoder = new StringDecoder('utf8');
     const stderrDecoder = new StringDecoder('utf8');
     const argv = [config.shell, ...HOST_COMMAND_SHELL_ARGS, input.command];
-    return new Promise<ChatHostCommandResult>((resolvePromise) => {
+    return new Promise<ChatHostCommandResult>((resolvePromise, reject) => {
+      let progressTail = Promise.resolve();
+      let lastProgressAt = 0;
+      const reportProgress = (force = false) => {
+        if (!onProgress || (!force && Date.now() - lastProgressAt < 100)) return;
+        const text = [stdout.value(), stderr.value()].filter(Boolean).join('\n').slice(-2000);
+        if (!text) return;
+        lastProgressAt = Date.now();
+        progressTail = progressTail.then(() => onProgress(text));
+        void progressTail.catch(() => undefined);
+      };
       let settled = false;
       let timedOut = false;
       let cancelled = false;
@@ -290,6 +285,7 @@ export class ChatHostCommandService {
         settled = true;
         signal?.removeEventListener('abort', onAbort);
         if (timeoutHandle) clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
         if (killHandle) clearTimeout(killHandle);
         if (failSafeHandle) clearTimeout(failSafeHandle);
         stdout.append(stdoutDecoder.end());
@@ -315,7 +311,7 @@ export class ChatHostCommandService {
         };
         const fullOutput = formatChatHostCommandOutput(formatted);
         const output = formatChatHostCommandOutput(formatted, config.outputChars);
-        resolvePromise({
+        const result: ChatHostCommandResult = {
           status: exitCode === 0 && !timedOut && !cancelled && !spawnError ? 'completed' : 'failed',
           command: input.command,
           cwd: input.cwd,
@@ -332,7 +328,9 @@ export class ChatHostCommandService {
           stdoutTruncated: stdout.truncated,
           stderrTruncated: stderr.truncated,
           outputTruncated: fullOutput.length > output.length,
-        });
+        };
+        reportProgress(true);
+        void progressTail.then(() => resolvePromise(result), reject);
       };
       const onAbort = () => interrupt('cancel');
 
@@ -348,8 +346,8 @@ export class ChatHostCommandService {
         finish(null, error instanceof Error ? error : new Error(String(error)));
         return;
       }
-      child.stdout?.on('data', (chunk: Buffer) => stdout.append(stdoutDecoder.write(chunk)));
-      child.stderr?.on('data', (chunk: Buffer) => stderr.append(stderrDecoder.write(chunk)));
+      child.stdout?.on('data', (chunk: Buffer) => { stdout.append(stdoutDecoder.write(chunk)); reportProgress(); });
+      child.stderr?.on('data', (chunk: Buffer) => { stderr.append(stderrDecoder.write(chunk)); reportProgress(); });
       child.once('error', (error) => finish(null, error));
       child.once('close', (exitCode) => finish(exitCode));
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -410,41 +408,6 @@ function cancelledResult(input: ChatHostCommandInput, config: ChatHostCommandCon
     stderrTruncated: false,
     outputTruncated: fullOutput.length > output.length,
   };
-}
-
-async function acquireQueueSlot(
-  getTail: () => Promise<void>,
-  setTail: (tail: Promise<void>) => void,
-  signal?: AbortSignal,
-): Promise<() => void> {
-  const previous = getTail();
-  let release!: () => void;
-  setTail(new Promise<void>((resolve) => { release = resolve; }));
-  try {
-    await waitForQueue(previous, signal);
-    return release;
-  } catch (error) {
-    // Keep this cancelled queue node chained to its predecessor. Releasing it immediately would
-    // let later callers pass the still-running command that this node was waiting behind.
-    void previous.then(release, release);
-    throw error;
-  }
-}
-
-function waitForQueue(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
-  if (!signal) return previous;
-  if (signal.aborted) return Promise.reject(new Error('Aborted'));
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => {
-      signal.removeEventListener('abort', onAbort);
-      reject(new Error('Aborted'));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    void previous.then(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    });
-  });
 }
 
 function boundedInteger(raw: string | undefined, fallback: number, minimum: number, maximum: number): number {
