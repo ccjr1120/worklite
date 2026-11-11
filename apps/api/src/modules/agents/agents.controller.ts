@@ -1,7 +1,7 @@
 import { AgentHistoryService } from './agent-history.service';
 import { BadRequestException, Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { AgentExecutionEvent, CreateAgentRequest, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
+import type { AgentExecutionEvent, CreateAgentRequest, AnswerAgentQuestionRequest, ContinueAgentExecutionRequest, CreateAgentExecutionRequest, RewindAgentExecutionRequest, UpdateAgentRequest } from '@worklite/contracts';
 import { AgentExecutionsService } from './agent-executions.service';
 import { AgentsService } from './agents.service';
 
@@ -153,6 +153,12 @@ export class AgentsController {
   @Post(':agentId/executions/:executionId/messages')
   continueExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: ContinueAgentExecutionRequest) {
     return this.executions.continue(request, 'personal', agentId, executionId, body);
+  }
+
+  @Post(':agentId/executions/:executionId/rewind')
+  rewindExecution(@Req() request: Request, @Param('agentId') agentId: string, @Param('executionId') executionId: string, @Body() body: RewindAgentExecutionRequest) {
+    if (typeof body?.messageId !== 'string' || !body.messageId.trim()) throw new BadRequestException('messageId is required.');
+    return this.executions.rewind(request, 'personal', agentId, executionId, body);
   }
 
   @Post(':agentId/executions/:executionId/answers')

@@ -434,7 +434,7 @@ export const skillIdAliases = sqliteTable('skill_id_aliases', {
 
 export type StoredAgentModelMessage =
   | { role: 'user'; content: string }
-  | { role: 'assistant'; content: Array<{ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> }
+  | { role: 'assistant'; content: Array<{ type: 'text'; text: string } | { type: 'reasoning'; text: string; providerOptions?: Record<string, Record<string, unknown>> } | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }> }
   | { role: 'tool'; content: Array<{ type: 'tool-result'; toolCallId: string; toolName: string; output: { type: 'text' | 'error-text'; value: string } }> };
 
 export type StoredAgentDisplayMessage = {
@@ -448,6 +448,8 @@ export type StoredAgentDisplayMessage = {
   // A summary divider marks where a /summarize compressed the model context; its content
   // retains the generated summary so a later summarize can build on it.
   kind?: 'summary_divider';
+  /** The model's visible reasoning for the step that produced this assistant message. */
+  reasoning?: string;
 };
 
 export type StoredAgentPlanStep = {
@@ -524,7 +526,23 @@ export type StoredChatExecutionAuthorization = {
   createdAt: string;
 };
 
+// Running token totals of a native execution's own model requests, accumulated per step.
+// costUsd stays null until every counted request had a known price.
+export type StoredAgentExecutionUsage = {
+  requests?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  costUsd?: number | null;
+  /** Provider-reported input size of the latest request, the most accurate context size known. */
+  lastInputTokens?: number;
+  model?: string;
+};
+
 export const agentExecutions = sqliteTable('agent_executions', {
+  usage: text('usage', { mode: 'json' }).$type<StoredAgentExecutionUsage>().notNull().default({}),
   queuedMessages: text('queued_messages', { mode: 'json' }).$type<Array<{ id: string; message: string; mode: 'steering' | 'follow_up'; createdAt: string }>>().notNull().default([]),
   projectDirectory: text('project_directory'),
   executionAuthorization: text('execution_authorization', { mode: 'json' }).$type<StoredChatExecutionAuthorization | null>(),

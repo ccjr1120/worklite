@@ -403,6 +403,26 @@ export type AgentExecutionMessage = {
   // A summary divider marks where a /summarize compressed the model context; it is a
   // transcript marker persisted among the display messages, not a spoken message.
   kind?: 'summary_divider';
+  /** The model's visible reasoning (thinking) for the step that produced this message. */
+  reasoning?: string;
+};
+
+/** Token totals of one conversation's own model requests. costUsd is null without a known price. */
+export type AgentExecutionUsage = {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number | null;
+};
+
+/** Edit a user message (replacing it and everything after it) or regenerate the reply after it. */
+export type RewindAgentExecutionRequest = {
+  messageId: string;
+  /** Replacement text; omit to regenerate the reply to the existing message. */
+  message?: string;
 };
 
 export type AgentPlanStep = {
@@ -560,6 +580,8 @@ export type AgentExecutionView = {
   plan: AgentPlanStep[];
   pendingQuestion: AgentPendingQuestion | null;
   contextDropped: number;
+  /** Native executions only: token totals of this execution's own model requests. */
+  usage?: AgentExecutionUsage;
   createdAt: string;
   updatedAt: string;
 };
@@ -603,9 +625,10 @@ export type AgentRunDetailView = {
 };
 
 export type AgentExecutionEventData =
-  | { kind: 'native_activity'; phase: 'model_start' | 'model_end' | 'tool_start' | 'tool_progress' | 'tool_end' | 'run_end'; toolCallId?: string; text?: string; status?: string }
+  | { kind: 'native_activity'; phase: 'model_start' | 'model_end' | 'tool_input' | 'tool_start' | 'tool_progress' | 'tool_end' | 'run_end'; toolCallId?: string; toolName?: string; text?: string; status?: string }
   | { kind: 'snapshot'; execution: AgentExecutionView }
   | { kind: 'message_delta'; messageId: string; delta: string; progressReport?: ChatProgressReport }
+  | { kind: 'reasoning_delta'; messageId: string; delta: string }
   | { kind: 'status'; status: AgentExecutionStatus; conversationStatus?: AgentExecutionStatus; phase: AgentExecutionPhase; errorCode: AgentExecutionErrorCode | null; error: string | null }
   | { kind: 'tool_call'; call: AgentToolCallView };
 

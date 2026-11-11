@@ -7,14 +7,30 @@ import { Button } from '@/components/ui/button';
 import { CoderRunDialog } from '@/features/coders/coder-run-detail';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLocale } from '@/components/locale-provider';
-import { formatDateTime, formatNumber, formatTokenCount } from '@/i18n/format';
-import type { ChatTaskReference, GatewayAttributionGroup } from '@worklite/contracts';
+import { formatCurrency, formatDateTime, formatNumber, formatTokenCount } from '@/i18n/format';
+import type { AgentExecutionView, ChatTaskReference, GatewayAttributionGroup } from '@worklite/contracts';
 
 // Gateway statistics are retained indefinitely, so a conversation's lifetime total
 // starts at the epoch. The upper bound is left out on purpose: it defaults to the
 // current instant server-side, and sending one would change the query key on every
 // render and refetch forever.
 const USAGE_FROM = new Date(0).toISOString();
+
+function NativeUsage({ usage }: { usage: NonNullable<AgentExecutionView['usage']> }) {
+  const { t } = useTranslation('assistant');
+  const { locale } = useLocale();
+  return <section aria-labelledby="chat-conversation-native-usage" className="mt-2 rounded-md border border-border bg-surface-subtle p-3">
+    <h3 id="chat-conversation-native-usage" className="text-sm font-medium">{t('usage.nativeTitle')}</h3>
+    <dl className="mt-2 grid gap-3 text-[13px] sm:grid-cols-2">
+      <div><dt className="text-muted-foreground">{t('usage.nativeTokens')}</dt><dd className="tabular-nums">{formatTokenCount(usage.inputTokens + usage.outputTokens, locale)}</dd></div>
+      <div><dt className="text-muted-foreground">{t('usage.requests')}</dt><dd className="tabular-nums">{formatNumber(usage.requests, locale)}</dd></div>
+      {usage.reasoningTokens > 0 ? <div><dt className="text-muted-foreground">{t('usage.reasoningTokens')}</dt><dd className="tabular-nums">{formatTokenCount(usage.reasoningTokens, locale)}</dd></div> : null}
+      {usage.cacheReadTokens > 0 ? <div><dt className="text-muted-foreground">{t('usage.cacheReadTokens')}</dt><dd className="tabular-nums">{formatTokenCount(usage.cacheReadTokens, locale)}</dd></div> : null}
+      <div><dt className="text-muted-foreground">{t('usage.estimatedCost')}</dt><dd className="tabular-nums">{usage.costUsd === null ? t('usage.unavailable') : formatCurrency(usage.costUsd, locale)}</dd></div>
+    </dl>
+    <p className="mt-2 text-[13px] text-muted-foreground">{t('usage.nativeCaveat')}</p>
+  </section>;
+}
 
 function ConversationUsage({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation('assistant');
@@ -75,6 +91,7 @@ export function ConversationRecords({ conversationId }: { conversationId: string
     {query.isError ? <div className="space-y-2"><p role="alert" className="text-sm text-danger">{t('records.loadFailed')}</p><Button variant="secondary" size="compact" onClick={() => void query.refetch()}>{t('history.retry')}</Button></div> : null}
     {data ? <>
       <ConversationUsage conversationId={conversationId} />
+      {data.execution?.usage ? <NativeUsage usage={data.execution.usage} /> : null}
       <dl className="grid gap-3 text-[13px] sm:grid-cols-2"><div><dt className="text-muted-foreground">{t('records.conversationId')}</dt><dd className="break-all font-mono">{data.conversation.id}</dd></div><div><dt className="text-muted-foreground">{t('history.channel')}</dt><dd>{data.conversation.channel}</dd></div>{data.conversation.channelConversationId ? <div><dt className="text-muted-foreground">{t('records.channelConversationId')}</dt><dd className="break-all font-mono">{data.conversation.channelConversationId}</dd></div> : null}</dl>
       {data.execution ? <details><summary className="cursor-pointer text-sm font-medium">{t('records.execution')}</summary><RawRecord value={data.execution} /></details> : null}
       <details open><summary className="cursor-pointer text-sm font-medium">{t('records.submissions')} · {data.submissions.length}</summary><div className="mt-2 space-y-3">{data.submissions.map((submission) => <details key={submission.id} className="border-b border-border pb-3"><summary className="cursor-pointer break-all text-[13px]">{formatDateTime(submission.createdAt, locale)} · {submission.id} · {t(submission.error ? 'status.failed' : data.conversation.channel === 'web' ? submission.reference ? 'records.accepted' : 'records.processing' : submission.settled ? 'records.settled' : submission.outputMessageId ? 'records.delivered' : 'records.pending')}</summary><TaskLink reference={submission.reference} /><RawRecord value={submission} /></details>)}</div></details>
