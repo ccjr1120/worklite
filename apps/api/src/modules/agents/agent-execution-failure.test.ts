@@ -13,4 +13,14 @@ describe('executionFailure', () => {
     });
     expect(executionFailureSource(error)).toBe('AI_MissingToolResultsError');
   });
+
+  it.each([
+    'Context summary was truncated; original history was retained.',
+    'The latest user instruction or system/tool definitions exceed the context budget. Shorten the request or increase WORKLITE_CHAT_CONTEXT_TOKENS.',
+    'Context cannot be reduced further without losing current instructions.',
+    'Context summary did not shrink enough; original history was retained.',
+    'Context remains too large after summarization; original history was retained.',
+  ])('surfaces a native-context compaction failure verbatim instead of a generic internal error (%s)', (message) => {
+    expect(executionFailure(new Error(message))).toEqual({ message, code: 'invalid_request', phase: 'model' });
+  });
 });

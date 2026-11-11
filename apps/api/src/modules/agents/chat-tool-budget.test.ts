@@ -288,9 +288,39 @@ describe('native Chat context and truncated calls', () => {
     db.update(agentExecutions).set(executionUpdates('aex_budget', { modelMessages: original as never })).run();
     gateway.streamText.mockReturnValue({ result: Promise.resolve({ text: '', finishReason: 'stop' }) });
     await advance(service);
-    expect(db.select(agentExecutionColumns).from(agentExecutions).get()).toMatchObject({ status: 'failed', modelMessages: original });
+    const saved = db.select(agentExecutionColumns).from(agentExecutions).get();
+    expect(saved).toMatchObject({ status: 'failed', modelMessages: original, errorCode: 'invalid_request', error: 'Context summary was empty; original history was retained.' });
     expect(db.select().from(agentCapabilityResults).all()).toEqual([]);
     expect(gateway.generateAgentStep).not.toHaveBeenCalled();
+  });
+
+  // Regression: a reasoning model (e.g. a GLM model behind an openai/responses-compatible
+  // gateway) can spend its entire output budget thinking before writing any summary text,
+  // leaving finishReason 'length' with an empty reply. The compaction request must give it
+  // room to both think and answer, and ask for the lowest supported reasoning effort so a
+  // mechanical summarization task does not spend that room on deep thinking by default.
+  it('gives the compaction summary call a large output budget and the lowest reasoning effort', async () => {
+    const { db, service } = await setup(0);
+    const original = history(24000);
+    db.update(agentExecutions).set(executionUpdates('aex_budget', { modelMessages: original as never })).run();
+    gateway.streamText.mockReturnValue({ result: Promise.resolve({ text: 'Preserved task state.', finishReason: 'stop' }) });
+    gateway.generateAgentStep.mockResolvedValue(done);
+    await advance(service);
+    expect(db.select(agentExecutionColumns).from(agentExecutions).get()?.status).toBe('completed');
+    const [request] = gateway.streamText.mock.calls[0]!;
+    expect(request.maxOutputTokens).toBeGreaterThanOrEqual(16_000);
+    expect(request.candidates[0].modelParameters?.reasoningEffort).toBe('minimal');
+  });
+
+  it("keeps the agent's own low reasoning effort for the compaction call instead of overriding it", async () => {
+    const { db, service } = await setup(0);
+    const original = history(24000);
+    db.update(agentExecutions).set(executionUpdates('aex_budget', { modelMessages: original as never, capabilitySnapshot: { agent: { id: CHAT_AGENT_ID, providerId: 'provider', model: 'model', systemPrompt: 'You are Chat.', modelParameters: { reasoningEffort: 'low' } }, skills: [] } as never })).run();
+    gateway.streamText.mockReturnValue({ result: Promise.resolve({ text: 'Preserved task state.', finishReason: 'stop' }) });
+    gateway.generateAgentStep.mockResolvedValue(done);
+    await advance(service);
+    const [request] = gateway.streamText.mock.calls[0]!;
+    expect(request.candidates[0].modelParameters?.reasoningEffort).toBe('low');
   });
 
   it('retries only the model once after a provider context overflow', async () => {

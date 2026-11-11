@@ -1021,10 +1021,15 @@ export class AgentExecutionsService implements OnModuleInit {
           tools: [...builtinToolDefinitions, ...availableMcpTools, ...availableSkillScripts.map((script) => script.tool ?? { skillId: script.skillId, path: script.path })],
           archiveId, maxTokens: chatContextBudget(runtime.model), observedInputTokens: execution.usage?.lastInputTokens, force, signal: abortController.signal,
           summarize: async (source) => {
+            // A reasoning model spends part of this budget on thinking before it writes the
+            // summary; 'minimal' effort keeps that share small, and the ceiling itself is raised
+            // well past the ~3 000-token summary compactNativeContext expects, so a model that
+            // still thinks at length does not starve the summary itself of room to finish.
+            const modelParameters = compactionModelParameters(agent.modelParameters, runtime.protocol);
             const stream = createModelGateway().streamText({
-              candidates: [{ provider: runtime.provider, model: runtime.model, modelParameters: agent.modelParameters ?? undefined }], correlation,
+              candidates: [{ provider: runtime.provider, model: runtime.model, modelParameters }], correlation,
               systemPrompt: COMPACTION_SYSTEM_PROMPT,
-              messages: [{ role: 'user', content: source }], maxOutputTokens: 4096, abortSignal: abortController.signal,
+              messages: [{ role: 'user', content: source }], maxOutputTokens: 16_000, abortSignal: abortController.signal,
             });
             const result = await stream.result;
             if (result.finishReason === 'length') throw new Error('Context summary was truncated; original history was retained.');
@@ -1239,7 +1244,7 @@ export class AgentExecutionsService implements OnModuleInit {
           await this.publishSnapshotForExecution(workspace.id, executionId);
         }
       } else {
-        this.logger.warn(`Agent execution ${executionId} failed: phase=${failure.phase} code=${failure.code} source=${executionFailureSource(error)}.`);
+        this.logger.warn(`Agent execution ${executionId} failed: phase=${failure.phase} code=${failure.code} source=${executionFailureSource(error)}: ${failure.message}`);
         await this.markExecutionFailed(workspace.id, executionId, failure);
       }
     } finally {
@@ -2383,6 +2388,20 @@ function shortDispatchText(value: string, limit: number): string {
 function normalizeUserMessage(input: unknown): string {
   if (typeof input !== 'string' || !input.trim()) throw new BadRequestException('An Agent message is required.');
   return input.trim();
+}
+
+// Compacting history is mechanical summarization, not a task that benefits from deep thinking;
+// a reasoning model given no explicit effort can spend its entire output budget thinking and
+// leave zero room for the summary itself (observed on a GLM model: 4096/4096 tokens of reasoning,
+// an empty reply, finishReason 'length'). The agent's own serviceTier and requestBody still apply;
+// only reasoningEffort is capped to the lowest value each protocol actually accepts
+// (modelRequestParameters rejects 'none'/'minimal' for Anthropic).
+function compactionModelParameters(agentModelParameters: ModelParameters | null | undefined, protocol: ModelProviderProtocol): ModelParameters {
+  const base = agentModelParameters ?? {};
+  const lowest = protocol === 'anthropic/messages' ? 'low' : 'minimal';
+  const accepted = protocol === 'anthropic/messages' ? ['low'] : ['none', 'minimal', 'low'];
+  if (base.reasoningEffort && accepted.includes(base.reasoningEffort)) return base;
+  return { ...base, reasoningEffort: lowest };
 }
 
 // Short context for a host notification: the pending question, the failure reason, or the reply the

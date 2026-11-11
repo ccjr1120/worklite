@@ -16,7 +16,7 @@ export type ModelCatalogEntry = {
   price?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
 };
 
-export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 
 const BUILTIN: Record<string, ModelCatalogEntry> = {
   'claude-': { contextWindow: 200_000, images: true },
