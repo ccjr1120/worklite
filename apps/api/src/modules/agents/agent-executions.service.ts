@@ -74,6 +74,11 @@ const MAX_TOOL_CALLS_PER_STEP = 16;
 // Sent for this one request only, never stored: the turn's history keeps its real messages.
 const TOOL_BUDGET_EXHAUSTED_MESSAGE = 'The tool budget for this turn is exhausted, so no tools are available now. Reply to the user with what you found so far, say plainly what is still unverified, and explain the likely blocking cause supported by the evidence. Distinguish facts from hypotheses; do not keep repeating searches, retry automatically or claim success.';
 const DEFERRED_TOOL_CALL_OUTPUT = 'This tool call was not executed: the model response contained more tool calls than one step allows. Reissue this call in a later step.';
+// WeChat shows no tool-call UI (unlike Web's task panel), so a running tool is otherwise
+// invisible there until the whole turn finishes. Every admitted tool call gets one short start
+// notice; a call still running past this interval gets a repeating "still running" notice so a
+// long host command or sub-Agent dispatch doesn't look stalled.
+const WECHAT_TOOL_PROGRESS_INTERVAL_MS = 20_000;
 
 export type ToolCallAdmission = {
   index: number;
@@ -180,6 +185,7 @@ export class AgentExecutionsService implements OnModuleInit {
   private readonly nativeLoop = new NativeAgentLoop();
   private readonly nativeToolProgress = new Map<string, (text: string) => Promise<void>>();
   private readonly activeNativeBatches = new Map<string, AbortController>();
+  private readonly wechatToolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly logger = new Logger(AgentExecutionsService.name);
   private readonly activeModelRequests = new Map<string, AbortController>();
   private readonly activeMcpRequests = new Map<string, AbortController>();
@@ -1214,9 +1220,16 @@ export class AgentExecutionsService implements OnModuleInit {
             const current = await this.loadExecution(workspace.id, execution.agentId, executionId);
             if (current.status !== 'running') { controller.abort(); controller.signal.throwIfAborted(); }
             await this.persistEvent(executionId, { kind: 'native_activity', phase: 'tool_start', toolCallId: job.id });
+            // run_agent already sends its own richer WeChat dispatch notice (queueWechatAgentDispatch);
+            // skip the generic one here to avoid two notices for the same call.
+            if (execution.agentId === CHAT_AGENT_ID && deliveryChat?.channel === 'wechat') {
+              const call = this.db.select({ toolName: agentToolCalls.toolName, scriptPath: agentToolCalls.scriptPath, mcpToolName: agentToolCalls.mcpToolName }).from(agentToolCalls).where(eq(agentToolCalls.id, job.id)).get();
+              if (call && call.mcpToolName !== 'run_agent') this.startWechatToolProgress(workspace.id, executionId, job.id, wechatToolProgressLabel(call));
+            }
           },
           onProgress: (job, text) => this.persistEvent(executionId, { kind: 'native_activity', phase: 'tool_progress', toolCallId: job.id, text }),
           afterTool: async (job, error) => {
+            this.stopWechatToolProgress(job.id);
             const call = this.db.select({ status: agentToolCalls.status }).from(agentToolCalls).where(eq(agentToolCalls.id, job.id)).get();
             await this.persistEvent(executionId, { kind: 'native_activity', phase: 'tool_end', toolCallId: job.id, status: controller.signal.aborted ? 'cancelled' : error ? 'failed' : call?.status });
           },
@@ -1231,6 +1244,12 @@ export class AgentExecutionsService implements OnModuleInit {
         });
       }
     } catch (error) {
+      // A concurrent cancelTurn(interrupt=true) (continueTurn interrupting this same turn to
+      // start the next one) aborts abortController and immediately flips status back to
+      // 'running' for the new turn. Without this check, the aborted request's own catch block
+      // would still run and mark that new turn 'failed' out from under it, even though nothing
+      // about the new turn failed.
+      if (abortController.signal.aborted) return this.toView(await this.loadExecution(workspace.id, execution.agentId, executionId));
       const failure = executionFailure(error);
       if (progressReport && error instanceof ServiceUnavailableException && error.message === 'Portkey Gateway is unavailable.') {
         this.logger.warn(`Agent execution ${executionId}: Gateway unavailable; using the recorded progress report.`);
@@ -1493,6 +1512,39 @@ export class AgentExecutionsService implements OnModuleInit {
       id: `dispatch_${callId}`, workspaceId, chatId: chat.id, executionId: conversationId, message: '', target: { kind: 'conversation' },
       reference: { kind: 'conversation', executionId: conversationId, afterMessageId: null, afterSequence: 0, completionStatus: 'completed', dispatchNotice: `已派 @${name}：${summary}，正在执行` },
     }).onConflictDoNothing().run();
+  }
+
+  // Fire-and-forget text notice, independent of the conversation's own turn state: reuses the
+  // same closed dispatchNotice window as queueWechatAgentDispatch, so WeChat sends it as one
+  // plain-text message and settles it immediately regardless of what the model does next.
+  private queueWechatToolNotice(workspaceId: string, executionId: string, noticeId: string, text: string): void {
+    const chat = this.db.select({ id: externalChats.id }).from(externalChats).where(and(eq(externalChats.workspaceId, workspaceId), eq(externalChats.executionId, executionId), eq(externalChats.channel, 'wechat'))).get();
+    if (!chat) return;
+    this.db.insert(chatSubmissions).values({
+      id: noticeId, workspaceId, chatId: chat.id, executionId, message: '', target: { kind: 'conversation' },
+      reference: { kind: 'conversation', executionId, afterMessageId: null, afterSequence: 0, completionStatus: 'completed', dispatchNotice: text },
+    }).onConflictDoNothing().run();
+  }
+
+  // WeChat has no task panel, so a tool call is otherwise invisible there until the whole model
+  // turn finishes. run_agent already sends its own richer dispatch notice (agent name and task
+  // summary), so it is excluded here to avoid sending two notices for the same call.
+  private startWechatToolProgress(workspaceId: string, executionId: string, callId: string, label: string): void {
+    const startedAt = Date.now();
+    this.queueWechatToolNotice(workspaceId, executionId, `toolstart_${callId}`, `正在执行：${label}`);
+    const timer = setInterval(() => {
+      const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+      this.queueWechatToolNotice(workspaceId, executionId, `toolprogress_${callId}_${Date.now()}`, `仍在执行：${label}（已运行 ${elapsedSeconds} 秒）`);
+    }, WECHAT_TOOL_PROGRESS_INTERVAL_MS);
+    timer.unref();
+    this.wechatToolProgressTimers.set(callId, timer);
+  }
+
+  private stopWechatToolProgress(callId: string): void {
+    const timer = this.wechatToolProgressTimers.get(callId);
+    if (!timer) return;
+    clearInterval(timer);
+    this.wechatToolProgressTimers.delete(callId);
   }
 
   private readonly backgroundAgentReportTimers = new Map<string, NodeJS.Timeout>();
@@ -2375,6 +2427,13 @@ export class AgentExecutionsService implements OnModuleInit {
       if (this.eventQueues.get(executionId) === next) this.eventQueues.delete(executionId);
     }
   }
+}
+
+// A short label for the WeChat start/progress notice. Prefers the Skill script's own file name
+// (the most specific, user-recognizable name for a platform skill_script call) over the generic
+// mcpToolName/toolName WorkLite uses internally for built-in and MCP tools.
+function wechatToolProgressLabel(call: { toolName: string; scriptPath: string | null; mcpToolName: string | null }): string {
+  return call.scriptPath?.split('/').pop() || call.mcpToolName || call.toolName;
 }
 
 function shortDispatchText(value: string, limit: number): string {

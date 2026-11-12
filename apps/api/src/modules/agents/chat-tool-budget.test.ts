@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutions, agentToolCalls, externalChats, platformSkillPackageFiles, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutions, agentToolCalls, chatSubmissions, externalChats, platformSkillPackageFiles, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
 import type { HostNotificationsService } from '../notifications/host-notifications.service';
@@ -455,5 +455,56 @@ describe('native Chat progressive tool exposure', () => {
     expect(saved).toMatchObject({ status: 'failed', resultAppended: true, commandExecutionId: null });
     expect(JSON.stringify(gateway.generateAgentStep.mock.calls[1][0].messages)).toContain('discover_tools');
     expect(names(gateway.generateAgentStep.mock.calls[1][0])).not.toContain('upload_local_images');
+  });
+
+  it('sends a WeChat start notice for every tool call and a repeating progress notice for a long-running one', async () => {
+    const { db, service } = await setup(0);
+    db.insert(externalChats).values({ id: 'wechat:user', workspaceId: WORKSPACE_ID, channel: 'wechat', externalId: 'user', userId: 'user', executionId: 'aex_budget' }).run();
+    const internal = service as unknown as { executeToolCall(...args: unknown[]): Promise<void> };
+    let finishTool!: () => void;
+    vi.spyOn(internal, 'executeToolCall').mockImplementation(async (...args) => {
+      await new Promise<void>((resolve) => { finishTool = resolve; });
+      db.update(agentToolCalls).set({ status: 'completed', output: 'done' }).where(eq(agentToolCalls.id, String(args[5]))).run();
+    });
+    vi.useFakeTimers();
+    try {
+      const toolCalls = [{ toolCallId: 'inspect', toolName: 'inspect_agents', input: {} }];
+      gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [{ role: 'assistant', content: toolCalls.map((call) => ({ type: 'tool-call', ...call })) }], toolCalls, finishReason: 'tool-calls', contextDropped: 0 }).mockResolvedValue(done);
+      await advance(service);
+      await vi.waitFor(() => expect(finishTool).toBeTypeOf('function'));
+      const notices = () => db.select().from(chatSubmissions).all().map((row) => (row.reference as { dispatchNotice?: string } | null)?.dispatchNotice);
+      expect(notices()).toEqual(['正在执行：inspect_agents']);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(notices()).toContain('仍在执行：inspect_agents（已运行 20 秒）');
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(notices()).toContain('仍在执行：inspect_agents（已运行 40 秒）');
+      const beforeFinish = notices().length;
+      finishTool();
+      await vi.waitFor(() => expect(db.select().from(agentToolCalls).get()!.status).toBe('completed'));
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(notices()).toHaveLength(beforeFinish);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not mark a newly started turn failed when it only aborted a predecessor still unwinding its own model request', async () => {
+    const { db, service } = await setup(0);
+    const internal = service as unknown as { activeModelRequests: Map<string, AbortController> };
+    // Simulates continueTurn's interrupt=true cancelTurn: it aborts the in-flight model request
+    // and flips status back to 'running' for the next turn before the aborted request's own
+    // catch block runs. That catch block must recognize the abort and skip marking the (now
+    // different) running turn as failed.
+    gateway.generateAgentStep.mockImplementationOnce(async () => {
+      const controller = internal.activeModelRequests.get('aex_budget')!;
+      controller.abort();
+      db.update(agentExecutions).set({ status: 'running' }).where(eq(agentExecutions.id, 'aex_budget')).run();
+      throw new Error(controller.signal.reason instanceof Error ? controller.signal.reason.message : 'aborted');
+    });
+    await advance(service);
+    const execution = db.select(agentExecutionColumns).from(agentExecutions).where(eq(agentExecutions.id, 'aex_budget')).get()!;
+    expect(execution.status).toBe('running');
+    expect(execution.error).toBeNull();
+    expect(execution.errorCode).toBeNull();
   });
 });
