@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDb, initializeDatabase, platformSkillPackageFiles } from './client';
+import { CHAT_ROLE_PROMPT, CHAT_RULES } from './chat-rules';
 import * as schema from './schema';
 import type { Database } from './client';
 
@@ -16,13 +17,33 @@ function platformFile(path: string): { content: string } {
   return file;
 }
 
+// Operational contracts now live in lazily loaded references, not the resident prompt.
+function ruleReferences(): string {
+  return platformSkillPackageFiles().filter((file) => file.path.startsWith('references/chat-rules/')).map((file) => file.content).join('\n\n');
+}
+
 afterEach(() => {
   db?.$client.close();
   db = undefined;
 });
 
 describe('initializeDatabase restart recovery', () => {
-  it('publishes the protected local-image tool and synchronizes the seeded Chat prompt', async () => {
+  it('replaces the old resident prompt on startup and packages every rule topic separately', async () => {
+    db = createDb(':memory:');
+    await initializeDatabase(db);
+    db.update(schema.agents).set({ systemPrompt: 'Old full operational prompt.' }).where(eq(schema.agents.id, 'agt_system_helper_chat')).run();
+    await initializeDatabase(db);
+    const chat = db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).get()!;
+    expect(chat.systemPrompt).toBe(CHAT_ROLE_PROMPT);
+    expect(chat.systemPrompt.length).toBeLessThan(100);
+    expect(platformFile('SKILL.md').content).toContain('discover_tools');
+    for (const [topic, rule] of Object.entries(CHAT_RULES)) {
+      expect(platformFile(`references/chat-rules/${topic}.md`).content).toBe(rule.content);
+      expect(chat.systemPrompt).not.toContain(rule.content);
+    }
+  });
+
+  it('publishes the protected local-image tool and preserves its on-demand delivery rules', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
     const tools = JSON.parse(platformFile('scripts/tools.json').content);
@@ -39,8 +60,7 @@ describe('initializeDatabase restart recovery', () => {
     expect(script).toContain("call('/artifacts/local-images', { method: 'POST', body: raw })");
     expect(script).toContain('print(data)');
     expect(script).not.toContain("type: 'snapshot'");
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    for (const text of [chat.systemPrompt, platformFile('SKILL.md').content]) {
+    for (const text of [ruleReferences()]) {
       expect(text).toContain('upload_local_images');
       expect(text).toContain('Use each returned markdown verbatim');
       expect(text).toContain('10 MB each and 40 MB total');
@@ -60,8 +80,7 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/upload-local-files.mjs']).toMatchObject({ name: 'upload_local_files', inputSchema: {
       required: ['files'], additionalProperties: false, properties: { files: { minItems: 1, maxItems: 8, items: { required: ['path'], additionalProperties: false } } },
     } });
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    for (const text of [chat.systemPrompt, platformFile('SKILL.md').content]) {
+    for (const text of [ruleReferences()]) {
       expect(text).toContain('upload_local_files');
       expect(text).toContain('20 MB each and 40 MB total');
       expect(text).toContain('/content?download=true');
@@ -74,10 +93,9 @@ describe('initializeDatabase restart recovery', () => {
     await initializeDatabase(db);
 
     const files = platformSkillPackageFiles();
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
     expect(files.some((file) => file.path === 'scripts/inspect-coder-conversation-archive.mjs')).toBe(false);
-    expect(chat.systemPrompt).not.toContain('inspect_coder_conversation_archive');
-    expect(platformFile('SKILL.md').content).not.toContain('pre-group Coder conversation');
+    expect(ruleReferences()).not.toContain('inspect_coder_conversation_archive');
+    expect(ruleReferences()).not.toContain('pre-group Coder conversation');
   });
 
   it('applies the empty-database path and removes all pre-group conversation tables', async () => {
@@ -299,13 +317,12 @@ describe('initializeDatabase restart recovery', () => {
     expect(platformFile('scripts/update-agent.mjs').content).toContain("method: 'PATCH'");
   });
 
-  it('synchronizes ownership routes and cascade deletion rules into Chat and its tools', async () => {
+  it('synchronizes ownership routes and cascade deletion rules in Chat references and its tools', async () => {
     db = createDb(':memory:');
     await initializeDatabase(db);
-    const chat = db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).get()!;
-    expect(chat.systemPrompt).toContain('only top-level user-managed Agents');
-    expect(chat.systemPrompt).toContain('GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId');
-    expect(chat.systemPrompt).toContain('Deleting an Agent cascades through all its descendants');
+    expect(ruleReferences()).toContain('only top-level user-managed Agents');
+    expect(ruleReferences()).toContain('GET/PATCH/DELETE /agents/:parentId/sub-agents/:childId');
+    expect(ruleReferences()).toContain('Deleting an Agent cascades through all its descendants');
     const tools = JSON.parse(platformFile('scripts/tools.json').content);
     expect(tools['scripts/delete-agent.mjs'].description).toContain('all owned descendants are deleted in the same operation');
     expect(tools['scripts/delete-agent.mjs'].description).not.toContain('owned children removed first');
@@ -329,7 +346,6 @@ describe('initializeDatabase restart recovery', () => {
     await initializeDatabase(db);
 
     const manifest = platformFile('scripts/tools.json');
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     const categories = ['rule', 'preference', 'project', 'project_state', 'workflow', 'other'];
     const tools = JSON.parse(manifest.content) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[] }> } }>;
@@ -339,7 +355,7 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/save-memory.mjs'].inputSchema.required).toEqual(['content']);
     expect(tools['scripts/update-memory.mjs'].inputSchema.properties.category.enum).toEqual(categories);
     expect(tools['scripts/update-memory.mjs'].inputSchema.required).toEqual(['memoryId']);
-    expect(chat.systemPrompt).toContain('project-category memories');
+    expect(ruleReferences()).toContain('project-category memories');
   });
   it('registers the read-only local project lookup tool', async () => {
     db = createDb(':memory:');
@@ -347,8 +363,7 @@ describe('initializeDatabase restart recovery', () => {
 
     const script = platformFile('scripts/search-local-projects.mjs');
     const manifest = platformFile('scripts/tools.json');
-    const skill = platformFile('SKILL.md');
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
+    const skill = { content: ruleReferences() };
 
     expect(script.content).toContain('/local-projects/search');
     expect(script.content).toContain("raw.refresh === true");
@@ -359,7 +374,7 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/search-local-projects.mjs'].inputSchema.properties.refresh.type).toBe('boolean');
     expect(skill.content).toContain('search_local_projects resolves a fuzzy project name');
     expect(skill.content).toContain('metadata-only local project index');
-    expect(chat.systemPrompt).toContain('search_local_projects');
+    expect(ruleReferences()).toContain('search_local_projects');
   });
 
   it('registers project alias tools that write only the alias dictionary', async () => {
@@ -369,7 +384,6 @@ describe('initializeDatabase restart recovery', () => {
     const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[] } }>;
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     expect(content.get('scripts/set-local-project-alias.mjs')).toContain("method: 'PUT'");
     expect(content.get('scripts/set-local-project-alias.mjs')).toContain('/local-projects/aliases');
@@ -383,14 +397,14 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/list-local-project-aliases.mjs'].inputSchema.required ?? []).toEqual([]);
     // The model must not invent mappings: only user-stated ones are recorded.
     expect(content.get('scripts/tools.json')).toContain('never guess a mapping');
-    expect(content.get('SKILL.md')).toContain('set_local_project_alias');
-    expect(content.get('SKILL.md')).toContain('explicitly supplied by the user');
-    expect(chat.systemPrompt).toContain('set_local_project_alias');
-    expect(chat.systemPrompt).toContain('never guessed or bulk-generated');
+    expect(ruleReferences()).toContain('set_local_project_alias');
+    expect(ruleReferences()).toContain('explicitly supplied by the user');
+    expect(ruleReferences()).toContain('set_local_project_alias');
+    expect(ruleReferences()).toContain('never guessed or bulk-generated');
   });
 
   it('documents the unified Agents page as the task configuration destination', () => {
-    const skill = platformFile('SKILL.md').content;
+    const skill = ruleReferences();
     expect(skill).toContain('/agents');
     expect(skill).not.toContain('/coding');
     expect(skill).not.toContain('/workflows');
@@ -407,21 +421,19 @@ describe('initializeDatabase restart recovery', () => {
 
   it('routes code and automation tasks through dynamically coordinated Agents', async () => {
     db = createDb(':memory:'); await initializeDatabase(db);
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    expect(chat.systemPrompt).toContain('run_agent');
-    expect(chat.systemPrompt).toContain('projectDirectory');
-    expect(chat.systemPrompt).toContain('promptly delegate the original user request');
-    expect(platformFile('SKILL.md').content).toContain('promptly delegate the original user request');
-    expect(chat.systemPrompt).not.toMatch(/\bdispatch_task\b|\binspect_coders\b/);
+    expect(ruleReferences()).toContain('run_agent');
+    expect(ruleReferences()).toContain('projectDirectory');
+    expect(ruleReferences()).toContain('promptly delegate the original user request');
+    expect(ruleReferences()).toContain('promptly delegate the original user request');
+    expect(ruleReferences()).not.toMatch(/\bdispatch_task\b|\binspect_coders\b/);
   });
 
   it('routes automation through dynamically coordinated Agents', async () => {
     db = createDb(':memory:'); await initializeDatabase(db);
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    expect(chat.systemPrompt).toContain('inspect_agents');
-    expect(chat.systemPrompt).toContain('run_agent');
-    expect(chat.systemPrompt).not.toMatch(/\b(?:inspect|patch|edit|create|publish)_workflow\b/);
-    expect(platformFile('SKILL.md').content).toContain('run_agent');
+    expect(ruleReferences()).toContain('inspect_agents');
+    expect(ruleReferences()).toContain('run_agent');
+    expect(ruleReferences()).not.toMatch(/\b(?:inspect|patch|edit|create|publish)_workflow\b/);
+    expect(ruleReferences()).toContain('run_agent');
     expect(platformFile('scripts/query-platform.mjs').content).toContain("READ_PREFIXES = ['/agents'");
   });
 
@@ -432,7 +444,6 @@ describe('initializeDatabase restart recovery', () => {
     const files = platformSkillPackageFiles();
     const content = new Map(files.map((file) => [file.path, file.content]));
     const tools = JSON.parse(content.get('scripts/tools.json')!) as Record<string, { name: string; inputSchema: { required?: string[]; properties: Record<string, { enum?: string[] }> } }>;
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
 
     expect(content.get('scripts/query-platform.mjs')).toContain("raw.method !== 'GET'");
     expect(content.get('scripts/query-platform.mjs')).toContain("decoded === '..'");
@@ -441,8 +452,8 @@ describe('initializeDatabase restart recovery', () => {
     expect(tools['scripts/query-platform.mjs'].name).toBe('query_platform');
     expect(tools['scripts/query-platform.mjs'].inputSchema.required).toEqual(['path']);
     expect(tools['scripts/query-platform.mjs'].inputSchema.properties.method.enum).toEqual(['GET']);
-    expect(content.get('SKILL.md')).toContain('query_platform');
-    expect(chat.systemPrompt).toContain('query_platform');
+    expect(ruleReferences()).toContain('query_platform');
+    expect(ruleReferences()).toContain('query_platform');
   });
 
   it('publishes the general Chat terminal tool and its split from project tasks', async () => {
@@ -456,8 +467,7 @@ describe('initializeDatabase restart recovery', () => {
       description: string;
       inputSchema: { required?: string[]; additionalProperties?: boolean; properties: Record<string, { type?: string; minLength?: number; maxLength?: number; minimum?: number; maximum?: number }> };
     }>;
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
-    const skill = content.get('SKILL.md')!;
+    const skill = ruleReferences();
     const terminal = tools['__runtime__/run-host-command'];
 
     expect(terminal.name).toBe('run_host_command');
@@ -475,10 +485,10 @@ describe('initializeDatabase restart recovery', () => {
     expect(skill).toContain('ordinary file management');
     expect(skill).not.toContain('batch file changes and directory removal belong to a project executor');
     expect(skill).not.toMatch(/whitelist|restricted Chat|no new Shell execution|no direct read|no bash/i);
-    expect(chat.systemPrompt).toContain('run_host_command');
-    expect(chat.systemPrompt).toContain('Do not dispatch an Agent for those operations');
-    expect(chat.systemPrompt).toContain('build/test validation belong to an appropriate Agent');
-    expect(chat.systemPrompt).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
+    expect(ruleReferences()).toContain('run_host_command');
+    expect(ruleReferences()).toContain('Do not dispatch an Agent for those operations');
+    expect(ruleReferences()).toContain('build/test validation belong to an appropriate Agent');
+    expect(ruleReferences()).not.toMatch(/whitelist|restricted run_host_command|General read, glob, grep and bash|no bash|no direct read/i);
   });
 
   it('registers saved Provider model tools with credential-free outputs', async () => {
@@ -492,7 +502,6 @@ describe('initializeDatabase restart recovery', () => {
       description: string;
       inputSchema: { required?: string[]; properties: Record<string, { type?: string; minItems?: number; maxItems?: number; items?: { minLength?: number; maxLength?: number } }> };
     }>;
-    const [chat] = await db.select().from(schema.agents).where(eq(schema.agents.id, 'agt_system_helper_chat')).limit(1);
     const discover = tools['scripts/discover-provider-models.mjs'];
     const update = tools['scripts/update-provider-models.mjs'];
 
@@ -507,10 +516,10 @@ describe('initializeDatabase restart recovery', () => {
     expect(content.get('scripts/discover-provider-models.mjs')).not.toMatch(/apiKey|api_key|encrypted/i);
     expect(content.get('scripts/update-provider-models.mjs')).toContain("method: 'PATCH'");
     expect(content.get('scripts/update-provider-models.mjs')).not.toMatch(/apiKey|api_key|encrypted/i);
-    expect(content.get('SKILL.md')).toContain('discover_provider_models');
-    expect(content.get('SKILL.md')).toContain('update_provider_models');
-    expect(chat.systemPrompt).toContain('discover_provider_models(providerId)');
-    expect(chat.systemPrompt).toContain('update_provider_models(providerId, addModels)');
-    expect(chat.systemPrompt).toContain('never request or return API keys');
+    expect(ruleReferences()).toContain('discover_provider_models');
+    expect(ruleReferences()).toContain('update_provider_models');
+    expect(ruleReferences()).toContain('discover_provider_models(providerId)');
+    expect(ruleReferences()).toContain('update_provider_models(providerId, addModels)');
+    expect(ruleReferences()).toContain('never request or return API keys');
   });
 });

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, agentCapabilityResults, agentExecutions, agentToolCalls, chatSubmissions, externalChats, platformSkillPackageFiles, createDb, initializeDatabase, type Database } from '@worklite/db';
+import { agentExecutionColumns, executionUpdates, CHAT_DELEGATION_RULE, CHAT_RULES, agentCapabilityResults, agentExecutions, agentToolCalls, chatSubmissions, externalChats, platformSkillPackageFiles, createDb, initializeDatabase, type Database } from '@worklite/db';
 import { AgentExecutionsService } from './agent-executions.service';
 import type { ChatProjectTasksService } from './chat-project-tasks.service';
 import type { HostNotificationsService } from '../notifications/host-notifications.service';
@@ -68,18 +68,19 @@ describe('Chat tool execution', () => {
     expect(gateway.generateAgentStep.mock.calls[0]![0].systemPrompt).toContain(`Current conversation delivery channel: ${channel}.`);
   });
 
-  it('applies delegation boundaries even to an existing Chat capability snapshot', async () => {
+  it('keeps delegation rules discoverable without adding them to the system prompt', async () => {
     const { service } = await setup(0);
     gateway.generateAgentStep.mockResolvedValueOnce({ text: '', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 });
 
     await advance(service);
 
     const request = gateway.generateAgentStep.mock.calls[0]![0] as { systemPrompt: string; builtinTools: Array<{ name: string; description: string }> };
-    expect(request.systemPrompt).toContain(CHAT_DELEGATION_RULE);
-    expect(request.systemPrompt).toContain('cancellation does not delete the instance');
-    expect(request.systemPrompt).toContain('Native Agent continuation reads the latest saved configuration');
-    expect(request.systemPrompt).toContain('GET /agents/:agentId/history/:runId');
-    expect(request.systemPrompt).toContain('A user-requested status check is allowed');
+    expect(request.systemPrompt).not.toContain(CHAT_DELEGATION_RULE);
+    expect(request.systemPrompt).toBe('You are Chat.\n\nCurrent conversation delivery channel: web.');
+    expect(request.builtinTools.find((tool) => tool.name === 'run_agent')?.description).toContain('ruleTopics: agents');
+    expect(CHAT_RULES.agents.content).toContain(CHAT_DELEGATION_RULE);
+    expect(CHAT_RULES.agents.content).toContain('cancellation does not delete the instance');
+    expect(CHAT_RULES.agents.content).toContain('Native Agent continuation reads the latest saved configuration');
     expect(request.builtinTools.find((tool) => tool.name === 'run_agent')?.description).toContain('the selected Agent decides how to fulfill the goal');
   });
 
@@ -352,7 +353,7 @@ describe('native Chat progressive tool exposure', () => {
   const done = { text: 'Done.', responseMessages: [], toolCalls: [], finishReason: 'stop', contextDropped: 0 };
   const step = (id: string, toolName: string, input: unknown) => ({ text: '', responseMessages: [{ role: 'assistant', content: [{ type: 'tool-call', toolCallId: id, toolName, input }] }], toolCalls: [{ toolCallId: id, toolName, input }], finishReason: 'tool-calls', contextDropped: 0 });
   function capturePlatform(db: Database) {
-    const skill = { id: 'sk_worklite_platform', name: 'worklite-platform', instructions: '' };
+    const skill = { id: 'sk_worklite_platform', name: 'worklite-platform', instructions: 'Legacy platform rules must not be eagerly injected.' };
     const files = platformSkillPackageFiles();
     const snapshot = db.select(agentExecutionColumns).from(agentExecutions).get()!.capabilitySnapshot!;
     db.update(agentExecutions).set({ capabilitySnapshot: { ...snapshot, skills: [{ id: skill.id, name: skill.name, instructions: skill.instructions, files }] } }).run();
@@ -367,6 +368,10 @@ describe('native Chat progressive tool exposure', () => {
     await advance(service);
     await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
     expect(names(gateway.generateAgentStep.mock.calls[0][0])).toHaveLength(10);
+    expect(gateway.generateAgentStep.mock.calls[0][0].systemPrompt).not.toContain('Legacy platform rules');
+    expect(gateway.generateAgentStep.mock.calls[0][0].builtinTools.find((tool: { name: string }) => tool.name === 'run_agent').description).toContain('ruleTopics: agents');
+    expect(gateway.generateAgentStep.mock.calls[1][0].systemPrompt).not.toContain(CHAT_RULES.files.content);
+    expect(JSON.stringify(gateway.generateAgentStep.mock.calls[1][0].messages)).toContain('Local image');
     expect(names(gateway.generateAgentStep.mock.calls[0][0])).not.toContain('upload_local_images');
     expect(names(gateway.generateAgentStep.mock.calls[1][0])).toContain('upload_local_images');
     expect(names(gateway.generateAgentStep.mock.calls[1][0])).toContain('upload_local_files');
@@ -377,7 +382,33 @@ describe('native Chat progressive tool exposure', () => {
     expect(JSON.stringify(exposed).length).toBeLessThan(JSON.stringify(Object.values(manifest)).length * 0.6);
     const call = db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'discover_files')).get()!;
     expect(call).toMatchObject({ status: 'completed', resultAppended: true, commandExecutionId: null });
+    expect(JSON.parse(call.output).rules).toContainEqual({ topic: 'files', content: CHAT_RULES.files.content });
     expect(JSON.parse(call.output).toolNames).toEqual(expect.arrayContaining(['upload_local_images', 'upload_local_files']));
+  });
+
+  it('reads only requested captured rules while preserving user extensions and selected Skills', async () => {
+    const { db, service } = await setup(0);
+    capturePlatform(db);
+    const snapshot = db.select(agentExecutionColumns).from(agentExecutions).get()!.capabilitySnapshot!;
+    snapshot.agent.systemPrompt += '\nUser capability extensions:\nKeep my extension.\nSaved memory.';
+    snapshot.skills.push({ id: 'selected_user_skill', name: 'selected-user-skill', instructions: 'Keep my selected Skill.', files: [] });
+    snapshot.skills[0].files.find((file) => file.path === 'references/chat-rules/wechat.md')!.content += '\nCaptured reference marker.';
+    db.update(agentExecutions).set({ capabilitySnapshot: snapshot }).run();
+    gateway.generateAgentStep.mockResolvedValueOnce(step('read_wechat', 'discover_tools', { ruleTopics: ['wechat'] })).mockResolvedValue(done);
+    await advance(service);
+    await vi.waitFor(() => expect(db.select(agentExecutionColumns).from(agentExecutions).get()!.status).toBe('completed'));
+    for (const [request] of gateway.generateAgentStep.mock.calls) {
+      expect(request.systemPrompt).toContain('Keep my extension.');
+      expect(request.systemPrompt).toContain('Saved memory.');
+      expect(request.systemPrompt).toContain('Keep my selected Skill.');
+      expect(request.systemPrompt).not.toContain(CHAT_RULES.wechat.content);
+      expect(names(request)).not.toContain('upload_local_images');
+    }
+    const output = JSON.parse(db.select().from(agentToolCalls).where(eq(agentToolCalls.toolCallId, 'read_wechat')).get()!.output);
+    expect(output.toolNames).toEqual([]);
+    expect(output.rules.map((rule: { topic: string }) => rule.topic)).toEqual(['wechat', 'tooling']);
+    expect(output.rules[0].content).toContain('Captured reference marker.');
+    expect(JSON.stringify(gateway.generateAgentStep.mock.calls[1][0].messages)).toContain('Captured reference marker.');
   });
 
   it('recovers loaded tools after compaction and a service restart, then resets at a new user turn', async () => {

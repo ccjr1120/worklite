@@ -1,7 +1,25 @@
+import { CHAT_RULES } from '@worklite/db';
 import { createHash } from 'node:crypto';
 import type { GatewayToolDefinition } from '@worklite/model-gateway';
 
 const REMOVED_TOOLS = new Set(['web_fetch', 'update_plan']);
+const TOOL_RULE_TOPICS: Record<string, Array<keyof typeof CHAT_RULES>> = {
+  discover_tools: [],
+  inspect_agents: ['agents'], run_agent: ['agents', 'terminal'], cancel_agent_execution: ['agents'],
+  run_host_command: ['terminal', 'agents'], query_platform: ['platform'], search_local_projects: ['terminal'],
+  inspect_agent_run: ['agents', 'usage'], ask_user: ['chat'], read_history_archive: ['chat'],
+};
+const GROUP_RULE_TOPICS: Record<string, Array<keyof typeof CHAT_RULES>> = {
+  files: ['files'], agents: ['agents'], platform: ['platform'], chat: ['chat', 'platform'],
+  providers: ['platform'], projects: ['terminal'], tasks: ['chat'], diagnostics: ['usage', 'recovery'],
+  publishing: ['files', 'wechat'], deployment: ['deployment'], settings: ['navigation'], memory: ['memory'], waiting: ['chat'],
+};
+
+function toolRuleTopics(name: string): Array<keyof typeof CHAT_RULES> {
+  return TOOL_RULE_TOPICS[name] ?? [...new Set(Object.entries(TOOL_GROUPS).flatMap(([key, group]) =>
+    (group.names as readonly string[]).includes(name) ? GROUP_RULE_TOPICS[key] ?? [] : []))];
+}
+
 const CORE_TOOLS = new Set([
   'discover_tools', 'ask_user', 'inspect_agents', 'run_agent',
   'run_host_command', 'query_platform', 'search_local_projects',
@@ -25,14 +43,13 @@ const TOOL_GROUPS = {
 
 export const DISCOVER_CHAT_TOOLS: GatewayToolDefinition = {
   name: 'discover_tools', executionMode: 'parallel',
-  description: 'Load additional tools for the next model step, without executing them. Select groups or exact toolNames; omit both to list available groups and tool names. Loaded tools stay available for this user turn. Prefer query_platform for ordinary platform reads and inspect_agent_run for Agent progress; waiting is usually unnecessary because background results arrive automatically.',
+  description: 'Before handling a task, read its operational rules using ruleTopics (tooling for general task handling; wechat for WeChat replies). Read rules before acting, including with core tools. Load additional tools for the next model step, without executing them. Select groups or exact toolNames; omit both to list available groups and tool names. Loaded tools stay available for this user turn. Prefer query_platform for ordinary platform reads and inspect_agent_run for Agent progress; waiting is usually unnecessary because background results arrive automatically.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
+    ruleTopics: { type: 'array', maxItems: 4, items: { type: 'string', enum: Object.keys(CHAT_RULES) }, description: Object.entries(CHAT_RULES).map(([key, rule]) => `${key}: ${rule.description}`).join('; ') },
     groups: { type: 'array', maxItems: 4, items: { type: 'string', enum: Object.keys(TOOL_GROUPS) }, description: Object.entries(TOOL_GROUPS).map(([key, group]) => `${key}: ${group.description}`).join('; ') },
     toolNames: { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 128 }, description: 'Exact names from the catalog or task instructions; only captured tools can be loaded.' },
   } },
 };
-
-export const NATIVE_CHAT_TOOL_GUIDANCE = 'Use the tools currently supplied. For other abilities call discover_tools with a group or exact toolNames, then use the loaded tool in the next model step. Discovery only loads definitions and never performs the requested action; continue until the user goal is fulfilled. Loaded tools remain available for the current user turn. Use query_platform for ordinary read-only platform facts; use inspect_agents to select an Agent and inspect_agent_run for execution evidence. Specialized inspection tools provide aggregation, revision checks or diagnostics. Prefer automatic background completion notifications; discover waiting tools only when an explicit wait is needed. Never substitute shell/API calls for a missing platform mutation tool: discover its typed contract first.';
 
 export function nativeChatTurnKey(execution: { displayMessages: readonly { id: string; role: string }[]; modelMessages: readonly { role: string; content: unknown }[] }): string {
   const displayed = execution.displayMessages.filter((message) => message.role === 'user').at(-1);
@@ -55,13 +72,18 @@ export function loadedChatToolNames(turnKey: string, outputs: readonly string[])
 }
 
 export function visibleChatTools(catalog: readonly GatewayToolDefinition[], loaded: ReadonlySet<string>): GatewayToolDefinition[] {
-  return catalog.filter((tool) => !REMOVED_TOOLS.has(tool.name) && (CORE_TOOLS.has(tool.name) || loaded.has(tool.name)));
+  return catalog.filter((tool) => !REMOVED_TOOLS.has(tool.name) && (CORE_TOOLS.has(tool.name) || loaded.has(tool.name))).map((tool) => {
+    const topics = toolRuleTopics(tool.name);
+    return topics.length ? { ...tool, description: `Before using this tool, read discover_tools ruleTopics: ${topics.join(', ')}. ${tool.description}` } : tool;
+  });
 }
 
-export function discoverChatTools(catalog: readonly GatewayToolDefinition[], input: unknown, turnKey: string) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected an object with groups or toolNames.');
+export function discoverChatTools(catalog: readonly GatewayToolDefinition[], input: unknown, turnKey: string, ruleContents?: Readonly<Record<string, string>>) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Expected an object with groups, toolNames or ruleTopics.');
   const value = input as Record<string, unknown>;
-  if (Object.keys(value).some((key) => key !== 'groups' && key !== 'toolNames')) throw new Error('Only groups and toolNames are accepted.');
+  if (Object.keys(value).some((key) => key !== 'groups' && key !== 'toolNames' && key !== 'ruleTopics')) throw new Error('Only groups, toolNames and ruleTopics are accepted.');
+  const ruleTopics = value.ruleTopics === undefined ? [] : value.ruleTopics;
+  if (!Array.isArray(ruleTopics) || ruleTopics.length > 4 || ruleTopics.some((topic) => typeof topic !== 'string' || !Object.hasOwn(CHAT_RULES, topic))) throw new Error('Select at most four valid rule topics.');
   const groups = value.groups === undefined ? [] : value.groups;
   const requested = value.toolNames === undefined ? [] : value.toolNames;
   if (!Array.isArray(groups) || groups.length > 4 || groups.some((group) => typeof group !== 'string' || !Object.hasOwn(TOOL_GROUPS, group))) throw new Error('Select at most four valid tool groups.');
@@ -72,10 +94,15 @@ export function discoverChatTools(catalog: readonly GatewayToolDefinition[], inp
   if (unknown.length) throw new Error(`Tools are unavailable in this captured turn: ${unknown.join(', ')}. Call discover_tools with {} to inspect the catalog.`);
   const names = new Set<string>(requested);
   for (const key of groups as Array<keyof typeof TOOL_GROUPS>) for (const name of TOOL_GROUPS[key].names) if (byName.has(name)) names.add(name);
+  const topics = new Set<keyof typeof CHAT_RULES>(ruleTopics);
+  for (const name of names) for (const topic of toolRuleTopics(name)) topics.add(topic);
+  if (topics.size) topics.add('tooling');
+  const rules = [...topics].map((topic) => ({ topic, content: nativeChatInstructions(ruleContents?.[topic] ?? CHAT_RULES[topic].content) }));
   const tools = catalog.filter((tool) => names.has(tool.name)).map((tool) => ({ name: tool.name, description: tool.description.slice(0, 180) }));
   return {
-    kind: 'native-tool-discovery', turnKey, toolNames: tools.map((tool) => tool.name), tools,
-    ...(groups.length || requested.length ? { note: 'Definitions are available in the next model step. No action has been executed.' } : {
+    kind: 'native-tool-discovery', turnKey, rules, toolNames: tools.map((tool) => tool.name), tools,
+    ...(groups.length || requested.length || ruleTopics.length ? { note: 'Rules are returned above; requested tool definitions are available in the next model step. No action has been executed.' } : {
+      ruleTopics: Object.entries(CHAT_RULES).map(([topic, rule]) => ({ topic, description: rule.description })),
       groups: Object.entries(TOOL_GROUPS).map(([name, group]) => ({ name, description: group.description, tools: group.names.filter((name) => byName.has(name)) })).filter((group) => group.tools.length),
       // Include future catalog additions even before they have a named group.
       otherTools: catalog.filter((tool) => !CORE_TOOLS.has(tool.name) && !Object.values(TOOL_GROUPS).some((group) => (group.names as readonly string[]).includes(tool.name))).map((tool) => tool.name),
